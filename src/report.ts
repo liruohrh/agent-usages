@@ -226,14 +226,32 @@ function projectKeys(project: ProjectRecord): string[] {
 }
 
 /**
- * Every spelling of a session a selector may refer to.
+ * Every spelling of a session's **id**.
  *
  * Agents commonly prefix ids (`session-<uuid>`) in their UI while keying records
- * by the bare id, so both spellings must match.
+ * by the bare id, so both spellings must match. A partial id is accepted too,
+ * which is why id spellings are kept separate from titles: `abc` should find the
+ * session whose id starts with `abc`, but must not match a *title* that happens
+ * to start with it.
  */
-function sessionKeys(session: SessionRecord): string[] {
+function sessionIdKeys(session: SessionRecord): string[] {
   const bare = session.id.replace(/^session-/, '');
   return session.id === bare ? [bare, `session-${bare}`] : [session.id, bare];
+}
+
+/**
+ * Every string an **exact** selector may equal.
+ *
+ * A session is addressable by id or by its title, because titles are how a human
+ * refers to a session and ids are how a script does. Titles are trimmed on both
+ * sides and may legitimately repeat, in which case every match is selected.
+ * Whitespace-only titles are treated as absent so a stray space cannot match
+ * several untitled sessions at once.
+ */
+function sessionExactKeys(session: SessionRecord): string[] {
+  const keys = sessionIdKeys(session);
+  const title = session.title?.trim() ?? '';
+  return title.length > 0 ? [...keys, title] : keys;
 }
 
 /** Expand a set of session ids with every session they transitively spawned. */
@@ -276,19 +294,28 @@ export function resolveSessionSelectors(
     const trimmed = selector.trim();
     if (trimmed.length === 0) continue;
     if (trimmed.includes('*') || trimmed.includes('?')) {
-      const matched = sessions.filter((session) => sessionKeys(session).some((key) => matchesAny(key, [trimmed])));
+      const matched = sessions.filter((session) =>
+        [...sessionIdKeys(session), ...(session.title === null ? [] : [session.title.trim()])]
+          .filter((key) => key.length > 0)
+          .some((key) => matchesAny(key, [trimmed])),
+      );
       if (matched.length === 0) errors.push(`没有会话匹配 "${trimmed}"`);
       for (const session of matched) ids.add(session.id);
       continue;
     }
+    // Exact match by id or by title. Both are tried at once so that a selector
+    // matching one session's id and another's title selects both, rather than
+    // silently dropping whichever was found second.
     const lowered = trimmed.toLowerCase();
-    const exact = sessions.find((session) => sessionKeys(session).some((key) => key.toLowerCase() === lowered));
-    if (exact !== undefined) {
-      ids.add(exact.id);
+    const exact = sessions.filter((session) => sessionExactKeys(session).some((key) => key.toLowerCase() === lowered));
+    if (exact.length > 0) {
+      for (const session of exact) ids.add(session.id);
       continue;
     }
-    // Accept any unambiguous prefix so users can paste a short id.
-    const byPrefix = sessions.filter((session) => sessionKeys(session).some((key) => key.toLowerCase().startsWith(lowered)));
+    // Accept any unambiguous id prefix so users can paste a short id.
+    const byPrefix = sessions.filter((session) =>
+      sessionIdKeys(session).some((key) => key.toLowerCase().startsWith(lowered)),
+    );
     if (byPrefix.length === 0) {
       errors.push(`找不到会话 "${trimmed}"`);
     } else if (byPrefix.length > 1) {

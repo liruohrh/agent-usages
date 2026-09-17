@@ -17,7 +17,7 @@ import { dshAgent, resolveDshHome } from '../../src/agents/dsh/loader.ts';
 import { readSessionLog } from '../../src/agents/dsh/sessionlog.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { deepseekPricing } from '../../src/pricing/vendors/deepseek.ts';
-import { listSessions, runQuery, type UsageQuery } from '../../src/report.ts';
+import { listSessions, resolveSessionSelectors, runQuery, type UsageQuery } from '../../src/report.ts';
 
 const SID = {
   /** Shard 25. Spans the 2026-09-10 price change and both tiers. */
@@ -510,6 +510,35 @@ describe('cost from real ledger data', () => {
     expect(foldedRows.every((row) => !row.isSubagent)).toBe(true);
     expect(splitRows.filter((row) => row.isSubagent)).toHaveLength(3);
     expect(splitRows.find((row) => row.id === SID.spanning)?.cost.total).toBe('33.2100');
+  });
+});
+
+describe('title search on real data', () => {
+  it('resolves a session by the title the projection cache stored', async () => {
+    const data = await dshAgent.load({ home });
+    const { ids, errors } = resolveSessionSelectors(data.sessions, ['  降价后的会话  ']);
+    expect(errors).toEqual([]);
+    expect([...ids]).toEqual([SID.current]);
+  });
+
+  it('resolves a subagent by the title only its log carries', async () => {
+    // Subagents are absent from the projection cache, so this title exists
+    // nowhere but the session log.
+    const data = await dshAgent.load({ home });
+    const { ids, errors } = resolveSessionSelectors(data.sessions, ['分类插件的子代理']);
+    expect(errors).toEqual([]);
+    expect([...ids]).toEqual([SID.subA]);
+  });
+
+  it('cannot select a session that has no title', async () => {
+    const data = await dshAgent.load({ home });
+    expect(data.sessions.find((session) => session.id === SID.subB)?.title).toBeNull();
+    expect(resolveSessionSelectors(data.sessions, [SID.subB]).errors).toEqual([]);
+  });
+
+  it('reports a title it cannot find rather than failing silently', async () => {
+    const data = await dshAgent.load({ home });
+    expect(resolveSessionSelectors(data.sessions, ['并不存在的标题']).errors).toEqual(['找不到会话 "并不存在的标题"']);
   });
 });
 

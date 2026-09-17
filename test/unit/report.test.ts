@@ -87,7 +87,7 @@ function fixture() {
       sessions: [
         session({
           id: 's-beta',
-          title: '另一个项目',
+          title: '另一个项目的标题',
           createdAt: STUB_AT.late,
           records: [record({ id: 'beta1', time: STUB_AT.late, model: 'tiered-model', tokens: FULL })],
         }),
@@ -133,7 +133,79 @@ describe('selector resolution', () => {
     expect(sessions.length).toBeGreaterThan(0);
   });
 
-  it('rejects an ambiguous prefix and names the candidates', () => {
+  it('matches a session by its exact title', () => {
+    const data = fixture();
+    const { ids, errors } = resolveSessionSelectors(data.sessions, ['另一个项目的标题']);
+    expect(errors).toEqual([]);
+    expect([...ids]).toEqual(['s-beta']);
+    // The parent's title resolves to the parent; its subagents follow through
+    // subtree expansion, not through the selector.
+    expect([...resolveSessionSelectors(data.sessions, ['父会话']).ids]).toEqual([SID.parent]);
+  });
+
+  it('trims surrounding whitespace on both the selector and the title', () => {
+    const data = fixture();
+    for (const selector of ['  父会话  ', '\t父会话\n', '父会话   ']) {
+      const { ids, errors } = resolveSessionSelectors(data.sessions, [selector]);
+      expect(errors).toEqual([]);
+      expect([...ids]).toEqual([SID.parent]);
+    }
+  });
+
+  it('matches case-insensitively', () => {
+    const data = dataset([project({ id: 'p', sessions: [session({ id: 's', title: 'Mixed Case Title' })] })]);
+    for (const selector of ['mixed case title', 'MIXED CASE TITLE', '  Mixed Case Title  ']) {
+      expect([...resolveSessionSelectors(data.sessions, [selector]).ids]).toEqual(['s']);
+    }
+  });
+
+  it('does not match a mere title prefix', () => {
+    // A partial id is accepted, but a partial title is not: titles are matched
+    // exactly so a short selector cannot silently sweep up several sessions.
+    const data = fixture();
+    const { ids, errors } = resolveSessionSelectors(data.sessions, ['父会']);
+    expect([...ids]).toEqual([]);
+    expect(errors).toEqual(['找不到会话 "父会"']);
+  });
+
+  it('does not match a missing or blank title', () => {
+    const data = dataset([
+      project({ id: 'p', sessions: [session({ id: 's-none' }), session({ id: 's-space', title: '   ' })] }),
+    ]);
+    // A blank selector is ignored outright.
+    expect([...resolveSessionSelectors(data.sessions, ['   ']).ids]).toEqual([]);
+    // A whitespace-only title is treated as absent, so it cannot be selected.
+    expect(resolveSessionSelectors(data.sessions, ['']).errors).toEqual([]);
+    expect([...resolveSessionSelectors(data.sessions, ['s-none']).ids]).toEqual(['s-none']);
+  });
+
+  it('selects every session sharing a title', () => {
+    const data = dataset([
+      project({
+        id: 'p',
+        sessions: [session({ id: 's1', title: '同名会话' }), session({ id: 's2', title: '同名会话' }), session({ id: 's3' })],
+      }),
+    ]);
+    expect([...resolveSessionSelectors(data.sessions, ['同名会话']).ids].sort()).toEqual(['s1', 's2']);
+  });
+
+  it('selects both an id match and a title match in one pass', () => {
+    // A selector equal to one session's id and another's title must select both.
+    const data = dataset([
+      project({ id: 'p', sessions: [session({ id: 'shared' }), session({ id: 'other', title: 'shared' })] }),
+    ]);
+    expect([...resolveSessionSelectors(data.sessions, ['shared']).ids].sort()).toEqual(['other', 'shared']);
+  });
+
+  it('matches titles with a glob', () => {
+    const data = dataset([
+      project({ id: 'p', sessions: [session({ id: 's1', title: 'enrich chunk 1' }), session({ id: 's2', title: 'enrich chunk 2' }), session({ id: 's3', title: 'other' })] }),
+    ]);
+    expect([...resolveSessionSelectors(data.sessions, ['enrich*']).ids].sort()).toEqual(['s1', 's2']);
+    expect([...resolveSessionSelectors(data.sessions, ['*chunk 2']).ids]).toEqual(['s2']);
+  });
+
+  it('rejects an ambiguous id prefix and names the candidates', () => {
     const collection = [session({ id: 'same-1' }), session({ id: 'same-2' })];
     const { ids, errors } = resolveSessionSelectors(collection, ['same']);
     expect([...ids]).toEqual([]);

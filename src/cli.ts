@@ -338,7 +338,7 @@ export function buildProgram(): Command {
       .option('--session', '按会话维度汇总（含每个项目下的会话明细）')
       .option('--subagents', '将子代理单独列出（默认并入其父会话）')
       .option('-p, --project-filter <selector>', '只统计指定项目：id、名称或路径（支持 * 通配；可重复）', collect)
-      .option('-s, --session-filter <selector>', '只统计指定会话：id 或唯一前缀（支持 * 通配；可重复）', collect)
+      .option('-s, --session-filter <selector>', '只统计指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；支持 * 通配；可重复）', collect)
       .option('--today', '时间范围：今天')
       .option('--month', '时间范围：本月')
       .option('--year', '时间范围：今年')
@@ -359,7 +359,7 @@ export function buildProgram(): Command {
       .description('列出所有项目与会话（项目按首个会话时间降序，会话按时间降序）')
       .option('--subagents', '将子代理单独列出（默认并入其父会话）')
       .option('-p, --project-filter <selector>', '只列出指定项目（可重复）', collect)
-      .option('-s, --session-filter <selector>', '只列出指定会话（可重复）', collect),
+      .option('-s, --session-filter <selector>', '只列出指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；可重复）', collect),
   ).action(async (options: SessionListOptions, command: Command) => {
     await runSessionList(withGlobals(command, options));
   });

@@ -184,6 +184,24 @@ describe('usage', () => {
     expect(miss.warnings.join('\n')).toMatch(/没有项目匹配/);
   });
 
+  it('filters by session title, trimming whitespace', async () => {
+    for (const selector of ['演示会话', '  演示会话  ']) {
+      const parsed = JSON.parse((await cli(['usage', '--json', '-s', selector])).stdout) as {
+        totals: { requests: number };
+      };
+      expect(parsed.totals.requests).toBe(1);
+    }
+  });
+
+  it('keeps a title match exact', async () => {
+    const parsed = JSON.parse((await cli(['usage', '--json', '-s', '演示'])).stdout) as {
+      totals: { requests: number };
+      warnings: string[];
+    };
+    expect(parsed.totals.requests).toBe(0);
+    expect(parsed.warnings.join('\n')).toMatch(/找不到会话 "演示"/);
+  });
+
   it('scopes by time range', async () => {
     const inside = JSON.parse((await cli(['usage', '--json', '--from', '2026-09-01'])).stdout) as {
       totals: { requests: number };
@@ -304,6 +322,18 @@ describe('session list', () => {
       expect(parsed.projects[0]?.sessionCount).toBe(1);
       expect(parsed.projects[0]?.sessions[0]?.title).toBe('演示会话');
     }
+  });
+
+  it('filters by session title', async () => {
+    const parsed = JSON.parse((await cli(['session', 'list', '--json', '-s', '演示会话'])).stdout) as {
+      totalSessions: number;
+    };
+    expect(parsed.totalSessions).toBe(1);
+  });
+
+  it('documents title search in its help', async () => {
+    const { stdout } = await cli(['usage', '--help']);
+    expect(stdout).toContain('标题');
   });
 
   it('renders a text listing by default', async () => {
