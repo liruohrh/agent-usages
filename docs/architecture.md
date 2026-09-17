@@ -75,7 +75,7 @@ agent-usages usage --provider deepseek
 
 ```bash
 pnpm install
-pnpm test        # vitest，230 个用例
+pnpm test        # vitest，231 个用例
 pnpm typecheck   # tsc --noEmit
 ```
 

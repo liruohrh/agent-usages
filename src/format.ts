@@ -335,9 +335,14 @@ function bandTable(result: UsageResult, engine: PricingEngine, symbol: string): 
     if (existing !== undefined && (existing.note !== '' || note === '')) continue;
     footnotes.set(band.periodId, { label: band.periodLabel, note, ...(window === undefined ? {} : { window }) });
   }
+  // The footnotes explain the period ids used above, so they sit left-aligned
+  // under the table, separated by a blank line. They must not be indented: an
+  // indented period id reads as a table row that drifted right, and there is no
+  // column it could belong to.
+  if (footnotes.size > 0) lines.push('');
   for (const [periodId, footnote] of footnotes) {
     const where = footnote.window === undefined ? '' : `（${footnote.window}）`;
-    lines.push(`  ${periodId}${where}：${footnote.label}${footnote.note}`);
+    lines.push(`${periodId}${where}：${footnote.label}${footnote.note}`);
   }
   return lines;
 }

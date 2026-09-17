@@ -181,6 +181,39 @@ describe('formatUsageReport', () => {
     expect(text).toContain('按其后第一个区间的价格计算');
   });
 
+  it('left-aligns a pricing-band footnote instead of drifting it right', () => {
+    const text = formatUsageReport(
+      report({
+        requests: 1,
+        bands: [
+          {
+            periodId: '2026-01-01',
+            periodLabel: 'flat period',
+            tier: 'off-peak',
+            resolution: 'fallback-later',
+            requests: 1,
+            total: '1.0000',
+            amounts: { output: '1.0000' },
+            rates: { output: '20' },
+            inputTokens: 0,
+          },
+        ],
+      }),
+      engine,
+      '¤',
+    );
+    // Header, separator, band row, and the period footnote: every line of the
+    // block starts in column 0. The footnote used to be indented two cells, so
+    // its period id read as a table row that had drifted right.
+    const lines = text
+      .slice(text.indexOf('计价区间:'))
+      .split('\n')
+      .filter((line) => line.length > 0);
+    expect(lines).toHaveLength(5);
+    for (const line of lines) expect(line).toBe(line.trimStart());
+    expect(lines[4]).toMatch(/^2026-01-01（.+）：flat period/);
+  });
+
   it('lists projects only in the project and session dimensions', () => {
     const projects = [projectRow({ id: 'demo' })];
     expect(formatUsageReport(report({ dimension: 'all', projects }), engine, '¤')).not.toContain('按项目:');
