@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatDecimal, parseDecimal, scalePerMillion, sumAmounts } from '../src/money.ts';
+import { formatDecimal, parseDecimal, scalePerMillion, sumAmounts } from '../../src/core/money.ts';
 
 describe('parseDecimal', () => {
   it('parses the rates DeepSeek publishes', () => {

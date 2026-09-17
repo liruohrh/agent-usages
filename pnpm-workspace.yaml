@@ -1,7 +1,6 @@
+# pnpm 12 reads dependency-build approvals from the `allowBuilds` map here.
+# vitest's bundler (esbuild) installs a native binary from a build script, so the
+# script must be allowed to run or `pnpm install` aborts with
+# ERR_PNPM_IGNORED_BUILDS.
 allowBuilds:
-  esbuild: set this to true or false
-# pnpm 10+ reads dependency-build approvals from here (not package.json "pnpm").
-# vitest's bundler (esbuild) ships a native binary it installs via a build script,
-# so the script must be allowed to run or `pnpm install` aborts.
-onlyBuiltDependencies:
-  - esbuild
+  esbuild: true

@@ -1,38 +1,42 @@
 #!/usr/bin/env node
 /**
- * `dsh-usage` command line interface.
+ * `agent-usages` — usage and cost reporting for coding agents.
  *
- * Two commands:
+ * Four commands:
  *   - `usage`        — token consumption and cost, by all / project / session
  *   - `session list` — the project-and-session inventory, newest first
+ *   - `price`        — the price list the cost calculation uses
+ *   - `agents`       — which agents and pricing sources this build supports
  *
- * Cost is computed from DeepSeek's published per-period, peak/off-peak rates;
- * see `pricing-data.ts` for the schedule and its sources.
+ * The tool is deliberately two-axis: `--agent` picks where usage is read from,
+ * `--provider` picks whose price list turns it into money. Neither axis knows
+ * about the other, so adding a vendor or an agent is a module plus a registry
+ * entry.
  */
 
 import { Command, InvalidArgumentError } from 'commander';
 
-import { loadDataset, resolveDshHome } from './loader.ts';
-import { PricingEngine } from './pricing.ts';
-import { runQuery, listSessions, type UsageDimension, type UsageQuery } from './report.ts';
-import { resolveRange } from './timerange.ts';
+import { AGENT_ADAPTERS, resolveAgent, type AgentAdapter } from './agents/index.ts';
 import {
-  formatSessionList,
-  formatUsageReport,
-  sessionListToJson,
-  usageToJson,
-} from './format.ts';
-import { DEFAULT_PRICING_MODEL, PRICING_CURRENCY } from './pricing-data.ts';
-import type { UsageDataset } from './types.ts';
+  PRICING_PROVIDERS,
+  createPricingEngine,
+  resolvePricingProvider,
+  type PricingEngine,
+} from './pricing/index.ts';
+import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
+import { resolveRange, type RangePreset } from './timerange.ts';
+import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson } from './format.ts';
+import type { UsageDataset } from './core/types.ts';
 
-/** Exit codes used by this CLI. */
 const EXIT_OK = 0;
 const EXIT_ERROR = 1;
 const EXIT_NO_DATA = 2;
 
-/** Options shared by both commands. */
+/** Options shared by every command. */
 interface GlobalOptions {
+  agent?: string;
   home?: string;
+  provider?: string;
   json?: boolean;
 }
 
@@ -51,6 +55,16 @@ interface UsageOptions extends GlobalOptions {
   to?: string;
   currency?: string;
   currencyRate?: string;
+  noEnrich?: boolean;
+}
+
+/** A dataset plus everything needed to price and describe it. */
+interface Loaded {
+  dataset: UsageDataset;
+  adapter: AgentAdapter;
+  engine: PricingEngine;
+  currency: string;
+  symbol: string;
 }
 
 /** Parse a non-negative float for `--currency-rate`. */
@@ -63,11 +77,11 @@ function parseRateOption(value: string): string {
 }
 
 /**
- * Merge a subcommand's options with the options of every ancestor command.
+ * Merge a subcommand's options with those of every ancestor command.
  *
  * commander does not copy an ancestor's options onto a subcommand, so a global
- * `--json` / `--home` placed before the command name would otherwise be
- * silently ignored. Values given closest to the leaf win.
+ * `--json` / `--home` / `--agent` placed before the command name would otherwise
+ * be silently ignored. Values given closest to the leaf win.
  */
 function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
   const chain: GlobalOptions[] = [];
@@ -77,12 +91,47 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
   }
   const merged: GlobalOptions = {};
   for (const entry of chain) {
+    if (entry.agent !== undefined) merged.agent = entry.agent;
     if (entry.home !== undefined) merged.home = entry.home;
+    if (entry.provider !== undefined) merged.provider = entry.provider;
     if (entry.json !== undefined) merged.json = entry.json;
   }
+  if (options.agent !== undefined) merged.agent = options.agent;
   if (options.home !== undefined) merged.home = options.home;
+  if (options.provider !== undefined) merged.provider = options.provider;
   if (options.json !== undefined) merged.json = options.json;
   return { ...options, ...merged };
+}
+
+/** Resolve the agent, read its data, and build a pricing engine for it. */
+async function loadOrExit(options: GlobalOptions): Promise<Loaded | undefined> {
+  try {
+    const adapter = await resolveAgent(options.agent, options.home);
+    const dataset = await adapter.load({
+      ...(options.home === undefined ? {} : { home: options.home }),
+      enrich: true,
+    });
+    const provider = resolvePricingProvider(options.provider, adapter.id);
+    const engine = createPricingEngine(provider);
+    return {
+      dataset,
+      adapter,
+      engine,
+      currency: provider.currency.code,
+      symbol: provider.currency.symbol,
+    };
+  } catch (error) {
+    process.stderr.write(`agent-usages: ${(error as Error).message}\n`);
+    process.exitCode = EXIT_ERROR;
+    return undefined;
+  }
+}
+
+/** Emit JSON or text and set the exit code. */
+function emit(payload: unknown, text: string, json: boolean, requests: number): void {
+  if (json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  else process.stdout.write(text);
+  process.exitCode = requests === 0 ? EXIT_NO_DATA : EXIT_OK;
 }
 
 /** Pick the requested dimension from the mutually exclusive flags. */
@@ -92,59 +141,30 @@ function resolveDimension(options: UsageOptions): UsageDimension {
     options.project === true ? 'project' : undefined,
     options.session === true ? 'session' : undefined,
   ].filter((value): value is UsageDimension => value !== undefined);
-  if (chosen.length > 1) {
-    throw new Error('--all / --project / --session 只能指定一个');
-  }
+  if (chosen.length > 1) throw new Error('--all / --project / --session 只能指定一个');
   return chosen[0] ?? 'all';
-}
-
-/** Load the dataset, mapping loader failures onto a friendly exit. */
-async function loadOrExit(options: GlobalOptions): Promise<UsageDataset | undefined> {
-  try {
-    return await loadDataset(options.home === undefined ? {} : { home: options.home });
-  } catch (error) {
-    process.stderr.write(`dsh-usage: ${(error as Error).message}\n`);
-    process.exitCode = EXIT_ERROR;
-    return undefined;
-  }
-}
-
-/** Emit JSON or text and set the exit code. */
-function emit(payload: unknown, text: string, json: boolean, requests: number): void {
-  if (json) {
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-  } else {
-    process.stdout.write(text);
-  }
-  process.exitCode = requests === 0 ? EXIT_NO_DATA : EXIT_OK;
 }
 
 /** The `usage` command implementation. */
 async function runUsage(spec: string | undefined, options: UsageOptions): Promise<void> {
-  const dataset = await loadOrExit(options);
-  if (dataset === undefined) return;
+  const loaded = await loadOrExit(options);
+  if (loaded === undefined) return;
+  const { dataset, engine, currency, symbol } = loaded;
 
   let range;
+  let dimension: UsageDimension;
   try {
     range = resolveRange({
       ...(spec === undefined ? {} : { spec }),
       ...(options.from === undefined ? {} : { from: options.from }),
       ...(options.to === undefined ? {} : { to: options.to }),
-      ...(options.today === true ? { preset: 'today' as const } : {}),
-      ...(options.month === true ? { preset: 'month' as const } : {}),
-      ...(options.year === true ? { preset: 'year' as const } : {}),
+      ...(options.today === true ? { preset: 'today' as RangePreset } : {}),
+      ...(options.month === true ? { preset: 'month' as RangePreset } : {}),
+      ...(options.year === true ? { preset: 'year' as RangePreset } : {}),
     });
-  } catch (error) {
-    process.stderr.write(`dsh-usage: ${(error as Error).message}\n`);
-    process.exitCode = EXIT_ERROR;
-    return;
-  }
-
-  let dimension: UsageDimension;
-  try {
     dimension = resolveDimension(options);
   } catch (error) {
-    process.stderr.write(`dsh-usage: ${(error as Error).message}\n`);
+    process.stderr.write(`agent-usages: ${(error as Error).message}\n`);
     process.exitCode = EXIT_ERROR;
     return;
   }
@@ -154,59 +174,26 @@ async function runUsage(spec: string | undefined, options: UsageOptions): Promis
     dimension,
     range,
     currencyRate,
-    currency: (options.currency ?? PRICING_CURRENCY).toUpperCase(),
-    // Folded by default: a session's number is what the session cost in total.
-    // `--subagents` splits it into the session's own usage plus one row per
-    // subagent it spawned.
+    // The provider's own currency unless the user renamed it; `--currency-rate`
+    // is what actually converts, so a mismatched label is warned about below.
+    currency: (options.currency ?? currency).toUpperCase(),
     includeSubagents: options.subagents !== true,
     ...(options.projectFilter === undefined ? {} : { projects: options.projectFilter }),
     ...(options.sessionFilter === undefined ? {} : { sessions: options.sessionFilter }),
   };
 
-  const engine = new PricingEngine();
-  const result = runQuery(dataset, query, engine);
-  result.warnings.push(...ledgerDriftWarnings(dataset));
-
-  if (query.currency !== PRICING_CURRENCY && options.currencyRate === undefined && !options.json) {
+  const result = runQuery(dataset, query, { engine, pricingProvider: engine.provider.id });
+  if (query.currency !== currency && options.currencyRate === undefined && !options.json) {
     result.warnings.push(
-      `DeepSeek 以人民币计价；--currency ${query.currency} 未同时给出 --currency-rate，金额仍按 1:1 显示`,
+      `${engine.provider.label} 以 ${currency} 计价；--currency ${query.currency} 未同时给出 --currency-rate，金额仍按 1:1 显示`,
     );
   }
-
-  emit(usageToJson(result), formatUsageReport(result, engine), options.json === true, result.requests);
-}
-
-/**
- * Compare every session's ledger totals with the harness' own projection cache.
- *
- * The ledger is authoritative for billing, but a divergence means the harness
- * observed usage the ledger does not carry (a crashed write, say), which the
- * user should know about before trusting the number.
- */
-function ledgerDriftWarnings(dataset: UsageDataset): string[] {
-  const drifts: string[] = [];
-  for (const session of dataset.sessions) {
-    if (session.projectedTotals === null || session.entries.length === 0) continue;
-    const ledger = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    for (const entry of session.entries) {
-      ledger.input += entry.tokens.input;
-      ledger.output += entry.tokens.output;
-      ledger.cacheRead += entry.tokens.cacheRead;
-      ledger.cacheWrite += entry.tokens.cacheWrite;
-    }
-    const projected = session.projectedTotals;
-    if (
-      ledger.input !== projected.input ||
-      ledger.output !== projected.output ||
-      ledger.cacheRead !== projected.cacheRead ||
-      ledger.cacheWrite !== projected.cacheWrite
-    ) {
-      drifts.push(
-        `会话 ${session.sessionId} 账本与投影缓存不一致：未命中输入 ${ledger.input}/${projected.input}、输出 ${ledger.output}/${projected.output}、缓存命中 ${ledger.cacheRead}/${projected.cacheRead}`,
-      );
-    }
-  }
-  return drifts;
+  emit(
+    usageToJson(result, engine),
+    formatUsageReport(result, engine, symbol, loaded.adapter.label),
+    options.json === true,
+    result.requests,
+  );
 }
 
 /** Options accepted by `session list`. */
@@ -218,102 +205,179 @@ interface SessionListOptions extends GlobalOptions {
 
 /** The `session list` command implementation. */
 async function runSessionList(options: SessionListOptions): Promise<void> {
-  const dataset = await loadOrExit(options);
-  if (dataset === undefined) return;
-  const result = listSessions(dataset, {
+  const loaded = await loadOrExit(options);
+  if (loaded === undefined) return;
+  const filters: SessionListFilters = {
     includeSubagents: options.subagents === true,
     ...(options.projectFilter === undefined ? {} : { projects: options.projectFilter }),
     ...(options.sessionFilter === undefined ? {} : { sessions: options.sessionFilter }),
-  });
-  emit(sessionListToJson(result), formatSessionList(result), options.json === true, result.totalSessions);
+  };
+  const result = listSessions(loaded.dataset, filters);
+  emit(
+    sessionListToJson(result),
+    formatSessionList(result, loaded.adapter.label),
+    options.json === true,
+    result.totalSessions,
+  );
 }
 
-/** Print the price schedule the cost calculation uses. */
-function runPrice(): void {
-  const engine = new PricingEngine();
-  const lines = ['DeepSeek 官方价格表（人民币 / 百万 tokens）'];
-  for (const schedule of engine.schedules) {
-    lines.push(`\n▸ ${schedule.model}`);
-    if (schedule.aliases.length > 1) {
-      lines.push(`  别名: ${schedule.aliases.filter((alias) => alias !== schedule.model).join('、')}`);
+/** Options accepted by `price`. */
+interface PriceOptions extends GlobalOptions {
+  all?: boolean;
+}
+
+/** The `price` command implementation. */
+function runPrice(options: PriceOptions): void {
+  const providers = options.all === true
+    ? PRICING_PROVIDERS
+    : [resolvePricingProvider(options.provider)];
+  const lines: string[] = [];
+  for (const provider of providers) {
+    const engine = createPricingEngine(provider);
+    lines.push(`▸ ${provider.label}（${provider.id}，${provider.currency.code} / 百万 tokens）`);
+    lines.push(`  默认价格模型: ${provider.defaultModel ?? '（无，未知模型不计价）'}`);
+    for (const price of provider.models()) {
+      lines.push(`\n  ${price.model}`);
+      if (price.aliases.length > 1) {
+        lines.push(`    别名: ${price.aliases.filter((alias) => alias !== price.model).join('、')}`);
+      }
+      for (const period of price.periods) {
+        lines.push(`    [${period.id}] ${period.label}`);
+        lines.push(`      生效: ${engine.describeWindow(period)}`);
+        lines.push(`      峰谷: ${engine.describeTiers(period)}`);
+        const render = (components: readonly { label: string; rate: string; per: number }[]): string =>
+          components.map((component) => `${component.label} ${component.rate}`).join(' / ') + ' 元';
+        lines.push(`      空闲: ${render(period.offPeak)}`);
+        if (period.peak !== null) lines.push(`      高峰: ${render(period.peak)}`);
+        lines.push(`      来源: ${period.source}`);
+        lines.push(`      说明: ${period.note}`);
+      }
     }
-    for (const period of schedule.periods) {
-      lines.push(`  [${period.id}] ${period.label}`);
-      lines.push(`    生效: ${engine.describeWindow(period)}`);
-      lines.push(`    峰谷: ${engine.describePeakWindows(period)}`);
-      const fmt = (card: { inputCacheHit: string; inputCacheMiss: string; output: string }): string =>
-        `缓存命中 ${card.inputCacheHit} / 缓存未命中 ${card.inputCacheMiss} / 输出 ${card.output}`;
-      lines.push(`    空闲时段: ${fmt(period.offPeak)}`);
-      if (period.peak !== null) lines.push(`    高峰时段: ${fmt(period.peak)}`);
-      lines.push(`    来源: ${period.source}`);
-      lines.push(`    说明: ${period.note}`);
-    }
+    lines.push('');
   }
-  lines.push(`\n默认价格模型（无对应价格表时使用）: ${DEFAULT_PRICING_MODEL}`);
-  lines.push('说明: DeepSeek 不对缓存写入单独计费；推理 tokens 已计入输出，不另行计费。');
+  lines.push('说明: 价格单位为「元 / 百万 tokens」；推理 token 已计入输出，不另行计费。');
   process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+/** The `agents` command implementation. */
+function runAgents(options: GlobalOptions): void {
+  const lines = ['支持的 agent（--agent）:'];
+  for (const adapter of AGENT_ADAPTERS) {
+    const source = adapter.defaultSource(process.env) ?? '（无法自动确定）';
+    lines.push(`  ▸ ${adapter.id}  ${adapter.label}`);
+    lines.push(`      默认数据目录: ${source}`);
+    if (adapter.envVars.length > 0) lines.push(`      环境变量: ${adapter.envVars.join('、')}`);
+    for (const note of adapter.notes()) lines.push(`      · ${note}`);
+  }
+  lines.push('');
+  lines.push('支持的计价来源（--provider）:');
+  for (const provider of PRICING_PROVIDERS) {
+    lines.push(`  ▸ ${provider.id}  ${provider.label}（${provider.currency.code}）`);
+    lines.push(`      模型: ${provider.models().map((price) => price.model).join('、')}`);
+  }
+  if (options.json === true) {
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          agents: AGENT_ADAPTERS.map((adapter) => ({
+            id: adapter.id,
+            label: adapter.label,
+            sessionNoun: adapter.sessionNoun,
+            envVars: adapter.envVars,
+            defaultSource: adapter.defaultSource(process.env),
+            notes: adapter.notes(),
+          })),
+          pricingProviders: PRICING_PROVIDERS.map((provider) => ({
+            id: provider.id,
+            label: provider.label,
+            currency: provider.currency,
+            defaultModel: provider.defaultModel,
+            models: provider.models().map((price) => ({
+              model: price.model,
+              aliases: price.aliases,
+              periods: price.periods.length,
+            })),
+          })),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return;
+  }
+  process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+/** Register the options every command shares. */
+function commonOptions(command: Command): Command {
+  return command
+    .option('--agent <id>', 'agent 类型（默认自动探测；见 `agents`）')
+    .option('--home <dir>', 'agent 的数据目录（默认用该 agent 的环境变量或标准位置）')
+    .option('--provider <id>', '计价来源（默认按 agent 选择；见 `agents`）')
+    .option('--json', '以 JSON 输出');
 }
 
 /** Build the commander program. */
 export function buildProgram(): Command {
-  const program = new Command();
-  program
-    .name('dsh-usage')
-    .description('统计 DeepSeek Harness (DSH) 的 token 消耗与费用')
-    .version('0.1.0')
-    .option('--home <dir>', `DSH 主目录（默认 ${(() => {
-      try {
-        return resolveDshHome();
-      } catch {
-        return '~/.dsh';
-      }
-    })()}）`)
-    .option('--json', '以 JSON 输出');
-
   const collect = (value: string, previous: string[] | undefined): string[] => [...(previous ?? []), value];
 
+  const program = new Command();
   program
-    .command('usage', { isDefault: true })
-    .description('计算 token 消耗与费用')
-    .argument('[range]', '时间范围：today/month/year（可加偏移，如 month-1）或 "起始..结束"')
-    .option('--all', '只输出全部维度的汇总（默认）')
-    .option('--project', '按项目维度汇总')
-    .option('--session', '按会话维度汇总（含每个项目下的会话明细）')
-    .option('--subagents', '将子代理单独列出（默认并入其父会话）；需配合 --session 查看明细')
-    .option('-p, --project-filter <selector>', '只统计指定项目：workspace id、项目名或路径（支持 * 通配；可重复指定）', collect)
-    .option('-s, --session-filter <selector>', '只统计指定会话：会话 id 或唯一前缀（支持 * 通配；可重复指定）', collect)
-    .option('--today', '时间范围：今天')
-    .option('--month', '时间范围：本月')
-    .option('--year', '时间范围：今年')
-    .option('--from <time>', '起始时间（含），如 2026-09-01 或 2026-09-01T10:30')
-    .option('--to <time>', '结束时间（不含），如 2026-09-10（含当天）')
-    .option('--currency <code>', `显示货币（默认 ${PRICING_CURRENCY}）`)
-    .option('--currency-rate <rate>', '1 CNY 折算为目标货币的汇率（默认 1）', parseRateOption)
+    .name('agent-usages')
+    .description('统计 coding agent 的 token 消耗与费用')
+    .version('0.2.0');
+  commonOptions(program);
+
+  commonOptions(
+    program
+      .command('usage', { isDefault: true })
+      .description('计算 token 消耗与费用')
+      .argument('[range]', '时间范围：today/month/year（可加偏移，如 month-1）或 "起始..结束"')
+      .option('--all', '只输出全部维度的汇总（默认）')
+      .option('--project', '按项目维度汇总')
+      .option('--session', '按会话维度汇总（含每个项目下的会话明细）')
+      .option('--subagents', '将子代理单独列出（默认并入其父会话）')
+      .option('-p, --project-filter <selector>', '只统计指定项目：id、名称或路径（支持 * 通配；可重复）', collect)
+      .option('-s, --session-filter <selector>', '只统计指定会话：id 或唯一前缀（支持 * 通配；可重复）', collect)
+      .option('--today', '时间范围：今天')
+      .option('--month', '时间范围：本月')
+      .option('--year', '时间范围：今年')
+      .option('--from <time>', '起始时间（含），如 2026-09-01 或 2026-09-01T10:30')
+      .option('--to <time>', '结束时间，日期形式含当天')
+      .option('--currency <code>', '显示货币（默认取计价来源的货币）')
+      .option('--currency-rate <rate>', '1 单位计价货币折算为目标货币的汇率（默认 1）', parseRateOption),
+  )
     .allowExcessArguments(false)
     .action(async (range: string | undefined, options: UsageOptions, command: Command) => {
       await runUsage(range, withGlobals(command, options));
     });
 
-  const sessionCommand = program.command('session').description('会话相关操作');
+  const sessionCommand = commonOptions(program.command('session').description('会话相关操作'));
+  commonOptions(
+    sessionCommand
+      .command('list')
+      .description('列出所有项目与会话（项目按首个会话时间降序，会话按时间降序）')
+      .option('--subagents', '将子代理单独列出（默认并入其父会话）')
+      .option('-p, --project-filter <selector>', '只列出指定项目（可重复）', collect)
+      .option('-s, --session-filter <selector>', '只列出指定会话（可重复）', collect),
+  ).action(async (options: SessionListOptions, command: Command) => {
+    await runSessionList(withGlobals(command, options));
+  });
 
-  sessionCommand
-    .command('list')
-    .description('列出所有项目与会话（项目按首个会话时间降序，会话按时间降序）')
-    .option('--subagents', '将子代理单独列出（默认并入其父会话）')
-    .option('-p, --project-filter <selector>', '只列出指定项目（可重复指定）', collect)
-    .option('-s, --session-filter <selector>', '只列出指定会话（可重复指定）', collect)
-    .option('--home <dir>', 'DSH 主目录')
-    .option('--json', '以 JSON 输出')
-    .action(async (options: SessionListOptions, command: Command) => {
-      await runSessionList(withGlobals(command, options));
-    });
+  commonOptions(
+    program
+      .command('price')
+      .description('显示内置价格表与生效区间（不读取任何数据）')
+      .option('--all', '列出全部计价来源'),
+  ).action((options: PriceOptions, command: Command) => {
+    runPrice(withGlobals(command, options));
+  });
 
-  program
-    .command('price')
-    .description('显示内置的 DeepSeek 官方价格表与生效区间')
-    .action(() => {
-      runPrice();
-    });
+  commonOptions(program.command('agents').description('列出支持的 agent 与计价来源')).action(
+    (options: GlobalOptions, command: Command) => {
+      runAgents(withGlobals(command, options));
+    },
+  );
 
   return program;
 }
@@ -328,13 +392,11 @@ async function main(): Promise<void> {
     // commander throws for --help/--version and for parse failures alike.
     const code = (error as { exitCode?: number }).exitCode;
     if (typeof code === 'number') {
-      if (code !== 0 && (error as Error).message.length > 0) {
-        process.stderr.write(`${(error as Error).message}\n`);
-      }
+      if (code !== 0 && (error as Error).message.length > 0) process.stderr.write(`${(error as Error).message}\n`);
       process.exitCode = code;
       return;
     }
-    process.stderr.write(`dsh-usage: ${(error as Error).message}\n`);
+    process.stderr.write(`agent-usages: ${(error as Error).message}\n`);
     process.exitCode = EXIT_ERROR;
   }
 }

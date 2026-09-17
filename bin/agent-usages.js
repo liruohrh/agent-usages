@@ -20,7 +20,7 @@ const result = spawnSync(
 );
 
 if (result.error !== undefined) {
-  process.stderr.write(`dsh-usage: 无法启动 ${process.execPath}: ${result.error.message}\n`);
+  process.stderr.write(`agent-usages: 无法启动 ${process.execPath}: ${result.error.message}\n`);
   process.exit(1);
 }
 process.exit(result.status ?? 1);

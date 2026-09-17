@@ -1,18 +1,19 @@
 /**
- * Query layer: filter a loaded dataset and aggregate it into the three
- * dimensions the CLI reports — everything, per project, and per session.
+ * Query layer: filter a loaded dataset and aggregate it into the dimensions the
+ * CLI reports — everything, per project, and per session.
  *
- * A usage record is billed by its **own** timestamp, so one session can
- * legitimately contribute to two pricing periods. Aggregates therefore carry a
- * per-period breakdown rather than a single blended rate.
+ * A record is billed by its **own** timestamp, so one session can legitimately
+ * contribute to two price periods and two tiers. Aggregates therefore carry a
+ * per-band breakdown rather than a single blended rate, and the grand total is
+ * computed in one pass over the in-scope records so it always equals the sum of
+ * the rows displayed beside it.
  */
 
-import type { PricingEngine } from './pricing.ts';
-import { emptyBuckets, firstUsageOf, lastUsageOf } from './loader.ts';
-import { COST_DIGITS, computeReport, displayCost, reconcile, type ExactCost, type UsageReport } from './accounting.ts';
-import { formatDecimal, parseDecimal } from './money.ts';
+import { emptyBuckets } from './core/buckets.ts';
+import type { CostTotals, ProjectRecord, SessionRecord, TokenTotals, UsageDataset, UsageRecord } from './core/types.ts';
+import { costOf, costOfGrouped, type ComponentUsage, type CostSummary } from './accounting.ts';
+import type { PricingEngine } from './pricing/index.ts';
 import { inRange, type TimeRange } from './timerange.ts';
-import type { ProjectRecord, SessionRecord, UsageDataset, UsageEntry } from './types.ts';
 
 /** Which aggregation the user asked for. */
 export type UsageDimension = 'all' | 'project' | 'session';
@@ -22,113 +23,174 @@ export interface UsageQuery {
   /** Selected dimension. */
   dimension: UsageDimension;
   /**
-   * Whether a session's total should include the usage of the subagents it
-   * spawned.
+   * Whether a session's total includes the usage of the sessions it spawned.
    *
    * `true` (the default) answers "what did this session cost me", folding every
-   * subagent request into the session that spawned it. `false` reports the
-   * session's own requests and each subagent as separate rows.
+   * subagent record into the session that spawned it. `false` reports the
+   * session's own records and each subagent as separate rows.
    */
-  includeSubagents?: boolean;
-  /** Project selectors: workspace id, project name, workspace path, or a `*` glob. */
-  projects?: readonly string[];
+  includeSubagents?: boolean | undefined;
+  /** Project selectors: project id, name, path, or a `*` glob. */
+  projects?: readonly string[] | undefined;
   /** Session selectors: session id, or any unambiguous id prefix. */
-  sessions?: readonly string[];
-  /** Half-open time range applied to each usage record's own timestamp. */
+  sessions?: readonly string[] | undefined;
+  /** Half-open time range applied to each record's own timestamp. */
   range: TimeRange;
-  /** Units of the target currency per 1 CNY. */
+  /** Units of the target currency per 1 unit of the provider's currency. */
   currencyRate: number;
-  /** Target currency code, e.g. `CNY` or `USD`. */
+  /** Target currency code, for display. */
   currency: string;
 }
 
-/** Per-model token and cost figures for one usage record group. */
+/** Per-model token and cost figures. */
 export interface ModelBreakdown {
+  /** Model billed. */
   model: string;
+  /** Requests billed under it. */
   requests: number;
-  tokens: import('./types.ts').TokenTotals;
-  cost: import('./types.ts').CostTotals;
+  /** Token totals. */
+  tokens: TokenTotals;
+  /** Cost totals. */
+  cost: CostTotals;
 }
 
-/** One project's aggregate. */
-export interface ProjectReport {
-  workspaceId: string;
-  name: string;
-  path: string;
-  /** Sessions in scope: top-level sessions when subagents are folded in, every session otherwise. */
-  sessions: number;
-  activeSessions: number;
-  /** Subagent sessions in scope. */
-  subagentSessions: number;
+/** A session's usage, grouped into the buckets that produced the cost. */
+export interface BandSummary {
+  /** Price period the rate came from. */
+  periodId: string;
+  /** Period label. */
+  periodLabel: string;
+  /** Tier within the period. */
+  tier: 'peak' | 'off-peak' | 'flat';
+  /** How the period was selected. */
+  resolution: 'exact' | 'fallback-later' | 'fallback-earlier' | 'fallback-default';
+  /** Requests billed under this band. */
   requests: number;
-  firstUsage: number | null;
-  lastUsage: number | null;
-  tokens: import('./types.ts').TokenTotals;
-  cost: import('./types.ts').CostTotals;
-  bands: import('./types.ts').PricingBandSummary[];
-  models: ModelBreakdown[];
-  /** Present only in the `session` dimension, where each project lists its sessions. */
-  sessionReports?: SessionReport[];
+  /** Amount charged under this band. */
+  total: string;
 }
 
 /** One session's aggregate. */
 export interface SessionReport {
-  sessionId: string;
+  /** Session id. */
+  id: string;
+  /** Session title, when known. */
   title: string | null;
+  /** Working directory, when known. */
   cwd: string | null;
+  /** Owning project's display name. */
   projectName: string;
-  workspaceId: string | null;
+  /** Owning project id. */
+  projectId: string;
+  /** Session creation time. */
   createdAt: number | null;
+  /** First billed request inside the selected range. */
   firstUsage: number | null;
+  /** Last billed request inside the selected range. */
   lastUsage: number | null;
-  /** Whether this row is a subagent session rather than a session a human started. */
+  /** Whether this row is a subagent session. */
   isSubagent: boolean;
-  /** For a top-level row: how many subagents were folded into it. */
+  /** For a top-level row: how many subagent sessions it stands for. */
   subagentCount: number;
   /** For a subagent row: the session that spawned it. */
-  parentSessionId: string | null;
+  parentId: string | null;
+  /** Requests billed. */
   requests: number;
-  tokens: import('./types.ts').TokenTotals;
-  cost: import('./types.ts').CostTotals;
-  bands: import('./types.ts').PricingBandSummary[];
+  /** Token totals. */
+  tokens: TokenTotals;
+  /** Cost totals. */
+  cost: CostTotals;
+  /** Which bands contributed. */
+  bands: BandSummary[];
+  /** Per-model figures. */
   models: ModelBreakdown[];
-  /** Set when the ledger disagrees with the harness' own projection totals. */
-  warning?: string;
+  /** Set when the adapter's own totals disagree with the records. */
+  warning?: string | undefined;
 }
 
-/** How subagent sessions were treated in a report. */
+/** One project's aggregate. */
+export interface ProjectReport {
+  /** Project id. */
+  id: string;
+  /** Project display name. */
+  name: string;
+  /** Project path. */
+  path: string;
+  /** Sessions represented by this row's number. */
+  sessions: number;
+  /** Sessions that billed at least one request in range. */
+  activeSessions: number;
+  /** Subagent sessions covered. */
+  subagentSessions: number;
+  /** Requests billed. */
+  requests: number;
+  /** First billed request in range. */
+  firstUsage: number | null;
+  /** Last billed request in range. */
+  lastUsage: number | null;
+  /** Token totals. */
+  tokens: TokenTotals;
+  /** Cost totals. */
+  cost: CostTotals;
+  /** Which bands contributed. */
+  bands: BandSummary[];
+  /** Per-model figures. */
+  models: ModelBreakdown[];
+  /** Present only in the `session` dimension. */
+  sessionReports?: SessionReport[] | undefined;
+}
+
+/** How subagent sessions were treated, and what they contributed on their own. */
 export interface SubagentScope {
-  /**
-   * `true` when subagent sessions are listed separately, `false` when their
-   * usage is folded into the session that spawned them.
-   */
+  /** `true` when subagents are listed separately, `false` when folded in. */
   split: boolean;
-  /** How many subagent sessions were in scope. */
+  /** Subagent sessions in scope. */
   rows: number;
   /** Sessions in scope that spawned at least one subagent. */
   parents: number;
-  /** Token totals attributable to subagent sessions alone. */
-  tokens: import('./types.ts').TokenTotals;
-  /** Cost attributable to subagent sessions alone, in the display currency. */
-  cost: import('./types.ts').CostTotals;
-  /** Number of billed requests made by subagent sessions. */
+  /** Requests made by subagent sessions. */
   requests: number;
+  /** Token totals of subagent sessions. */
+  tokens: TokenTotals;
+  /** Cost of subagent sessions. */
+  cost: CostTotals;
 }
 
 /** The complete answer to a {@link UsageQuery}. */
 export interface UsageResult {
+  /** Agent the data came from. */
+  agent: string;
+  /** Data root that was read. */
+  source: string;
+  /** Which aggregation produced this report. */
   dimension: UsageDimension;
+  /** Time range applied. */
   range: TimeRange;
+  /** Display currency. */
   currency: string;
+  /** Units of the display currency per 1 unit of the pricing currency. */
   currencyRate: number;
-  /** How subagents were treated, and what they contributed on their own. */
+  /** Pricing provider that supplied the rates. */
+  pricingProvider: string;
+  /** How subagents were treated. */
   subagents: SubagentScope;
+  /** Requests billed. */
   requests: number;
-  tokens: import('./types.ts').TokenTotals;
-  cost: import('./types.ts').CostTotals;
-  bands: import('./types.ts').PricingBandSummary[];
+  /** Records nothing could price. */
+  unpriced: number;
+  /** Token totals. */
+  tokens: TokenTotals;
+  /** Cost totals. */
+  cost: CostTotals;
+  /** Which bands contributed. */
+  bands: BandSummary[];
+  /** Tokens charged per pricing component, keyed by component id. */
+  components: Map<string, ComponentUsage>;
+  /** Per-model figures. */
   models: ModelBreakdown[];
+  /** Per-project rows. */
   projects: ProjectReport[];
+  /** Non-fatal problems worth showing. */
   warnings: string[];
 }
 
@@ -147,17 +209,15 @@ function globToRegExp(pattern: string): RegExp {
 
 /** Whether any selector matches a candidate, treating selectors as globs. */
 function matchesAny(candidate: string, selectors: readonly string[]): boolean {
-  const lower = candidate.toLowerCase();
   return selectors.some((selector) => {
     const trimmed = selector.trim();
-    if (trimmed.length === 0) return false;
-    return globToRegExp(trimmed).test(lower);
+    return trimmed.length > 0 && globToRegExp(trimmed).test(candidate);
   });
 }
 
 /** Every spelling of a project a selector may refer to. */
 function projectKeys(project: ProjectRecord): string[] {
-  const keys = [project.workspaceId, project.name, project.path];
+  const keys = [project.id, project.name, project.path];
   if (project.path.length > 0) {
     const base = project.path.split(/[\\/]/).filter((part) => part.length > 0).pop();
     if (base !== undefined) keys.push(base);
@@ -168,82 +228,22 @@ function projectKeys(project: ProjectRecord): string[] {
 /**
  * Every spelling of a session a selector may refer to.
  *
- * DSH writes ids with a `session-` prefix in the UI and on disk, while the
- * ledger keys its rows by the bare UUID, so both spellings must match.
+ * Agents commonly prefix ids (`session-<uuid>`) in their UI while keying records
+ * by the bare id, so both spellings must match.
  */
 function sessionKeys(session: SessionRecord): string[] {
-  const bare = session.sessionId.replace(/^session-/, '');
-  return session.sessionId === bare ? [bare, `session-${bare}`] : [session.sessionId, bare];
+  const bare = session.id.replace(/^session-/, '');
+  return session.id === bare ? [bare, `session-${bare}`] : [session.id, bare];
 }
 
-/** Resolve session selectors to concrete session ids, rejecting ambiguity. */
-export function resolveSessionSelectors(
-  sessions: readonly SessionRecord[],
-  selectors: readonly string[],
-): { ids: Set<string>; errors: string[] } {
-  const ids = new Set<string>();
-  const errors: string[] = [];
-  for (const selector of selectors) {
-    const trimmed = selector.trim();
-    if (trimmed.length === 0) continue;
-    if (trimmed.includes('*') || trimmed.includes('?')) {
-      const matched = sessions.filter((session) => matchesAny(session.sessionId, [trimmed]) || matchesAny(`session-${session.sessionId}`, [trimmed]));
-      if (matched.length === 0) errors.push(`没有会话匹配 "${trimmed}"`);
-      for (const session of matched) ids.add(session.sessionId);
-      continue;
-    }
-    const exact = sessions.find((session) => sessionKeys(session).some((key) => key.toLowerCase() === trimmed.toLowerCase()));
-    if (exact !== undefined) {
-      ids.add(exact.sessionId);
-      continue;
-    }
-    // Accept any unambiguous prefix so users can paste a short id.
-    const byPrefix = sessions.filter((session) => sessionKeys(session).some((key) => key.toLowerCase().startsWith(trimmed.toLowerCase())));
-    if (byPrefix.length === 0) {
-      errors.push(`找不到会话 "${trimmed}"`);
-    } else if (byPrefix.length > 1) {
-      errors.push(`会话 "${trimmed}" 有 ${byPrefix.length} 个候选，请提供更长的前缀：${byPrefix.slice(0, 5).map((session) => session.sessionId).join('、')}`);
-    } else {
-      ids.add((byPrefix[0] as SessionRecord).sessionId);
-    }
-  }
-  return { ids, errors };
-}
-
-/**
- * Expand a set of session ids with every session they transitively spawned.
- *
- * Session selection follows delegation: naming a session a human started means
- * "that session and its subagents". A subagent is still selectable on its own,
- * in which case only it (and anything *it* spawned) is in scope.
- * @param dataset - the loaded dataset.
- * @param ids - the directly selected session ids.
- * @returns the selected ids plus all their descendants.
- */
-export function collectDescendantIds(dataset: UsageDataset, sessionId: string): Set<string> {
-  const expanded = expandWithDescendants(dataset, new Set([sessionId]));
-  // The seed itself is not a descendant.
-  expanded.delete(sessionId);
-  return expanded;
-}
-
-/**
- * Expand a set of session ids with every session they transitively spawned.
- *
- * Session selection follows delegation: naming a session a human started means
- * "that session and its subagents". A subagent is still selectable on its own,
- * in which case only it (and anything *it* spawned) is in scope.
- * @param dataset - the loaded dataset.
- * @param ids - the directly selected session ids.
- * @returns the selected ids plus all their descendants.
- */
+/** Expand a set of session ids with every session they transitively spawned. */
 export function expandWithDescendants(dataset: UsageDataset, ids: ReadonlySet<string>): Set<string> {
   const byParent = new Map<string, string[]>();
   for (const session of dataset.sessions) {
-    if (session.parentSessionId === null) continue;
-    const bucket = byParent.get(session.parentSessionId);
-    if (bucket === undefined) byParent.set(session.parentSessionId, [session.sessionId]);
-    else bucket.push(session.sessionId);
+    if (session.parentId === null) continue;
+    const bucket = byParent.get(session.parentId);
+    if (bucket === undefined) byParent.set(session.parentId, [session.id]);
+    else bucket.push(session.id);
   }
   const expanded = new Set(ids);
   const queue = [...ids];
@@ -258,7 +258,51 @@ export function expandWithDescendants(dataset: UsageDataset, ids: ReadonlySet<st
   return expanded;
 }
 
-/** Resolve project selectors to concrete workspace keys, rejecting ambiguity. */
+/** Every descendant of a session, excluding the session itself. */
+export function collectDescendantIds(dataset: UsageDataset, sessionId: string): Set<string> {
+  const expanded = expandWithDescendants(dataset, new Set([sessionId]));
+  expanded.delete(sessionId);
+  return expanded;
+}
+
+/** Resolve session selectors to concrete ids, rejecting ambiguity. */
+export function resolveSessionSelectors(
+  sessions: readonly SessionRecord[],
+  selectors: readonly string[],
+): { ids: Set<string>; errors: string[] } {
+  const ids = new Set<string>();
+  const errors: string[] = [];
+  for (const selector of selectors) {
+    const trimmed = selector.trim();
+    if (trimmed.length === 0) continue;
+    if (trimmed.includes('*') || trimmed.includes('?')) {
+      const matched = sessions.filter((session) => sessionKeys(session).some((key) => matchesAny(key, [trimmed])));
+      if (matched.length === 0) errors.push(`没有会话匹配 "${trimmed}"`);
+      for (const session of matched) ids.add(session.id);
+      continue;
+    }
+    const lowered = trimmed.toLowerCase();
+    const exact = sessions.find((session) => sessionKeys(session).some((key) => key.toLowerCase() === lowered));
+    if (exact !== undefined) {
+      ids.add(exact.id);
+      continue;
+    }
+    // Accept any unambiguous prefix so users can paste a short id.
+    const byPrefix = sessions.filter((session) => sessionKeys(session).some((key) => key.toLowerCase().startsWith(lowered)));
+    if (byPrefix.length === 0) {
+      errors.push(`找不到会话 "${trimmed}"`);
+    } else if (byPrefix.length > 1) {
+      errors.push(
+        `会话 "${trimmed}" 有 ${byPrefix.length} 个候选，请提供更长的前缀：${byPrefix.slice(0, 5).map((session) => session.id).join('、')}`,
+      );
+    } else {
+      ids.add((byPrefix[0] as SessionRecord).id);
+    }
+  }
+  return { ids, errors };
+}
+
+/** Resolve project selectors to concrete project ids, rejecting ambiguity. */
 export function resolveProjectSelectors(
   projects: readonly ProjectRecord[],
   selectors: readonly string[],
@@ -268,322 +312,101 @@ export function resolveProjectSelectors(
   for (const selector of selectors) {
     const trimmed = selector.trim();
     if (trimmed.length === 0) continue;
-    const matched = projects.filter((project) => matchesAny(project.workspaceId, [trimmed]) || projectKeys(project).some((key) => matchesAny(key, [trimmed])));
+    const matched = projects.filter((project) => projectKeys(project).some((key) => matchesAny(key, [trimmed])));
     if (matched.length === 0) errors.push(`没有项目匹配 "${trimmed}"`);
-    for (const project of matched) keys.add(project.workspaceId);
+    for (const project of matched) keys.add(project.id);
   }
   return { keys, errors };
 }
 
-/** Filter one session's usage records to the requested time range. */
-function filterEntries(entries: readonly UsageEntry[], range: TimeRange): UsageEntry[] {
-  if (range.from === null && range.to === null) return [...entries];
-  return entries.filter((entry) => inRange(entry.time, range));
+/** Narrow records to the requested time range. */
+function inRangeRecords(records: readonly UsageRecord[], range: TimeRange): UsageRecord[] {
+  if (range.from === null && range.to === null) return [...records];
+  return records.filter((record) => inRange(record.time, range));
 }
 
-/** Build the per-model breakdown for a set of usage records. */
-function modelsOf(entries: readonly UsageEntry[], engine: PricingEngine, currencyRate: number): ModelBreakdown[] {
-  const byModel = new Map<string, UsageEntry[]>();
-  for (const entry of entries) {
-    const bucket = byModel.get(entry.model);
-    if (bucket === undefined) byModel.set(entry.model, [entry]);
-    else bucket.push(entry);
+/** Group records by model and price each group. */
+function modelsOf(records: readonly UsageRecord[], engine: PricingEngine, currencyRate: number): ModelBreakdown[] {
+  const byModel = new Map<string, UsageRecord[]>();
+  for (const record of records) {
+    const bucket = byModel.get(record.model);
+    if (bucket === undefined) byModel.set(record.model, [record]);
+    else bucket.push(record);
   }
   const breakdown: ModelBreakdown[] = [];
-  for (const [model, entries] of byModel) {
-    const report = computeReport(entries, engine, currencyRate);
-    breakdown.push({ model, requests: report.requests, tokens: report.tokens, cost: report.cost });
+  for (const [model, group] of byModel) {
+    const summary = costOf(group, engine, currencyRate);
+    breakdown.push({
+      model,
+      requests: summary.priced + summary.unpriced,
+      tokens: summary.totals === undefined ? emptyBuckets() : sumOf(group),
+      cost: summary.totals,
+    });
   }
-  breakdown.sort(
-    (left, right) =>
-      parseDecimal(right.cost.total) === parseDecimal(left.cost.total)
-        ? left.model.localeCompare(right.model)
-        : parseDecimal(right.cost.total) > parseDecimal(left.cost.total)
-          ? 1
-          : -1,
-  );
+  breakdown.sort((left, right) => {
+    const leftTotal = Number(left.cost.total);
+    const rightTotal = Number(right.cost.total);
+    return rightTotal - leftTotal || left.model.localeCompare(right.model);
+  });
   return breakdown;
 }
 
-/** Turn one session plus its filtered records into a report row. */
-function sessionReport(
-  session: SessionRecord,
-  entries: UsageEntry[],
-  projectName: string,
-  engine: PricingEngine,
-  currencyRate: number,
-  subagents: { includeSubagents: boolean; subagentCount: number },
-): SessionReport {
-  const report = computeReport(entries, engine, currencyRate);
-  const row: SessionReport = {
-    sessionId: session.sessionId,
-    title: session.title,
-    cwd: session.cwd,
-    projectName,
-    workspaceId: session.workspaceId,
-    createdAt: session.createdAt,
-    firstUsage: entries.length === 0 ? null : (entries[0] as UsageEntry).time,
-    lastUsage: entries.length === 0 ? null : (entries[entries.length - 1] as UsageEntry).time,
-    isSubagent: session.isSubagent,
-    subagentCount: subagents.subagentCount,
-    parentSessionId: session.parentSessionId,
-    requests: report.requests,
-    tokens: report.tokens,
-    cost: report.cost,
-    bands: report.bands,
-    models: modelsOf(entries, engine, currencyRate),
-  };
-  if (session.projectedTotals !== null && entries.length === session.entries.length) {
-    const warning = reconcile(sumTokensOf(entries), session.projectedTotals);
-    if (warning !== undefined) row.warning = warning;
-  }
-  return row;
-}
-
-/** Sum provider buckets without constructing a cost report. */
-function sumTokensOf(entries: readonly UsageEntry[]): import('./types.ts').TokenTotals {
+/** Sum buckets without pricing them. */
+function sumOf(records: readonly UsageRecord[]): TokenTotals {
   const totals = emptyBuckets();
-  for (const entry of entries) {
-    totals.input += entry.tokens.input;
-    totals.output += entry.tokens.output;
-    totals.cacheRead += entry.tokens.cacheRead;
-    totals.cacheWrite += entry.tokens.cacheWrite;
-    totals.reasoning += entry.tokens.reasoning;
+  for (const record of records) {
+    totals.input += record.tokens.input;
+    totals.output += record.tokens.output;
+    totals.cacheRead += record.tokens.cacheRead;
+    totals.cacheWrite += record.tokens.cacheWrite;
+    totals.reasoning += record.tokens.reasoning;
   }
   return totals;
 }
 
-/**
- * Merge a list of reports into one.
- *
- * Cost is summed from the reports' **exact** components and rounded once here,
- * never from their already-rounded display values: otherwise each merged report
- * contributes its own rounding remainder, and the same grand total would come
- * out differently depending on how the usage was grouped (folded vs. split,
- * one project vs. many).
- */
-function mergeReports(reports: readonly UsageReport[]): UsageReport {
-  const tokens = emptyBuckets();
-  let requests = 0;
-  let cacheHitInputTokens = 0;
-  let cacheMissInputTokens = 0;
-  let outputTokens = 0;
-  let cacheWriteTokens = 0;
-  const exactCost: ExactCost = { cacheHitInputCost: 0n, cacheMissInputCost: 0n, outputCost: 0n };
-  const bands = new Map<string, import('./types.ts').PricingBandSummary>();
-  for (const report of reports) {
-    requests += report.requests;
-    tokens.input += report.tokens.input;
-    tokens.output += report.tokens.output;
-    tokens.cacheRead += report.tokens.cacheRead;
-    tokens.cacheWrite += report.tokens.cacheWrite;
-    tokens.reasoning += report.tokens.reasoning;
-    cacheHitInputTokens += report.cost.cacheHitInputTokens;
-    cacheMissInputTokens += report.cost.cacheMissInputTokens;
-    outputTokens += report.cost.outputTokens;
-    cacheWriteTokens += report.cost.cacheWriteTokens;
-    exactCost.cacheHitInputCost += report.exactCost.cacheHitInputCost;
-    exactCost.cacheMissInputCost += report.exactCost.cacheMissInputCost;
-    exactCost.outputCost += report.exactCost.outputCost;
-    for (const band of report.bands) {
-      const key = `${band.periodId}\u0000${band.band}\u0000${band.resolution}`;
-      const existing = bands.get(key);
-      if (existing === undefined) bands.set(key, { ...band });
-      else existing.requests += band.requests;
-    }
-  }
-  return {
-    requests,
-    tokens,
-    exactCost,
-    bands: [...bands.values()].sort(
-      (left, right) => right.periodId.localeCompare(left.periodId) || left.band.localeCompare(right.band),
-    ),
-    cost: displayCost(exactCost, tokens),
-  };
+/** Turn a cost summary's breakdown into the report's band rows. */
+function bandsOf(summary: CostSummary): BandSummary[] {
+  return summary.breakdown.map((band) => ({
+    periodId: band.periodId,
+    periodLabel: band.periodLabel,
+    tier: band.tier,
+    resolution: band.resolution,
+    requests: band.requests,
+    total: band.total,
+  }));
 }
 
-/**
- * Run a query against a dataset.
- * @param dataset - the loaded dataset.
- * @param query - dimension, filters, range, and currency.
- * @param engine - the pricing engine; a default engine is created when omitted.
- * @returns the aggregated result, including any selector errors as warnings.
- */
-export function runQuery(
-  dataset: UsageDataset,
-  query: UsageQuery,
+/** Build one session's report row from its records. */
+function sessionReport(
+  session: SessionRecord,
+  records: UsageRecord[],
+  project: ProjectRecord,
   engine: PricingEngine,
-): UsageResult {
-  const warnings = [...dataset.warnings];
-  const projectSelection = query.projects === undefined || query.projects.length === 0
-    ? undefined
-    : resolveProjectSelectors(dataset.projects, query.projects);
-  const sessionSelection = query.sessions === undefined || query.sessions.length === 0
-    ? undefined
-    : resolveSessionSelectors(dataset.sessions, query.sessions);
-  for (const error of projectSelection?.errors ?? []) warnings.push(error);
-  for (const error of sessionSelection?.errors ?? []) warnings.push(error);
-
-  const selectedProjects = dataset.projects.filter((project) => projectSelection === undefined || projectSelection.keys.has(project.workspaceId));
-
-  const includeSubagents = query.includeSubagents ?? true;
-  // Selecting a session selects its whole delegation subtree: asking about a
-  // session a human started naturally means "and everything it spawned".
-  const selectedSessionIds = sessionSelection === undefined
-    ? undefined
-    : expandWithDescendants(dataset, sessionSelection.ids);
-
-  // Every session the filters select, with its own records already narrowed to
-  // the time range. A usage record must pass every active filter: time, project,
-  // and session. This set is a superset of the reported rows — whether a
-  // subagent becomes a row of its own or folds into an ancestor is a reporting
-  // decision made below, not a reason to drop it from the data.
-  const inScope: { session: SessionRecord; entries: UsageEntry[] }[] = [];
-  const inScopeByProject = new Map<string, { session: SessionRecord; entries: UsageEntry[] }[]>();
-  for (const project of selectedProjects) {
-    const rows: { session: SessionRecord; entries: UsageEntry[] }[] = [];
-    for (const session of project.sessions) {
-      if (selectedSessionIds !== undefined && !selectedSessionIds.has(session.sessionId)) continue;
-      const row = { session, entries: filterEntries(session.entries, query.range) };
-      rows.push(row);
-      inScope.push(row);
-    }
-    inScopeByProject.set(project.workspaceId, rows);
-  }
-
-  // Scope for the grand total and the project rows. In folded mode a top-level
-  // session's records become its own plus every descendant's, so the row the
-  // user reads already equals the total they are shown; in split mode each
-  // session stands alone.
-  const scopedByProject = new Map<string, { session: SessionRecord; entries: UsageEntry[] }[]>();
-  const scoped: { session: SessionRecord; entries: UsageEntry[] }[] = [];
-  for (const project of selectedProjects) {
-    const own = inScopeByProject.get(project.workspaceId) ?? [];
-    const ownById = new Map(own.map((row) => [row.session.sessionId, row]));
-    const rows: { session: SessionRecord; entries: UsageEntry[] }[] = [];
-    for (const row of own) {
-      const parentInScope =
-        row.session.parentSessionId !== null && ownById.has(row.session.parentSessionId);
-      if (includeSubagents) {
-        // Folded: a subagent is represented by its ancestor, so only the top of
-        // each subtree becomes a row — and that row carries the whole subtree.
-        if (row.session.isSubagent && parentInScope) continue;
-        const merged: UsageEntry[] = [...row.entries];
-        for (const id of collectDescendantIds(dataset, row.session.sessionId)) {
-          const child = ownById.get(id);
-          if (child !== undefined) merged.push(...child.entries);
-        }
-        merged.sort((left, right) => (left.time === right.time ? left.seq - right.seq : left.time - right.time));
-        rows.push({ session: row.session, entries: merged });
-        continue;
-      }
-      // Split: every session stands alone. A subagent is a row here, so its
-      // records must not also be merged into the ancestor's row — that is what
-      // keeps the two modes' totals identical.
-      rows.push({ session: row.session, entries: [...row.entries] });
-    }
-    scopedByProject.set(project.workspaceId, rows);
-    scoped.push(...rows);
-  }
-
-  const projectRows: ProjectReport[] = [];
-  for (const project of selectedProjects) {
-    const sessionRows: SessionReport[] = [];
-    const ownRows = scopedByProject.get(project.workspaceId) ?? [];
-    // Session counts describe what is in scope, including subagents that were
-    // folded into an ancestor's row rather than listed separately.
-    const projectScope = inScopeByProject.get(project.workspaceId) ?? [];
-    for (const { session, entries } of ownRows) {
-      if (query.dimension === 'session' && entries.length > 0) {
-        sessionRows.push(
-          sessionReport(session, entries, project.name, engine, query.currencyRate, {
-            includeSubagents,
-            // In folded mode the row stands for the whole subtree, so the count
-            // is every descendant; in split mode nothing is folded.
-            subagentCount: includeSubagents ? collectDescendantIds(dataset, session.sessionId).size : 0,
-          }),
-        );
-      }
-    }
-    sessionRows.sort(
-      (left, right) => (right.lastUsage ?? 0) - (left.lastUsage ?? 0) || left.sessionId.localeCompare(right.sessionId),
-    );
-    const reports = ownRows.map(({ entries }) => computeReport(entries, engine, query.currencyRate));
-    const merged = mergeReports(reports);
-    const activeRows = ownRows.filter(({ entries }) => entries.length > 0);
-    const row: ProjectReport = {
-      workspaceId: project.workspaceId,
-      name: project.name,
-      path: project.path,
-      sessions: includeSubagents ? ownRows.length : projectScope.length,
-      activeSessions: includeSubagents ? activeRows.length : projectScope.filter(({ entries }) => entries.length > 0).length,
-      // How many subagent sessions this project's report covers. Subagents have
-      // no subagents of their own in this dataset, so this is just the number of
-      // subagent sessions in scope.
-      subagentSessions: projectScope.filter(({ session }) => session.isSubagent).length,
-      requests: merged.requests,
-      firstUsage: minOf(activeRows, ({ session }) => firstUsageOf(session)),
-      lastUsage: maxOf(activeRows, ({ session }) => lastUsageOf(session)),
-      tokens: merged.tokens,
-      cost: merged.cost,
-      bands: merged.bands,
-      models: modelsOf(
-        ownRows.flatMap(({ entries }) => entries),
-        engine,
-        query.currencyRate,
-      ),
-    };
-    if (query.dimension === 'session') row.sessionReports = sessionRows;
-    projectRows.push(row);
-  }
-
-  // The grand total and the per-model breakdown are computed from the in-scope
-  // records in one pass. Deriving them from the reported rows instead would make
-  // the headline number depend on how those rows were grouped — the same usage
-  // must total the same whether subagents are folded or split.
-  const allEntries: UsageEntry[] = [];
-  for (const { entries } of scoped) allEntries.push(...entries);
-  allEntries.sort((left, right) => (left.time === right.time ? left.seq - right.seq : left.time - right.time));
-  const mergedAll = computeReport(allEntries, engine, query.currencyRate);
-  // Subagent contribution is reported in both modes: folded in by default
-  // (already part of the totals above), or as the separate rows themselves.
-  // Subagent totals always describe the subagent sessions themselves, whether
-  // or not their usage was folded into an ancestor's reported row.
-  const subagentSessions = inScope.filter(({ session }) => session.isSubagent);
-  const subagentMerged = mergeReports(
-    subagentSessions.map(({ entries }) => computeReport(entries, engine, query.currencyRate)),
-  );
-  const parents = new Set<string>();
-  for (const { session } of inScope) {
-    if (session.parentSessionId !== null) parents.add(session.parentSessionId);
-  }
-
-  const result: UsageResult = {
-    dimension: query.dimension,
-    range: query.range,
-    currency: query.currency,
-    currencyRate: query.currencyRate,
-    subagents: {
-      split: !includeSubagents,
-      rows: subagentSessions.length,
-      parents: parents.size,
-      tokens: subagentMerged.tokens,
-      cost: subagentMerged.cost,
-      requests: subagentMerged.requests,
-    },
-    requests: mergedAll.requests,
-    tokens: mergedAll.tokens,
-    cost: mergedAll.cost,
-    bands: mergedAll.bands,
-    models: modelsOf(allEntries, engine, query.currencyRate),
-    projects: projectRows,
-    warnings,
+  currencyRate: number,
+  subagentCount: number,
+  warning: string | undefined,
+): SessionReport {
+  const summary = costOf(records, engine, currencyRate);
+  const row: SessionReport = {
+    id: session.id,
+    title: session.title,
+    cwd: session.cwd,
+    projectName: project.name,
+    projectId: project.id,
+    createdAt: session.createdAt,
+    firstUsage: records[0]?.time ?? null,
+    lastUsage: records[records.length - 1]?.time ?? null,
+    isSubagent: session.isSubagent,
+    subagentCount,
+    parentId: session.parentId,
+    requests: records.length,
+    tokens: summary.totals === undefined ? emptyBuckets() : sumOf(records),
+    cost: summary.totals,
+    bands: bandsOf(summary),
+    models: modelsOf(records, engine, currencyRate),
   };
-  if (result.requests === 0) {
-    warnings.push('当前筛选条件下没有任何用量记录');
-  }
-  return result;
+  if (warning !== undefined) row.warning = warning;
+  return row;
 }
 
 /** Smallest non-null value produced by `pick`, or `null`. */
@@ -608,70 +431,328 @@ function maxOf<T>(items: readonly T[], pick: (item: T) => number | null): number
   return best;
 }
 
-/** Build the `session list` inventory: projects first, newest activity first. */
+/** A session together with the records that survived filtering. */
+interface ScopedSession {
+  session: SessionRecord;
+  records: UsageRecord[];
+}
+
+/** Options for {@link runQuery} beyond the query itself. */
+export interface ReportContext {
+  /** Pricing engine supplying rates. */
+  engine: PricingEngine;
+  /** Provider id, reported back for provenance. */
+  pricingProvider: string;
+}
+
+/**
+ * Run a query against a dataset.
+ * @param dataset - the loaded dataset.
+ * @param query - dimension, filters, range, and currency.
+ * @param context - pricing engine and its provider id.
+ * @returns the aggregated result, including selector errors as warnings.
+ */
+export function runQuery(dataset: UsageDataset, query: UsageQuery, context: ReportContext): UsageResult {
+  const { engine } = context;
+  const warnings = [...dataset.warnings];
+  const projectSelection = query.projects === undefined || query.projects.length === 0
+    ? undefined
+    : resolveProjectSelectors(dataset.projects, query.projects);
+  const sessionSelection = query.sessions === undefined || query.sessions.length === 0
+    ? undefined
+    : resolveSessionSelectors(dataset.sessions, query.sessions);
+  for (const error of projectSelection?.errors ?? []) warnings.push(error);
+  for (const error of sessionSelection?.errors ?? []) warnings.push(error);
+
+  const includeSubagents = query.includeSubagents ?? true;
+  const selectedProjects = dataset.projects.filter(
+    (project) => projectSelection === undefined || projectSelection.keys.has(project.id),
+  );
+  // Selecting a session selects its whole delegation subtree: asking about a
+  // session a human started naturally means "and everything it spawned".
+  const selectedSessionIds = sessionSelection === undefined
+    ? undefined
+    : expandWithDescendants(dataset, sessionSelection.ids);
+
+  // Every session in scope, with its records narrowed to the time range. This is
+  // a superset of the reported rows: whether a subagent becomes a row of its own
+  // or folds into an ancestor is a reporting decision, not a reason to drop it.
+  const inScope: ScopedSession[] = [];
+  const inScopeByProject = new Map<string, ScopedSession[]>();
+  for (const project of selectedProjects) {
+    const rows: ScopedSession[] = [];
+    for (const session of project.sessions) {
+      if (selectedSessionIds !== undefined && !selectedSessionIds.has(session.id)) continue;
+      const row: ScopedSession = { session, records: inRangeRecords(session.records, query.range) };
+      rows.push(row);
+      inScope.push(row);
+    }
+    inScopeByProject.set(project.id, rows);
+  }
+
+  // Which sessions get a row of their own, and what each row covers.
+  const scopedByProject = new Map<string, ScopedSession[]>();
+  const scoped: ScopedSession[] = [];
+  for (const project of selectedProjects) {
+    const own = inScopeByProject.get(project.id) ?? [];
+    const ownById = new Map(own.map((row) => [row.session.id, row]));
+    const rows: ScopedSession[] = [];
+    for (const row of own) {
+      if (includeSubagents) {
+        // Folded: only the top of each subtree gets a row, and it carries the
+        // whole subtree.
+        const parentInScope = row.session.parentId !== null && ownById.has(row.session.parentId);
+        if (row.session.isSubagent && parentInScope) continue;
+        const records = [...row.records];
+        for (const id of collectDescendantIds(dataset, row.session.id)) {
+          const child = ownById.get(id);
+          if (child !== undefined) records.push(...child.records);
+        }
+        records.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
+        rows.push({ session: row.session, records });
+        continue;
+      }
+      // Split: every session stands alone, so a subagent's records are not also
+      // merged into an ancestor's row — that keeps both modes' totals identical.
+      rows.push({ session: row.session, records: [...row.records] });
+    }
+    scopedByProject.set(project.id, rows);
+    scoped.push(...rows);
+  }
+
+  const projectRows: ProjectReport[] = [];
+  for (const project of selectedProjects) {
+    const ownRows = scopedByProject.get(project.id) ?? [];
+    const projectScope = inScopeByProject.get(project.id) ?? [];
+    // One pricing pass per project, merged at full precision.
+    const summary = costOfGrouped(ownRows.map((row) => row.records), engine, query.currencyRate);
+    const activeRows = ownRows.filter((row) => row.records.length > 0);
+    const projectRecords = ownRows.flatMap((row) => row.records);
+    const row: ProjectReport = {
+      id: project.id,
+      name: project.name,
+      path: project.path,
+      sessions: includeSubagents ? ownRows.length : projectScope.length,
+      activeSessions: includeSubagents ? activeRows.length : projectScope.filter((entry) => entry.records.length > 0).length,
+      subagentSessions: projectScope.filter((entry) => entry.session.isSubagent).length,
+      requests: summary.priced + summary.unpriced,
+      firstUsage: minOf(activeRows, (entry) => entry.records[0]?.time ?? null),
+      lastUsage: maxOf(activeRows, (entry) => entry.records[entry.records.length - 1]?.time ?? null),
+      tokens: sumOf(projectRecords),
+      cost: summary.totals,
+      bands: bandsOf(summary),
+      models: modelsOf(projectRecords, engine, query.currencyRate),
+    };
+    if (query.dimension === 'session') {
+      const sessionRows: SessionReport[] = [];
+      for (const { session, records } of ownRows) {
+        if (records.length === 0) continue;
+        const warning = adapterWarning(session, records);
+        sessionRows.push(
+          sessionReport(
+            session,
+            records,
+            project,
+            engine,
+            query.currencyRate,
+            includeSubagents ? collectDescendantIds(dataset, session.id).size : 0,
+            warning,
+          ),
+        );
+      }
+      sessionRows.sort(
+        (left, right) => (right.lastUsage ?? 0) - (left.lastUsage ?? 0) || left.id.localeCompare(right.id),
+      );
+      row.sessionReports = sessionRows;
+    }
+    projectRows.push(row);
+  }
+
+  // The headline total is computed in one pass over the in-scope records.
+  // Deriving it from the reported rows instead would make the number depend on
+  // how those rows were grouped — the same usage must total the same whether
+  // subagents are folded or split.
+  const allRecords: UsageRecord[] = [];
+  for (const { records } of scoped) allRecords.push(...records);
+  allRecords.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
+  const mergedAll = costOf(allRecords, engine, query.currencyRate);
+
+  // Subagent totals always describe the subagent sessions themselves, whether or
+  // not their usage was folded into an ancestor's reported row.
+  const subagentSessions = inScope.filter((entry) => entry.session.isSubagent);
+  const subagentSummary = costOfGrouped(subagentSessions.map((entry) => entry.records), engine, query.currencyRate);
+  const parents = new Set<string>();
+  for (const { session } of inScope) {
+    if (session.parentId !== null) parents.add(session.parentId);
+  }
+
+  const result: UsageResult = {
+    agent: dataset.agent,
+    source: dataset.source,
+    dimension: query.dimension,
+    range: query.range,
+    currency: query.currency,
+    currencyRate: query.currencyRate,
+    pricingProvider: context.pricingProvider,
+    subagents: {
+      split: !includeSubagents,
+      rows: subagentSessions.length,
+      parents: parents.size,
+      requests: subagentSummary.priced + subagentSummary.unpriced,
+      tokens: sumOf(subagentSessions.flatMap((entry) => entry.records)),
+      cost: subagentSummary.totals,
+    },
+    requests: mergedAll.priced + mergedAll.unpriced,
+    unpriced: mergedAll.unpriced,
+    tokens: sumOf(allRecords),
+    cost: mergedAll.totals,
+    bands: bandsOf(mergedAll),
+    components: mergedAll.components,
+    models: modelsOf(allRecords, engine, query.currencyRate),
+    projects: projectRows,
+    warnings,
+  };
+  if (result.requests === 0) warnings.push('当前筛选条件下没有任何用量记录');
+  if (result.unpriced > 0) {
+    warnings.push(`有 ${result.unpriced} 条记录没有可用价格，未计入费用（可用 \`price\` 查看已收录的模型）`);
+  }
+  return result;
+}
+
+/**
+ * Compare a session's records against the adapter's own totals, when it kept some.
+ * @param session - the session.
+ * @param records - the records that were billed.
+ * @returns a warning, or `undefined` when there is nothing to compare or they agree.
+ */
+function adapterWarning(session: SessionRecord, records: readonly UsageRecord[]): string | undefined {
+  const projected = session.extra?.['projectedTotals'];
+  if (!isBuckets(projected) || records.length !== session.records.length) return undefined;
+  const totals = sumOf(records);
+  const diffs: string[] = [];
+  const compare = (label: string, left: number, right: number): void => {
+    if (left !== right) diffs.push(`${label} 账本 ${left} vs 投影缓存 ${right}`);
+  };
+  compare('未命中输入', totals.input, projected.input);
+  compare('输出', totals.output, projected.output);
+  compare('缓存命中输入', totals.cacheRead, projected.cacheRead);
+  compare('缓存写入', totals.cacheWrite, projected.cacheWrite);
+  return diffs.length === 0 ? undefined : `会话用量与投影缓存不一致：${diffs.join('；')}`;
+}
+
+/** Narrow an `unknown` to a token bucket set. */
+function isBuckets(value: unknown): value is TokenTotals {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return ['input', 'output', 'cacheRead', 'cacheWrite'].every((key) => typeof candidate[key] === 'number');
+}
+
+/** One session row in the `session list` inventory. */
 export interface SessionListEntry {
-  sessionId: string;
+  /** Session id. */
+  id: string;
+  /** Session title. */
   title: string | null;
-  workspaceId: string | null;
+  /** Owning project id. */
+  projectId: string;
+  /** Owning project name. */
   projectName: string;
+  /** Working directory. */
   cwd: string | null;
+  /** Session creation time. */
   createdAt: number | null;
+  /** First billed request. */
   firstUsage: number | null;
+  /** Last billed request. */
   lastUsage: number | null;
+  /** Requests billed. */
   requests: number;
-  tokens: import('./types.ts').TokenTotals;
+  /** Token totals. */
+  tokens: TokenTotals;
   /** Whether this session is a subagent. */
   isSubagent: boolean;
-  /** Delegation depth: 0 for a session a human started. */
-  delegationDepth: number;
-  /** The session that spawned this one, for a subagent. */
-  parentSessionId: string | null;
-  /** How many subagents this session spawned (0 for a subagent). */
+  /** Delegation depth. */
+  depth: number;
+  /** The session that spawned this one. */
+  parentId: string | null;
+  /** How many subagents this session spawned. */
   subagentCount: number;
-  /** Requests and tokens of this session's subagents, when they are listed separately. */
+  /** Requests made by this session's subagents. */
   subagentRequests: number;
-  /** Whether this row was expanded from its parent rather than listed at top level. */
+  /** Whether this row was nested under its parent rather than listed at top level. */
   nested: boolean;
 }
 
 /** A project plus its sessions, ordered for the `session list` command. */
 export interface SessionListProject {
-  workspaceId: string;
+  /** Project id. */
+  id: string;
+  /** Project display name. */
   name: string;
+  /** Project path. */
   path: string;
+  /** Earliest session time. */
   firstUsage: number | null;
+  /** Latest session time. */
   lastUsage: number | null;
+  /**
+   * Display rows, newest first, with each subagent nested beneath its parent.
+   * A folded row stands for its whole subtree, so this can be shorter than
+   * {@link SessionListProject.sessionCount}.
+   */
   sessions: SessionListEntry[];
+  /** Sessions in scope, counting subagents that were folded into a parent row. */
+  sessionCount: number;
 }
 
 /** The `session list` inventory. */
 export interface SessionListResult {
+  /** Agent the data came from. */
+  agent: string;
+  /** Data root that was read. */
+  source: string;
+  /** Projects, newest activity first. */
   projects: SessionListProject[];
+  /** Sessions listed. */
   totalSessions: number;
+  /** Non-fatal problems worth showing. */
   warnings: string[];
+}
+
+/** Filters accepted by {@link listSessions}. */
+export interface SessionListFilters {
+  /** Project selectors. */
+  projects?: readonly string[] | undefined;
+  /** Session selectors. */
+  sessions?: readonly string[] | undefined;
+  /** List subagents separately (`true`) or fold them into their parent (`false`, default). */
+  includeSubagents?: boolean | undefined;
+}
+
+/** Sort key for a session row: first billed request, else creation time. */
+function sortInstantOf(session: SessionListEntry): number {
+  if (session.firstUsage !== null) return session.firstUsage;
+  if (session.createdAt !== null) return session.createdAt;
+  return Number.NEGATIVE_INFINITY;
 }
 
 /**
  * Inventory every project and session, newest first.
  *
  * Ordering is by first session time descending for projects and by session time
- * descending within a project, as requested. "Session time" is the first billed
- * request when the ledger has one and the session's creation time otherwise.
+ * descending within a project. "Session time" is the first billed request when
+ * there is one and the session's creation time otherwise.
+ *
+ * A session is listed exactly once. A subagent is nested beneath its parent when
+ * that parent is also in scope, and stands on its own when it is not — so a
+ * subagent named directly, or reached through a filter, never disappears.
  * @param dataset - the loaded dataset.
- * @param filters - optional project and session selectors.
+ * @param filters - optional project and session selectors, and subagent handling.
  * @returns the ordered inventory.
  */
-export function listSessions(
-  dataset: UsageDataset,
-  filters: {
-    projects?: readonly string[];
-    sessions?: readonly string[];
-    /** List subagents separately (true) or fold them into their parent's row (false, the default). */
-    includeSubagents?: boolean;
-  } = {},
-): SessionListResult {
-  const includeSubagents = filters.includeSubagents ?? false;
+export function listSessions(dataset: UsageDataset, filters: SessionListFilters = {}): SessionListResult {
   const warnings = [...dataset.warnings];
+  const includeSubagents = filters.includeSubagents ?? false;
   const projectSelection = filters.projects === undefined || filters.projects.length === 0
     ? undefined
     : resolveProjectSelectors(dataset.projects, filters.projects);
@@ -681,115 +762,139 @@ export function listSessions(
   for (const error of projectSelection?.errors ?? []) warnings.push(error);
   for (const error of sessionSelection?.errors ?? []) warnings.push(error);
 
-  const selected = sessionSelection === undefined
-    ? undefined
-    : expandWithDescendants(dataset, sessionSelection.ids);
-
+  const selected = sessionSelection === undefined ? undefined : expandWithDescendants(dataset, sessionSelection.ids);
   const projects: SessionListProject[] = [];
   let totalSessions = 0;
+
   for (const project of dataset.projects) {
-    if (projectSelection !== undefined && !projectSelection.keys.has(project.workspaceId)) continue;
-    const rows: SessionListEntry[] = [];
+    if (projectSelection !== undefined && !projectSelection.keys.has(project.id)) continue;
+
+    // Every session in scope, with its tokens already summed.
+    const all = new Map<string, SessionListEntry>();
     for (const session of project.sessions) {
-      if (selected !== undefined && !selected.has(session.sessionId)) continue;
-      const first = session.entries.length > 0 ? firstUsageOf(session) : null;
-      const last = session.entries.length > 0 ? lastUsageOf(session) : null;
-      const subagentEntries = session.subagentIds.reduce((total, id) => {
-        const child = dataset.sessions.find((candidate) => candidate.sessionId === id);
-        return total + (child?.entries.length ?? 0);
-      }, 0);
-      rows.push({
-        sessionId: session.sessionId,
-        title: session.title,
-        workspaceId: session.workspaceId,
-        projectName: project.name,
-        cwd: session.cwd,
-        createdAt: session.createdAt,
-        firstUsage: first,
-        lastUsage: last,
-        requests: session.entries.length,
-        tokens: sumTokensOf(session.entries),
-        isSubagent: session.isSubagent,
-        delegationDepth: session.delegationDepth,
-        parentSessionId: session.parentSessionId,
-        subagentCount: session.subagentIds.length,
-        subagentRequests: subagentEntries,
-        nested: false,
-      });
+      if (selected !== undefined && !selected.has(session.id)) continue;
+      all.set(session.id, toListEntry(session, project, dataset));
     }
-    if (rows.length === 0) continue;
+    if (all.size === 0) continue;
 
-    // Default: a top-level session stands for itself **and** its subagents, so
-    // its row already carries the combined token total and the subagent count.
-    // A subagent is only listed on its own when the user asks for it.
-    const own = includeSubagents ? rows : rows.filter((row) => !row.isSubagent);
-    const listed = own.map((row) => {
-      if (includeSubagents || row.subagentCount === 0) return row;
-      const children = rows.filter((candidate) => candidate.parentSessionId === row.sessionId);
-      if (children.length === 0) return row;
-      return {
-        ...row,
-        requests: row.requests + children.reduce((total, child) => total + child.requests, 0),
-        tokens: mergeTokenTotals(row.tokens, children.map((child) => child.tokens)),
-        firstUsage: minOf([row, ...children], (entry) => entry.firstUsage),
-        lastUsage: maxOf([row, ...children], (entry) => entry.lastUsage),
-      };
-    });
-    if (listed.length === 0) continue;
+    // A subagent whose parent is also in scope is nested under it; one whose
+    // parent is absent (named directly, or filtered out) stands on its own.
+    const hasParentInScope = (entry: SessionListEntry): boolean =>
+      entry.parentId !== null && all.has(entry.parentId);
 
-    // Order the top-level rows newest first, then hang each session's subagents
-    // directly beneath it. Subagents are never re-sorted into the top level, so
-    // a child appears exactly once.
-    const topLevel = listed
-      .filter((row) => !row.isSubagent)
-      .sort((left, right) => sortInstantOf(right) - sortInstantOf(left) || left.sessionId.localeCompare(right.sessionId));
+    // A "root" is a session with no parent in scope: a top-level session, or a
+    // subagent whose parent was named away.
+    const allEntries = [...all.values()];
+    const roots = allEntries.filter((entry) => !hasParentInScope(entry));
+    const byInstantDescending = (left: SessionListEntry, right: SessionListEntry): number =>
+      sortInstantOf(right) - sortInstantOf(left) || left.id.localeCompare(right.id);
+
+    // Folded: each root's row stands for its whole subtree, so nothing is also
+    // listed separately. Split: every session keeps its own row, nested beneath
+    // whichever ancestor is in scope (its direct parent, or the nearest one
+    // still present).
+    const listed = includeSubagents ? allEntries : roots.map((entry) => foldSubtree(entry, all));
     const ordered: SessionListEntry[] = [];
-    for (const row of topLevel) {
-      ordered.push(row);
+    for (const root of roots.sort(byInstantDescending)) {
+      ordered.push(includeSubagents ? root : (listed.find((entry) => entry.id === root.id) ?? root));
+      // Split mode gives every descendant its own row, nested under the root it
+      // was reached through. Folded mode gives the root alone a row, because
+      // that row already carries the subtree; a descendant whose intermediate
+      // ancestor is out of scope is a root itself and is emitted above.
       if (!includeSubagents) continue;
-      const children = rows
-        .filter((candidate) => candidate.parentSessionId === row.sessionId)
-        .sort((left, right) => sortInstantOf(right) - sortInstantOf(left) || left.sessionId.localeCompare(right.sessionId));
-      for (const child of children) ordered.push({ ...child, nested: true });
+      for (const descendant of descendantsOfList(all, root.id).sort(byInstantDescending)) {
+        ordered.push({ ...descendant, nested: true });
+      }
     }
-    // A subagent whose parent was filtered out still gets a row of its own.
-    const orphaned = listed.filter(
-      (row) => row.isSubagent && !ordered.some((entry) => entry.sessionId === row.sessionId),
-    );
-    ordered.push(...orphaned);
 
-    totalSessions += listed.length;
+    // Sessions in scope, which is what the number means in both modes: folded
+    // rows hide their subagents from the table, but they are still sessions.
+    totalSessions += allEntries.length;
     projects.push({
-      workspaceId: project.workspaceId,
+      id: project.id,
       name: project.name,
       path: project.path,
-      firstUsage: minOf(listed, (session) => session.firstUsage),
-      lastUsage: maxOf(listed, (session) => session.lastUsage),
+      firstUsage: minOf(ordered, (entry) => entry.firstUsage),
+      lastUsage: maxOf(ordered, (entry) => entry.lastUsage),
       sessions: ordered,
+      sessionCount: allEntries.length,
     });
   }
+
   projects.sort((left, right) => projectSortInstant(right) - projectSortInstant(left) || left.name.localeCompare(right.name));
-  return { projects, totalSessions, warnings };
+  return { agent: dataset.agent, source: dataset.source, projects, totalSessions, warnings };
 }
 
-/** Add two token totals together. */
-function mergeTokenTotals(base: import('./types.ts').TokenTotals, extras: readonly import('./types.ts').TokenTotals[]): import('./types.ts').TokenTotals {
-  const merged = { ...base };
-  for (const extra of extras) {
-    merged.input += extra.input;
-    merged.output += extra.output;
-    merged.cacheRead += extra.cacheRead;
-    merged.cacheWrite += extra.cacheWrite;
-    merged.reasoning += extra.reasoning;
+/** Build one list row from a session. */
+function toListEntry(session: SessionRecord, project: ProjectRecord, dataset: UsageDataset): SessionListEntry {
+  const subagentRequests = session.childIds.reduce((total, id) => {
+    const child = dataset.sessions.find((candidate) => candidate.id === id);
+    return total + (child?.records.length ?? 0);
+  }, 0);
+  return {
+    id: session.id,
+    title: session.title,
+    projectId: project.id,
+    projectName: project.name,
+    cwd: session.cwd,
+    createdAt: session.createdAt,
+    firstUsage: session.records[0]?.time ?? null,
+    lastUsage: session.records[session.records.length - 1]?.time ?? null,
+    requests: session.records.length,
+    tokens: sumOf(session.records),
+    isSubagent: session.isSubagent,
+    depth: session.depth,
+    parentId: session.parentId,
+    subagentCount: session.childIds.length,
+    subagentRequests,
+    nested: false,
+  };
+}
+
+/**
+ * Every descendant of a session, depth-first, within a set of rows.
+ * @param all - the rows in scope, keyed by id.
+ * @param id - the ancestor's id.
+ * @returns the descendants, excluding the ancestor itself.
+ */
+function descendantsOfList(all: ReadonlyMap<string, SessionListEntry>, id: string): SessionListEntry[] {
+  const found: SessionListEntry[] = [];
+  const queue = [id];
+  const seen = new Set([id]);
+  while (queue.length > 0) {
+    const current = queue.pop() as string;
+    for (const entry of all.values()) {
+      if (entry.parentId !== current || seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      found.push(entry);
+      queue.push(entry.id);
+    }
   }
-  return merged;
+  return found;
 }
 
-/** Sort key for a session row: first billed request, else creation time. */
-function sortInstantOf(session: SessionListEntry): number {
-  if (session.firstUsage !== null) return session.firstUsage;
-  if (session.createdAt !== null) return session.createdAt;
-  return Number.NEGATIVE_INFINITY;
+/** Fold a session's whole subtree into its row: requests, tokens, and time span. */
+function foldSubtree(root: SessionListEntry, all: ReadonlyMap<string, SessionListEntry>): SessionListEntry {
+  const descendants = descendantsOfList(all, root.id);
+  if (descendants.length === 0) return root;
+  const tokens = { ...root.tokens };
+  let requests = root.requests;
+  for (const descendant of descendants) {
+    requests += descendant.requests;
+    tokens.input += descendant.tokens.input;
+    tokens.output += descendant.tokens.output;
+    tokens.cacheRead += descendant.tokens.cacheRead;
+    tokens.cacheWrite += descendant.tokens.cacheWrite;
+    tokens.reasoning += descendant.tokens.reasoning;
+  }
+  return {
+    ...root,
+    requests,
+    tokens,
+    subagentCount: descendants.length,
+    firstUsage: minOf([root, ...descendants], (entry) => entry.firstUsage),
+    lastUsage: maxOf([root, ...descendants], (entry) => entry.lastUsage),
+  };
 }
 
 /** Sort key for a project row: its newest session. */

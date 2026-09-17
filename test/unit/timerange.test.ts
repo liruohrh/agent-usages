@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { inRange, parseInstant, presetRange, resolveRange } from '../src/timerange.ts';
+import { inRange, parseInstant, presetRange, resolveRange } from '../../src/timerange.ts';
 
 /** A fixed local reference instant: 2026-09-17 15:30:00 local time. */
 const NOW = new Date(2026, 8, 17, 15, 30, 0, 0);

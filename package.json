@@ -1,14 +1,19 @@
 {
-  "name": "dsh-usage",
-  "version": "0.1.0",
+  "name": "@agent/usages",
+  "version": "0.2.0",
   "private": true,
-  "description": "计算 DeepSeek Harness (DSH) 会话的 token 消耗与费用：按全部 / 项目 / 会话维度统计，支持时间范围与 DeepSeek 分时段(峰谷)定价",
+  "description": "统计 coding agent 的 token 消耗与费用：agent 与模型价格两个维度均可扩展，支持项目/会话/子代理维度、时间范围与分时段峰谷定价",
   "type": "module",
   "engines": {
     "node": ">=22.6"
   },
   "bin": {
-    "dsh-usage": "./bin/dsh-usage.js"
+    "agent-usages": "./bin/agent-usages.js"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./agents": "./src/agents/index.ts",
+    "./pricing": "./src/pricing/index.ts"
   },
   "scripts": {
     "cli": "node src/cli.ts",

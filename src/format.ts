@@ -1,54 +1,16 @@
 /**
- * Presentation layer: render {@link UsageResult} and {@link SessionListResult}
- * as either aligned terminal tables or stable JSON.
+ * Presentation layer: render reports as aligned terminal tables or stable JSON.
  *
  * Table layout accounts for East-Asian wide characters so Chinese titles do not
- * shear the columns.
+ * shear the columns. Cost rows are generated from the pricing provider's own
+ * component list, so a vendor that bills something unusual still gets a labelled
+ * line instead of an empty cell.
  */
 
-import type { SessionListResult, UsageResult, ModelBreakdown } from './report.ts';
-import { formatInstant, PricingEngine } from './pricing.ts';
-import type { PricingPeriod } from './pricing-data.ts';
-import { formatDecimal, toNumber } from './money.ts';
-import type { CostTotals, TokenTotals } from './types.ts';
-
-/** Currency symbols for the codes this CLI is likely to see. */
-const CURRENCY_SYMBOLS: Readonly<Record<string, string>> = {
-  CNY: '¥',
-  RMB: '¥',
-  USD: '$',
-  EUR: '€',
-  JPY: '¥',
-  GBP: '£',
-  HKD: 'HK$',
-};
-
-/**
- * Render an amount with its currency symbol and thousands separators.
- *
- * The caller passes the exact decimal string the accounting layer produced, so
- * the rendered figure matches the JSON figure digit for digit.
- */
-function money(amount: string, currency: string): string {
-  const symbol = CURRENCY_SYMBOLS[currency.toUpperCase()] ?? `${currency.toUpperCase()} `;
-  const [whole = '0', fraction = ''] = amount.split('.');
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  const decimals = fraction.padEnd(2, '0').replace(/0+$/, '').padEnd(2, '0');
-  return `${symbol}${grouped}.${decimals}`;
-}
-
-/** Render an integer with thousands separators. */
-function count(value: number): string {
-  return value.toLocaleString('en-US');
-}
-
-/** Compact a large token count for dense columns. */
-function compact(value: number): string {
-  if (value < 1000) return String(value);
-  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}K`;
-  if (value < 1_000_000_000) return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 2 : 1)}M`;
-  return `${(value / 1_000_000_000).toFixed(2)}B`;
-}
+import { totalTokens } from './core/buckets.ts';
+import type { CostTotals, TokenTotals } from './core/types.ts';
+import type { PricingEngine, RateComponent } from './pricing/index.ts';
+import type { SessionListResult, UsageResult } from './report.ts';
 
 /** Display width of a string, counting East-Asian wide characters as two cells. */
 function displayWidth(text: string): number {
@@ -74,10 +36,9 @@ function isWide(code: number): boolean {
   );
 }
 
-/** Pad a string to a display width, accounting for wide characters. */
+/** Pad a string to a display width. */
 function pad(text: string, width: number, align: 'left' | 'right' = 'left'): string {
-  const current = displayWidth(text);
-  const fill = Math.max(0, width - current);
+  const fill = Math.max(0, width - displayWidth(text));
   return align === 'left' ? text + ' '.repeat(fill) : ' '.repeat(fill) + text;
 }
 
@@ -99,102 +60,51 @@ function clip(text: string, width: number): string {
 function table(headers: readonly string[], rows: readonly (readonly string[])[], aligns: readonly ('left' | 'right')[]): string {
   const widths = headers.map((header, index) => {
     let width = displayWidth(header);
-    for (const row of rows) {
-      const cell = row[index] ?? '';
-      width = Math.max(width, displayWidth(cell));
-    }
+    for (const row of rows) width = Math.max(width, displayWidth(row[index] ?? ''));
     return width;
   });
   const renderRow = (row: readonly string[]): string =>
-    row
-      .map((cell, index) => pad(clip(cell, Math.max(widths[index] ?? 0, 3)), widths[index] ?? 0, aligns[index] ?? 'left'))
-      .join('  ')
-      .trimEnd();
-  const separator = widths.map((width) => '─'.repeat(width)).join('  ');
-  return [renderRow(headers), separator, ...rows.map(renderRow)].join('\n');
+    row.map((cell, index) => pad(clip(cell, Math.max(widths[index] ?? 0, 3)), widths[index] ?? 0, aligns[index] ?? 'left')).join('  ').trimEnd();
+  return [renderRow(headers), widths.map((width) => '─'.repeat(width)).join('  '), ...rows.map(renderRow)].join('\n');
 }
 
-/** Invert `formatInstant` for the day boundary; used for `YYYY-MM-DD` labels. */
-function dayLabel(instant: number | null, timeZone?: string): string {
+/** Render an integer with thousands separators. */
+function count(value: number): string {
+  return value.toLocaleString('en-US');
+}
+
+/** Compact a large token count for dense columns. */
+function compact(value: number): string {
+  if (value < 1000) return String(value);
+  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}K`;
+  if (value < 1_000_000_000) return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 2 : 1)}M`;
+  return `${(value / 1_000_000_000).toFixed(2)}B`;
+}
+
+/** Render an exact decimal amount with a currency symbol. */
+function money(amount: string, symbol: string): string {
+  const [whole = '0', fraction = ''] = amount.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${symbol}${grouped}.${fraction.padEnd(2, '0').replace(/0+$/, '').padEnd(2, '0')}`;
+}
+
+/** `YYYY-MM-DD` in local time, for dense columns. */
+function dayLabel(instant: number | null): string {
   if (instant === null || !Number.isFinite(instant)) return '—';
-  if (timeZone === undefined) {
-    const date = new Date(instant);
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-  }
-  return formatInstant(instant, timeZone).slice(0, 10);
+  const date = new Date(instant);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-/** Render the token/cost summary block shared by every report. */
-function summaryLines(
-  requests: number,
-  tokens: TokenTotals,
-  cost: CostTotals,
-  currency: string,
-  rate: number,
-  indent = '',
-): string[] {
-  const billedInput = cost.cacheMissInputTokens;
-  const lines = [
-    `${indent}请求数        ${count(requests)}`,
-    `${indent}输入(缓存未命中) ${count(tokens.input)}${tokens.cacheWrite > 0 ? `  (另有缓存写入 ${count(tokens.cacheWrite)})` : ''}`,
-    `${indent}输入(缓存命中)   ${count(tokens.cacheRead)}`,
-    `${indent}输出          ${count(tokens.output)}${tokens.reasoning > 0 ? `  (含推理 ${count(tokens.reasoning)})` : ''}`,
-    `${indent}计费输入合计    ${count(billedInput)}`,
-    `${indent}Token 总计     ${count(tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite)}`,
-    `${indent}费用          ${money(cost.total, currency)}` +
-      (rate === 1 ? '' : `  (按 1 CNY = ${rate} ${currency} 折算)`),
-  ];
-  return lines;
+/** ISO timestamp, or `null`. */
+function iso(instant: number | null): string | null {
+  return instant === null || !Number.isFinite(instant) ? null : new Date(instant).toISOString();
 }
 
-/** Render a per-model breakdown table. */
-function modelTable(models: readonly ModelBreakdown[], currency: string): string {
-  const rows = models.map((model) => [
-    model.model,
-    count(model.requests),
-    compact(model.tokens.input),
-    compact(model.tokens.cacheRead),
-    compact(model.tokens.output),
-    money(model.cost.total, currency),
-  ]);
-  return table(
-    ['模型', '请求', '未命中输入', '缓存命中', '输出', '费用'],
-    rows,
-    ['left', 'right', 'right', 'right', 'right', 'right'],
-  );
-}
-
-/**
- * Render the pricing-period breakdown.
- *
- * A band summary carries only a period id, so the period is located across
- * every schedule — a project billed on `deepseek-v4-pro` must show its own
- * validity window rather than the Flash one.
- */
-function bandLines(bands: UsageResult['bands'], engine: PricingEngine): string[] {
-  if (bands.length === 0) return [];
-  const byId = new Map<string, PricingPeriod>();
-  for (const schedule of engine.schedules) {
-    for (const period of schedule.periods) {
-      if (!byId.has(period.id)) byId.set(period.id, period);
-    }
-  }
-  const lines = ['计价区间:'];
-  for (const band of bands) {
-    const period = byId.get(band.periodId);
-    const window = period === undefined ? '' : `（${engine.describeWindow(period)}）`;
-    const note = RESOLUTION_NOTES[band.resolution] ?? '';
-    lines.push(`  - ${band.periodLabel} / ${bandName(band.band)}：${count(band.requests)} 次请求${window}${note}`);
-  }
-  return lines;
-}
-
-/** Chinese label for a band. */
-function bandName(band: string): string {
-  if (band === 'peak') return '高峰时段';
-  if (band === 'off-peak') return '空闲时段';
-  return '统一价格';
-}
+const TIER_LABELS: Readonly<Record<string, string>> = {
+  peak: '高峰时段',
+  'off-peak': '空闲时段',
+  flat: '统一价格',
+};
 
 /** Explanation shown when a period had to be chosen by fallback. */
 const RESOLUTION_NOTES: Readonly<Record<string, string>> = {
@@ -204,66 +114,183 @@ const RESOLUTION_NOTES: Readonly<Record<string, string>> = {
   'fallback-default': ' ← 该模型无价格表，按默认模型价格计算',
 };
 
+/** How a provider's billing basis reads in a breakdown. */
+function basisLabel(engine: PricingEngine, component: RateComponent): string {
+  return component.label.length > 0 ? component.label : engine.describeBasis(component.basis);
+}
+
+/** Render the token totals block. */
+function tokenLines(requests: number, tokens: TokenTotals): string[] {
+  return [
+    `请求数            ${count(requests)}`,
+    `输入(缓存未命中)   ${count(tokens.input)}${tokens.cacheWrite > 0 ? `  (另有缓存写入 ${count(tokens.cacheWrite)})` : ''}`,
+    `输入(缓存命中)     ${count(tokens.cacheRead)}`,
+    `输出              ${count(tokens.output)}${tokens.reasoning > 0 ? `  (含推理 ${count(tokens.reasoning)})` : ''}`,
+    `Token 总计         ${count(totalTokens(tokens))}`,
+  ];
+}
+
+/**
+ * Render one line per pricing component.
+ *
+ * The component list is the provider's, not this tool's, so a vendor that bills
+ * a bucket nobody else does still gets a labelled line.
+ */
+function costLines(
+  cost: CostTotals,
+  components: Map<string, { component: RateComponent; tokens: number }>,
+  symbol: string,
+  currency: string,
+  currencyRate: number,
+): string[] {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const [id, info] of components) {
+    const amount = amountForComponent(id, cost);
+    if (amount === undefined) continue;
+    seen.add(id);
+    lines.push(`  ${clip(basisLabelText(info.component), 18).padEnd(18)} ${count(info.tokens)} tokens → ${money(amount, symbol)}`);
+  }
+  for (const [id, amount] of componentAmounts(cost)) {
+    if (seen.has(id)) continue;
+    lines.push(`  ${clip(id, 18).padEnd(18)} → ${money(amount, symbol)}`);
+  }
+  lines.push(
+    `  ${'费用合计'.padEnd(18)} ${money(cost.total, symbol)}${currencyRate === 1 ? '' : `　(按 1:${currencyRate} 折算为 ${currency}，原始计价货币见 price)`}`,
+  );
+  return lines;
+}
+
+/** Component label without engine access, for the fallback path. */
+function basisLabelText(component: RateComponent): string {
+  return component.label.length > 0 ? component.label : component.id;
+}
+
+/** The amount for a known component id. */
+function amountForComponent(id: string, cost: CostTotals): string | undefined {
+  switch (id) {
+    case 'input-hit':
+      return cost.cacheHitInputCost;
+    case 'input-miss':
+      return cost.cacheMissInputCost;
+    case 'output':
+      return cost.outputCost;
+    case 'input-write':
+      return cost.cacheWriteInputCost;
+    default:
+      return undefined;
+  }
+}
+
+/** Every component amount a cost total carries. */
+function componentAmounts(cost: CostTotals): [string, string][] {
+  return [
+    ['input-hit', cost.cacheHitInputCost],
+    ['input-miss', cost.cacheMissInputCost],
+    ['output', cost.outputCost],
+    ...(cost.cacheWriteInputCost === '0.0000' ? [] : ([['input-write', cost.cacheWriteInputCost]] as [string, string][])),
+  ];
+}
+
+/** Render the pricing-band breakdown. */
+function bandLines(result: UsageResult, engine: PricingEngine): string[] {
+  if (result.bands.length === 0) return [];
+  const byId = new Map<string, { window: string }>();
+  for (const price of engine.provider.models()) {
+    for (const period of price.periods) {
+      if (!byId.has(period.id)) byId.set(period.id, { window: engine.describeWindow(period) });
+    }
+  }
+  const lines = ['计价区间:'];
+  for (const band of result.bands) {
+    const window = byId.get(band.periodId);
+    const where = window === undefined ? '' : `（${window.window}）`;
+    lines.push(
+      `  - ${band.periodLabel} / ${TIER_LABELS[band.tier] ?? band.tier}：${count(band.requests)} 次请求${where}${RESOLUTION_NOTES[band.resolution] ?? ''}`,
+    );
+  }
+  return lines;
+}
+
+/** Render a per-model table. */
+function modelTable(result: UsageResult, symbol: string): string {
+  return table(
+    ['模型', '请求', '未命中输入', '缓存命中', '输出', '费用'],
+    result.models.map((model) => [
+      model.model,
+      count(model.requests),
+      compact(model.tokens.input),
+      compact(model.tokens.cacheRead),
+      compact(model.tokens.output),
+      money(model.cost.total, symbol),
+    ]),
+    ['left', 'right', 'right', 'right', 'right', 'right'],
+  );
+}
+
 /**
  * Render a usage result for the terminal.
  * @param result - the aggregated result.
- * @param engine - pricing engine used for period descriptions.
+ * @param engine - pricing engine, for period descriptions and component labels.
+ * @param symbol - currency symbol to print.
  * @returns the text to print.
  */
-export function formatUsageReport(result: UsageResult, engine: PricingEngine): string {
+export function formatUsageReport(
+  result: UsageResult,
+  engine: PricingEngine,
+  symbol: string,
+  agentLabel?: string,
+): string {
   const sections: string[] = [];
   sections.push(
     [
-      'DSH Token 用量统计',
-      `维度      ${DIMENSION_LABELS[result.dimension]}`,
+      'Agent 用量统计',
+      `Agent     ${agentLabel === undefined ? result.agent : `${result.agent}（${agentLabel}）`}`,
+      `数据目录  ${result.source}`,
+      `维度      ${DIMENSION_LABELS[result.dimension] ?? result.dimension}`,
       `时间范围  ${result.range.label}`,
-      `计价货币  ${result.currency}${result.currencyRate === 1 ? '' : `（1 CNY = ${result.currencyRate} ${result.currency}）`}`,
+      `计价来源  ${engine.provider.label}（${result.currency}${result.currencyRate === 1 ? '' : `，1:${result.currencyRate}`}）`,
     ].join('\n'),
   );
 
-  const scopeLines: string[] = [];
-  if (result.subagents !== undefined) {
-    if (result.subagents.split) {
-      scopeLines.push(
-        `会话口径  不含子代理（${count(result.subagents.rows)} 个子代理会话单独列出，父会话为其自身用量）`,
-      );
-    } else {
-      scopeLines.push(
-        result.subagents.rows > 0
-          ? `会话口径  含子代理（${count(result.subagents.rows)} 个子代理会话已并入其父会话，另计 ${money(result.subagents.cost.total, result.currency)}）`
-          : '会话口径  含子代理',
-      );
-    }
+  const scope: string[] = [];
+  if (result.subagents.split) {
+    scope.push(`会话口径  不含子代理（${count(result.subagents.rows)} 个子代理会话单独列出，父会话为其自身用量）`);
+  } else {
+    scope.push(
+      result.subagents.rows > 0
+        ? `会话口径  含子代理（${count(result.subagents.rows)} 个子代理会话已并入其父会话，另计 ${money(result.subagents.cost.total, symbol)}）`
+        : '会话口径  含子代理',
+    );
   }
+  sections.push(['总量:', ...scope, ...tokenLines(result.requests, result.tokens)].join('\n'));
+
   sections.push(
-    ['总量:', ...scopeLines, ...summaryLines(result.requests, result.tokens, result.cost, result.currency, result.currencyRate)].join('\n'),
+    ['费用明细:', ...costLines(result.cost, result.components, symbol, result.currency, result.currencyRate)].join('\n'),
   );
 
-  const bands = bandLines(result.bands, engine);
+  const bands = bandLines(result, engine);
   if (bands.length > 0) sections.push(bands.join('\n'));
 
-  if (result.models.length > 0) {
-    sections.push(['模型明细:', modelTable(result.models, result.currency)].join('\n'));
-  }
+  if (result.models.length > 0) sections.push(['模型明细:', modelTable(result, symbol)].join('\n'));
 
   if (result.dimension === 'project' || result.dimension === 'session') {
-    const rows = result.projects.map((project) => [
-      project.name,
-      project.path,
-      count(project.activeSessions),
-      project.subagentSessions > 0 ? count(project.subagentSessions) : '—',
-      count(project.requests),
-      compact(project.tokens.input),
-      compact(project.tokens.cacheRead),
-      compact(project.tokens.output),
-      money(project.cost.total, result.currency),
-    ]);
     sections.push(
       [
         '按项目:',
         table(
           ['项目', '路径', '会话', '子代理', '请求', '未命中输入', '缓存命中', '输出', '费用'],
-          rows,
+          result.projects.map((project) => [
+            project.name,
+            project.path,
+            count(project.activeSessions),
+            project.subagentSessions > 0 ? count(project.subagentSessions) : '—',
+            count(project.requests),
+            compact(project.tokens.input),
+            compact(project.tokens.cacheRead),
+            compact(project.tokens.output),
+            money(project.cost.total, symbol),
+          ]),
           ['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
         ),
       ].join('\n'),
@@ -274,18 +301,17 @@ export function formatUsageReport(result: UsageResult, engine: PricingEngine): s
     const rows: string[][] = [];
     for (const project of result.projects) {
       for (const session of project.sessionReports ?? []) {
-        const isSub = session.isSubagent;
+        const sub = session.isSubagent;
         rows.push([
-          // Subagent rows are prefixed so the tree is readable in a flat table.
-          `${isSub ? '  ↳ ' : ''}${project.name}`,
-          `${isSub ? '  ' : ''}${session.title ?? '(无标题)'}`,
-          session.sessionId,
-          isSub ? '—' : session.subagentCount > 0 ? count(session.subagentCount) : '—',
+          `${sub ? '  ↳ ' : ''}${project.name}`,
+          `${sub ? '  ' : ''}${session.title ?? '(无标题)'}`,
+          session.id,
+          sub ? '—' : session.subagentCount > 0 ? count(session.subagentCount) : '—',
           count(session.requests),
           compact(session.tokens.input),
           compact(session.tokens.cacheRead),
           compact(session.tokens.output),
-          money(session.cost.total, result.currency),
+          money(session.cost.total, symbol),
         ]);
       }
     }
@@ -320,30 +346,36 @@ const DIMENSION_LABELS: Readonly<Record<string, string>> = {
  * @param result - the inventory.
  * @returns the text to print.
  */
-export function formatSessionList(result: SessionListResult): string {
+export function formatSessionList(result: SessionListResult, agentLabel?: string): string {
   const sections: string[] = [];
-  sections.push(['DSH 会话列表', `项目数 ${count(result.projects.length)}　会话数 ${count(result.totalSessions)}`].join('\n'));
+  sections.push(
+    [
+      'Agent 会话列表',
+      `Agent     ${agentLabel === undefined ? result.agent : `${result.agent}（${agentLabel}）`}`,
+      `数据目录  ${result.source}`,
+      `项目数 ${count(result.projects.length)}　会话数 ${count(result.totalSessions)}`,
+    ].join('\n'),
+  );
   for (const project of result.projects) {
     sections.push(
       [
         `▸ ${project.name}  ${project.path}`,
-        `  会话 ${count(project.sessions.length)}　最近 ${dayLabel(project.lastUsage)}　最早 ${dayLabel(project.firstUsage)}`,
+        `  ${project.sessionCount === project.sessions.length ? `会话 ${count(project.sessions.length)}` : `会话 ${count(project.sessionCount)}（显示 ${count(project.sessions.length)} 行，子代理已并入父会话）`}　最近 ${dayLabel(project.lastUsage)}　最早 ${dayLabel(project.firstUsage)}`,
       ].join('\n'),
     );
-    const rows = project.sessions.map((session) => [
-      `${session.nested ? '  ↳ ' : ''}${session.sessionId}`,
-      `${session.nested ? '  ' : ''}${session.title ?? '(无标题)'}`,
-      dayLabel(session.firstUsage),
-      dayLabel(session.lastUsage),
-      session.subagentCount > 0 && !session.isSubagent ? count(session.subagentCount) : '—',
-      count(session.requests),
-      compact(session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite),
-      compact(session.tokens.output),
-    ]);
     sections.push(
       table(
         ['会话 ID', '标题', '首次', '最近', '子代理', '请求', '输入', '输出'],
-        rows,
+        project.sessions.map((session) => [
+          `${session.nested ? '  ↳ ' : ''}${session.id}`,
+          `${session.nested ? '  ' : ''}${session.title ?? '(无标题)'}`,
+          dayLabel(session.firstUsage),
+          dayLabel(session.lastUsage),
+          session.subagentCount > 0 && !session.isSubagent ? count(session.subagentCount) : '—',
+          count(session.requests),
+          compact(totalTokens(session.tokens) - session.tokens.output),
+          compact(session.tokens.output),
+        ]),
         ['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right'],
       ),
     );
@@ -357,11 +389,14 @@ export function formatSessionList(result: SessionListResult): string {
 /**
  * Serialise a usage result as JSON-ready data.
  * @param result - the aggregated result.
- * @returns a plain object with ISO timestamps added alongside epoch numbers.
+ * @param engine - pricing engine, for component labels.
+ * @returns a plain object with ISO timestamps beside every epoch value.
  */
-export function usageToJson(result: UsageResult): unknown {
-  const iso = (instant: number | null): string | null => (instant === null || !Number.isFinite(instant) ? null : new Date(instant).toISOString());
+export function usageToJson(result: UsageResult, engine: PricingEngine): unknown {
   return {
+    agent: result.agent,
+    source: result.source,
+    pricingProvider: result.pricingProvider,
     dimension: result.dimension,
     range: {
       label: result.range.label,
@@ -372,16 +407,33 @@ export function usageToJson(result: UsageResult): unknown {
     },
     currency: result.currency,
     currencyRate: result.currencyRate,
-    subagents: result.subagents,
+    subagents: {
+      split: result.subagents.split,
+      rows: result.subagents.rows,
+      parents: result.subagents.parents,
+      requests: result.subagents.requests,
+      tokens: result.subagents.tokens,
+      cost: result.subagents.cost,
+    },
     totals: {
       requests: result.requests,
+      unpriced: result.unpriced,
       tokens: result.tokens,
       cost: result.cost,
     },
+    costComponents: [...result.components].map(([id, info]) => ({
+      id,
+      label: basisLabel(engine, info.component),
+      basis: info.component.basis,
+      rate: info.component.rate,
+      per: info.component.per,
+      tokens: info.tokens,
+      amount: amountForComponent(id, result.cost) ?? result.cost.total,
+    })),
     pricingBands: result.bands,
     models: result.models,
     projects: result.projects.map((project) => ({
-      workspaceId: project.workspaceId,
+      id: project.id,
       name: project.name,
       path: project.path,
       sessions: project.sessions,
@@ -400,10 +452,10 @@ export function usageToJson(result: UsageResult): unknown {
         ? {}
         : {
             sessionReports: project.sessionReports.map((session) => ({
-              sessionId: session.sessionId,
+              id: session.id,
               title: session.title,
+              projectId: session.projectId,
               projectName: session.projectName,
-              workspaceId: session.workspaceId,
               cwd: session.cwd,
               createdAt: session.createdAt,
               createdAtIso: iso(session.createdAt),
@@ -413,7 +465,7 @@ export function usageToJson(result: UsageResult): unknown {
               lastUsageIso: iso(session.lastUsage),
               isSubagent: session.isSubagent,
               subagentCount: session.subagentCount,
-              parentSessionId: session.parentSessionId,
+              parentId: session.parentId,
               requests: session.requests,
               tokens: session.tokens,
               cost: session.cost,
@@ -430,25 +482,28 @@ export function usageToJson(result: UsageResult): unknown {
 /**
  * Serialise the session inventory as JSON-ready data.
  * @param result - the inventory.
- * @returns a plain object with ISO timestamps added alongside epoch numbers.
+ * @returns a plain object with ISO timestamps beside every epoch value.
  */
 export function sessionListToJson(result: SessionListResult): unknown {
-  const iso = (instant: number | null): string | null => (instant === null || !Number.isFinite(instant) ? null : new Date(instant).toISOString());
   return {
+    agent: result.agent,
+    source: result.source,
     totalProjects: result.projects.length,
     totalSessions: result.totalSessions,
     projects: result.projects.map((project) => ({
-      workspaceId: project.workspaceId,
+      id: project.id,
       name: project.name,
       path: project.path,
+      sessionCount: project.sessionCount,
+      listRows: project.sessions.length,
       firstUsage: project.firstUsage,
       firstUsageIso: iso(project.firstUsage),
       lastUsage: project.lastUsage,
       lastUsageIso: iso(project.lastUsage),
       sessions: project.sessions.map((session) => ({
-        sessionId: session.sessionId,
+        id: session.id,
         title: session.title,
-        workspaceId: session.workspaceId,
+        projectId: session.projectId,
         projectName: session.projectName,
         cwd: session.cwd,
         createdAt: session.createdAt,
@@ -460,8 +515,8 @@ export function sessionListToJson(result: SessionListResult): unknown {
         requests: session.requests,
         tokens: session.tokens,
         isSubagent: session.isSubagent,
-        delegationDepth: session.delegationDepth,
-        parentSessionId: session.parentSessionId,
+        depth: session.depth,
+        parentId: session.parentId,
         subagentCount: session.subagentCount,
         subagentRequests: session.subagentRequests,
         nested: session.nested,

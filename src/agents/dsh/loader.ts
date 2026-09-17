@@ -1,7 +1,9 @@
 /**
- * Reader for the DSH on-disk usage stores.
+ * The DSH agent adapter.
  *
- * Three files under the DSH home directory matter:
+ * Reads DeepSeek Harness' on-disk usage stores and converts them into the
+ * agent-neutral {@link UsageDataset}. Three file families under the DSH home
+ * directory matter:
  *
  * - `storages/all_usage_ledger_*.json` — the durable per-request usage ledger.
  *   Each shard is an independent key/value unit and a session lives in exactly
@@ -13,60 +15,23 @@
  *   creation time, and the harness' own token totals, which are used only to
  *   cross-check the ledger.
  *
- * Nothing here writes to the DSH home; the loader is strictly read-only.
+ * Nothing here writes to the DSH home; the adapter is strictly read-only.
  */
 
 import { readFile, readdir } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
+import { emptyBuckets } from '../../core/buckets.ts';
 import type {
+  DatasetStats,
   ProjectRecord,
   SessionRecord,
   TokenBuckets,
   UsageDataset,
-  UsageEntry,
-} from './types.ts';
+  UsageRecord,
+} from '../../core/types.ts';
+import type { AdapterOptions, AgentAdapter } from '../contract.ts';
 import { readSessionLogIndex, type SessionLogInfo } from './sessionlog.ts';
-
-/** Buckets with every counter at zero. */
-export function emptyBuckets(): TokenBuckets {
-  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
-}
-
-/** Options accepted by {@link loadDataset}. */
-export interface LoadOptions {
-  /** Explicit DSH home; defaults to {@link resolveDshHome}. */
-  home?: string;
-}
-
-/**
- * Resolve the DSH home directory the same way the harness does.
- * @param env - environment to read; defaults to `process.env`.
- * @param platform - platform name, used only for the Windows default; defaults to `process.platform`.
- * @returns the absolute DSH home path.
- * @throws when `DSH_HOME` is set but not absolute.
- */
-export function resolveDshHome(
-  env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
-): string {
-  const configured = env['DSH_HOME']?.trim();
-  if (configured !== undefined && configured.length > 0) {
-    if (!isAbsolute(configured)) {
-      throw new Error(`DSH_HOME must be an absolute path, got ${JSON.stringify(configured)}`);
-    }
-    return configured;
-  }
-  const home = env['HOME'] ?? env['USERPROFILE'] ?? '';
-  if (home.length === 0) {
-    throw new Error('cannot determine the home directory: neither HOME nor USERPROFILE is set');
-  }
-  if (platform === 'win32') {
-    const appData = env['APPDATA'];
-    return appData !== undefined && appData.length > 0 ? join(appData, 'dsh') : join(home, '.dsh');
-  }
-  return join(home, '.dsh');
-}
 
 /** Narrow an unknown JSON value to a record. */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -103,29 +68,31 @@ function parseBuckets(raw: unknown): TokenBuckets {
   };
 }
 
-/** Parse one ledger `usage[]` element, or `undefined` when it is unusable. */
-function parseEntry(raw: unknown): UsageEntry | undefined {
+/**
+ * Parse one ledger `usage[]` element, or `undefined` when it is unusable.
+ *
+ * The ledger names the model twice — a provider-qualified label and the bare
+ * routed model — and the bare one is what a price list keys on.
+ */
+function parseRecord(raw: unknown): UsageRecord | undefined {
   const record = asRecord(raw);
   if (record === undefined) return undefined;
-  const key = asString(record['key']);
+  const id = asString(record['key']);
   const time = asNumber(record['time']);
-  if (key === undefined || time === undefined) return undefined;
+  if (id === undefined || time === undefined) return undefined;
   const identity = asRecord(record['identity']);
-  const modelId =
+  const modelLabel =
     asString(record['modelId']) ??
     asString(identity?.['label']) ??
     asString(identity?.['actualModel']) ??
     asString(identity?.['requestedModel']) ??
     'unknown';
-  const model =
-    asString(identity?.['actualModel']) ??
-    asString(identity?.['requestedModel']) ??
-    modelId;
+  const model = asString(identity?.['actualModel']) ?? asString(identity?.['requestedModel']) ?? modelLabel;
   return {
-    key,
+    id,
     seq: asCount(record['seq']),
     time,
-    modelId,
+    modelLabel,
     model,
     turn: asCount(record['turn']),
     step: asCount(record['step']),
@@ -225,12 +192,12 @@ async function readLedger(
   home: string,
   warnings: string[],
 ): Promise<{
-  entries: Map<string, UsageEntry[]>;
+  records: Map<string, UsageRecord[]>;
   workspaceIds: Map<string, string>;
   sourceCwds: Map<string, string>;
   shards: string[];
 }> {
-  const entries = new Map<string, UsageEntry[]>();
+  const records = new Map<string, UsageRecord[]>();
   const workspaceIds = new Map<string, string>();
   const sourceCwds = new Map<string, string>();
   const shards: string[] = [];
@@ -270,31 +237,31 @@ async function readLedger(
       const sourceCwd = asString(record['sourceCwd']);
       if (sourceCwd !== undefined) sourceCwds.set(sessionId, sourceCwd);
       const usage = Array.isArray(record['usage']) ? record['usage'] : [];
-      const parsedEntries: UsageEntry[] = [];
+      const parsedRecords: UsageRecord[] = [];
       const seenKeys = new Set<string>();
       for (const rawEntry of usage) {
-        const entry = parseEntry(rawEntry);
+        const entry = parseRecord(rawEntry);
         if (entry === undefined) continue;
-        if (seenKeys.has(entry.key)) {
-          warnings.push(`会话 ${sessionId} 的账本分片 ${name} 出现重复记录 ${entry.key}，已忽略后一条`);
+        if (seenKeys.has(entry.id)) {
+          warnings.push(`会话 ${sessionId} 的账本分片 ${name} 出现重复记录 ${entry.id}，已忽略后一条`);
           continue;
         }
-        seenKeys.add(entry.key);
-        parsedEntries.push(entry);
+        seenKeys.add(entry.id);
+        parsedRecords.push(entry);
       }
-      const existing = entries.get(sessionId);
+      const existing = records.get(sessionId);
       if (existing === undefined) {
-        entries.set(sessionId, parsedEntries);
+        records.set(sessionId, parsedRecords);
       } else {
         // Distinct shards own distinct sessions. A collision means the shard
         // layout changed, so records are de-duplicated by key rather than
         // summed outright — double-billing the user would be worse than a
         // missing record, and the warning tells them to check.
-        const known = new Set(existing.map((entry) => entry.key));
+        const known = new Set(existing.map((entry) => entry.id));
         let added = 0;
-        for (const entry of parsedEntries) {
-          if (known.has(entry.key)) continue;
-          known.add(entry.key);
+        for (const entry of parsedRecords) {
+          if (known.has(entry.id)) continue;
+          known.add(entry.id);
           existing.push(entry);
           added += 1;
         }
@@ -304,7 +271,7 @@ async function readLedger(
       }
     }
   }
-  return { entries, workspaceIds, sourceCwds, shards };
+  return { records, workspaceIds, sourceCwds, shards };
 }
 
 /**
@@ -323,35 +290,8 @@ function isPlaceholderWorkspaceId(workspaceId: string): boolean {
 }
 
 /** Derive a project key for sessions the workspace registry does not list. */
-function syntheticWorkspaceId(cwd: string | undefined): string {
+function syntheticProjectKey(cwd: string | undefined): string {
   return `path:${cwd ?? '<unknown>'}`;
-}
-
-/**
- * Delegation facts for one session, resolved through the log index.
- *
- * The ledger keys a session by the bare UUID while the log header (and the
- * directories on disk) carry the `session-` prefix, so a parent id is run back
- * through the index — which holds both spellings — to land on the same spelling
- * the ledger used.
- */
-function delegationOf(
-  sessionId: string,
-  log: SessionLogInfo | undefined,
-  byId: ReadonlyMap<string, SessionLogInfo>,
-): Pick<SessionRecord, 'parentSessionId' | 'delegationDepth' | 'isSubagent' | 'subagentIds' | 'parentKnown'> {
-  const rawParent = log?.parentSessionId ?? null;
-  const resolvedParent = rawParent === null ? null : (byId.get(rawParent)?.sessionId ?? rawParent);
-  // `delegationDepth` is the harness' own statement of nesting; a session with a
-  // parent is a subagent even if the depth field is missing or zero.
-  const isSubagent = resolvedParent !== null || (log !== undefined && log.delegationDepth > 0);
-  return {
-    parentSessionId: isSubagent ? resolvedParent : null,
-    delegationDepth: log?.delegationDepth ?? (isSubagent ? 1 : 0),
-    isSubagent,
-    subagentIds: [],
-    parentKnown: resolvedParent !== null && byId.has(resolvedParent),
-  };
 }
 
 /** Basename of a path, tolerating Windows separators. */
@@ -368,7 +308,7 @@ function basenameOf(path: string): string {
  * the registry no longer lists (a deleted project) is not silently dropped —
  * the path index gets a chance first, and the id is kept only as a last resort.
  */
-function resolveWorkspaceId(
+function resolveProjectKey(
   ledgerWorkspaceId: string | undefined,
   cwd: string | null,
   workspaceOf: ReadonlyMap<string, WorkspaceMeta>,
@@ -398,36 +338,39 @@ function resolveWorkspaceId(
 }
 
 /**
- * Load every project, session, and usage record from a DSH home directory.
- * @param options - loader options.
- * @returns the dataset, with sessions ordered by first usage ascending.
- * @throws when the storages directory or the usage ledger is missing.
+ * Read a DSH home directory into the agent-neutral dataset.
+ *
+ * @param options - resolved adapter options; `enrich: false` skips the per-session
+ *   logs, which is faster but loses titles for subagents and every delegation link.
+ * @returns the dataset, with each project's sessions ordered by first usage ascending.
+ * @throws when the data root is absent or carries no usage ledger.
  */
-export async function loadDataset(options: LoadOptions = {}): Promise<UsageDataset> {
-  const home = resolve(options.home ?? resolveDshHome());
+async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
+  const source = resolve(options.home ?? defaultSource(options.env ?? process.env) ?? '');
   const warnings: string[] = [];
+  if (options.home !== undefined && !isAbsolute(options.home)) {
+    throw new Error(`数据目录必须是绝对路径，收到 ${JSON.stringify(options.home)}`);
+  }
   const [ledger, workspaces, meta, logIndex] = await Promise.all([
-    readLedger(home, warnings),
-    readWorkspaces(home, warnings),
-    readSessionMeta(home, warnings),
-    readSessionLogIndex(home),
+    readLedger(source, warnings),
+    readWorkspaces(source, warnings),
+    readSessionMeta(source, warnings),
+    // A session log answers the delegation question that neither the ledger nor
+    // the projection cache records. An unreadable log degrades attribution to
+    // "top-level session" rather than failing the whole report.
+    options.enrich === false ? Promise.resolve({ byId: new Map<string, SessionLogInfo>(), warnings: [] }) : readSessionLogIndex(source),
   ]);
-  // A session log answers the delegation question that neither the ledger nor
-  // the projection cache records. An unreadable log degrades attribution to
-  // "top-level session" rather than failing the whole report.
   warnings.push(...logIndex.warnings);
 
   const workspaceOf = new Map<string, WorkspaceMeta>();
-  for (const workspace of workspaces) {
-    workspaceOf.set(workspace.workspaceId, workspace);
-  }
+  for (const workspace of workspaces) workspaceOf.set(workspace.workspaceId, workspace);
 
   // `workspace.json`'s per-workspace `sessionIds` list is NOT an authoritative
   // roster: it is populated by a one-time bootstrap plus later explicit
-  // attachments, and on this machine it names 7 sessions while the ledger holds
-  // 51. The registry's *paths* are reliable, and the session's own cwd is the
-  // real authority for ownership, so attribution goes through a path index —
-  // the same way the ledger writer itself attributes sessions.
+  // attachments, and on a real home it names a fraction of the ledger's
+  // sessions. The registry's *paths* are reliable, and the session's own cwd is
+  // the real authority for ownership, so attribution goes through a path index —
+  // exactly how the ledger writer itself attributes sessions.
   const workspaceByPath = new Map<string, WorkspaceMeta>();
   for (const workspace of workspaces) {
     if (workspace.path !== undefined && workspace.path.length > 0) {
@@ -436,78 +379,138 @@ export async function loadDataset(options: LoadOptions = {}): Promise<UsageDatas
   }
 
   const sessions: SessionRecord[] = [];
-  for (const [sessionId, entries] of ledger.entries) {
-    entries.sort((left, right) => (left.time === right.time ? left.seq - right.seq : left.time - right.time));
+  const projectOfSession = new Map<string, string>();
+  for (const [sessionId, records] of ledger.records) {
+    records.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
     const sessionMeta = meta.get(sessionId);
     const log = logIndex.byId.get(sessionId);
     const cwd = sessionMeta?.cwd ?? log?.cwd ?? ledger.sourceCwds.get(sessionId) ?? null;
-    sessions.push({
-      sessionId,
-      workspaceId: resolveWorkspaceId(ledger.workspaceIds.get(sessionId), cwd, workspaceOf, workspaceByPath, warnings),
+    const projectKey =
+      resolveProjectKey(ledger.workspaceIds.get(sessionId), cwd, workspaceOf, workspaceByPath, warnings) ??
+      syntheticProjectKey(cwd ?? undefined);
+    const session = buildSession(sessionId, records, {
       // Subagents are absent from the projection cache, so their log title is
       // the only human-readable label available.
       title: sessionMeta?.title ?? log?.title ?? null,
       cwd,
       createdAt: sessionMeta?.createdAt ?? log?.createdAt ?? null,
-      entries,
-      projectedTotals: sessionMeta?.projectedTotals ?? null,
-      ...delegationOf(sessionId, log, logIndex.byId),
+      log,
+      byId: logIndex.byId,
     });
+    if (sessionMeta?.projectedTotals !== undefined && sessionMeta.projectedTotals !== null) {
+      session.extra = { projectedTotals: sessionMeta.projectedTotals };
+    }
+    sessions.push(session);
+    projectOfSession.set(sessionId, projectKey);
   }
 
-  // Sessions the projection cache knows about but the ledger does not carry no
-  // billed requests; they are still listed by `session list` so the inventory
-  // matches what DSH shows.
+  // Sessions the projection cache knows about but the ledger does not carry made
+  // no billed requests; they are still listed so the inventory matches what DSH
+  // itself shows.
   for (const [sessionId, sessionMeta] of meta) {
-    if (ledger.entries.has(sessionId)) continue;
+    if (ledger.records.has(sessionId)) continue;
     const log = logIndex.byId.get(sessionId);
     const cwd = sessionMeta.cwd ?? log?.cwd ?? null;
-    sessions.push({
-      sessionId,
-      workspaceId: resolveWorkspaceId(undefined, cwd, workspaceOf, workspaceByPath, warnings),
+    const projectKey = resolveProjectKey(undefined, cwd, workspaceOf, workspaceByPath, warnings) ?? syntheticProjectKey(cwd ?? undefined);
+    const session = buildSession(sessionId, [], {
       title: sessionMeta.title ?? log?.title ?? null,
       cwd,
       createdAt: sessionMeta.createdAt ?? log?.createdAt ?? null,
-      entries: [],
-      projectedTotals: sessionMeta.projectedTotals ?? null,
-      ...delegationOf(sessionId, log, logIndex.byId),
+      log,
+      byId: logIndex.byId,
     });
+    if (sessionMeta.projectedTotals !== undefined && sessionMeta.projectedTotals !== null) {
+      session.extra = { projectedTotals: sessionMeta.projectedTotals };
+    }
+    sessions.push(session);
+    projectOfSession.set(sessionId, projectKey);
   }
 
   // Second pass: record each parent's children now that every session is known.
-  const byId = new Map(sessions.map((session) => [session.sessionId, session]));
+  const byId = new Map(sessions.map((session) => [session.id, session]));
   for (const session of sessions) {
-    if (session.parentSessionId === null) continue;
-    const parent = byId.get(session.parentSessionId);
+    if (session.parentId === null) continue;
+    const parent = byId.get(session.parentId);
     if (parent === undefined) continue;
-    parent.subagentIds.push(session.sessionId);
+    parent.childIds.push(session.id);
   }
-  for (const session of sessions) session.subagentIds.sort();
+  for (const session of sessions) session.childIds.sort();
 
-  const byWorkspace = new Map<string, SessionRecord[]>();
+  const byProject = new Map<string, SessionRecord[]>();
   for (const session of sessions) {
-    const key = session.workspaceId ?? syntheticWorkspaceId(session.cwd ?? undefined);
-    const bucket = byWorkspace.get(key);
-    if (bucket === undefined) byWorkspace.set(key, [session]);
+    const key = projectOfSession.get(session.id) ?? syntheticProjectKey(session.cwd ?? undefined);
+    const bucket = byProject.get(key);
+    if (bucket === undefined) byProject.set(key, [session]);
     else bucket.push(session);
   }
 
   const projects: ProjectRecord[] = [];
-  for (const [workspaceId, members] of byWorkspace) {
-    const declared = workspaceOf.get(workspaceId);
+  for (const [projectKey, members] of byProject) {
+    const declared = workspaceOf.get(projectKey);
     const firstCwd = members.find((session) => session.cwd !== null)?.cwd ?? undefined;
     const path = declared?.path ?? firstCwd ?? '';
     members.sort((left, right) => firstUsageOf(left) - firstUsageOf(right));
     projects.push({
-      workspaceId,
-      name: declared?.title ?? (path.length > 0 ? basenameOf(path) : workspaceId),
+      id: projectKey,
+      name: declared?.title ?? (path.length > 0 ? basenameOf(path) : projectKey),
       path,
       sessions: members,
     });
   }
-  projects.sort((left, right) => left.name.localeCompare(right.name) || left.workspaceId.localeCompare(right.workspaceId));
+  projects.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 
-  return { home, shardFiles: ledger.shards, projects, sessions, warnings };
+  const stats: DatasetStats = {
+    filesRead: ledger.shards,
+    sessions: sessions.length,
+    records: sessions.reduce((total, session) => total + session.records.length, 0),
+  };
+  return { agent: 'dsh', source, projects, sessions, stats, warnings };
+}
+
+/** Assemble one session record from its parts. */
+function buildSession(
+  id: string,
+  records: UsageRecord[],
+  meta: {
+    title: string | null;
+    cwd: string | null;
+    createdAt: number | null;
+    log: SessionLogInfo | undefined;
+    byId: ReadonlyMap<string, SessionLogInfo>;
+  },
+): SessionRecord {
+  const parentId = resolveParentId(meta.log, meta.byId);
+  const depth = meta.log?.delegationDepth ?? (parentId === null ? 0 : 1);
+  const isSubagent = parentId !== null || depth > 0;
+  return {
+    id,
+    title: meta.title,
+    cwd: meta.cwd,
+    createdAt: meta.createdAt,
+    records,
+    parentId: isSubagent ? parentId : null,
+    depth,
+    isSubagent,
+    childIds: [],
+    parentKnown: parentId !== null && meta.byId.has(parentId),
+  };
+}
+
+/**
+ * Resolve a session's parent id through the log index.
+ *
+ * The ledger keys a session by the bare UUID while the log header (and the
+ * directories on disk) carry the `session-` prefix, so a parent id is run back
+ * through the index — which holds both spellings — to land on the spelling the
+ * ledger used.
+ */
+function resolveParentId(
+  log: SessionLogInfo | undefined,
+  byId: ReadonlyMap<string, SessionLogInfo>,
+): string | null {
+  const raw = log?.parentSessionId ?? null;
+  if (raw === null) return null;
+  return byId.get(raw)?.sessionId ?? raw;
 }
 
 /**
@@ -519,7 +522,7 @@ export async function loadDataset(options: LoadOptions = {}): Promise<UsageDatas
  * @returns milliseconds since the Unix epoch, or `Number.POSITIVE_INFINITY` when the session has no time at all.
  */
 export function firstUsageOf(session: SessionRecord): number {
-  const first = session.entries[0];
+  const first = session.records[0];
   if (first !== undefined) return first.time;
   if (session.createdAt !== null) return session.createdAt;
   return Number.POSITIVE_INFINITY;
@@ -531,8 +534,58 @@ export function firstUsageOf(session: SessionRecord): number {
  * @returns milliseconds since the Unix epoch, or `Number.NEGATIVE_INFINITY` when the session has no time at all.
  */
 export function lastUsageOf(session: SessionRecord): number {
-  const last = session.entries[session.entries.length - 1];
+  const last = session.records[session.records.length - 1];
   if (last !== undefined) return last.time;
   if (session.createdAt !== null) return session.createdAt;
   return Number.NEGATIVE_INFINITY;
 }
+
+/** Default DSH home, honouring the same environment the harness does. */
+function defaultSource(env: NodeJS.ProcessEnv): string | null {
+  const configured = env['DSH_HOME']?.trim();
+  if (configured !== undefined && configured.length > 0) return configured;
+  const home = env['HOME'] ?? env['USERPROFILE'] ?? '';
+  if (home.length === 0) return null;
+  return join(home, '.dsh');
+}
+
+/**
+ * Resolve the DSH home the way the harness does.
+ * @param configured - an explicit path, which wins.
+ * @param env - environment to read.
+ * @returns the absolute DSH home path.
+ * @throws when `DSH_HOME` is set but not absolute, or no home can be determined.
+ */
+export function resolveDshHome(configured?: string, env: NodeJS.ProcessEnv = process.env): string {
+  const candidate = configured ?? defaultSource(env);
+  if (candidate === null || candidate === undefined || candidate.trim().length === 0) {
+    throw new Error('无法确定 DSH 主目录：请设置 DSH_HOME 或用 --home 指定');
+  }
+  if (!isAbsolute(candidate)) {
+    throw new Error(`DSH 主目录必须是绝对路径，收到 ${JSON.stringify(candidate)}`);
+  }
+  return resolve(candidate);
+}
+
+/** The DSH agent adapter. */
+export const dshAgent: AgentAdapter = {
+  id: 'dsh',
+  label: 'DeepSeek Harness (DSH)',
+  sessionNoun: '会话',
+  envVars: ['DSH_HOME'],
+  defaultSource,
+  hasData: async (source) => {
+    try {
+      const names = await readdir(join(source, 'storages'));
+      return names.some((name) => /^all_usage_ledger_\d+\.json$/.test(name));
+    } catch {
+      return false;
+    }
+  },
+  load,
+  notes: () => [
+    '用量账本由 DSH 插件 dsh-all-usage 写入；若从未安装该插件，则没有可统计的逐请求用量。',
+    '账本中的 cost 字段不可用（其价格目录从未成功拉取，恒为 0），本工具只取其 token 数与时间戳并自行计价。',
+    '子代理关系只存在于会话日志首帧，需要在 sessions/ 下额外读取每个会话的日志。',
+  ],
+};

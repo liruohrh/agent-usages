@@ -1,318 +1,385 @@
 /**
- * Accounting: turn a filtered list of usage records into token totals and cost.
+ * Accounting: turn filtered usage records into token totals and money.
  *
- * Cost is accumulated as exact scaled integers grouped by
- * (model, period, band), because each group needs `tokens × rate / 1e6` computed
- * before summing — summing tokens first and multiplying once would be wrong the
- * moment a session spans two price periods or two bands within a period.
+ * The arithmetic is vendor-neutral by construction. Rates come from a
+ * {@link PricingEngine}, which decides *which* rates apply to each record; this
+ * module only decides how to accumulate them:
  *
- * Rounding happens exactly once, on the four cost components, so every total in
- * the UI is a sum of the numbers the user can already see: the per-model, per-
- * project, per-band, and grand totals all reconcile.
+ * - Costs accumulate as exact scaled integers in `bigint`, because each group
+ *   needs `tokens × rate / per` computed *before* summing — adding token counts
+ *   first and multiplying once would be wrong the moment a session spans two
+ *   price periods or two tiers within one period.
+ * - Rounding happens exactly once per report, on the components, and every
+ *   aggregate is then the sum of already-rounded components. A grand total is
+ *   computed in a single pass over the in-scope records rather than by adding up
+ *   the rows displayed beside it, so the number a reader checks always matches.
  */
 
-import { formatDecimal, parseDecimal, scalePerMillion } from './money.ts';
-import type { PricingEngine } from './pricing.ts';
-import type {
-  CostTotals,
-  PricingBandSummary,
-  PricingResolution,
-  SessionRecord,
-  TokenTotals,
-  UsageEntry,
-} from './types.ts';
-import { emptyBuckets } from './loader.ts';
-
-/** Exact money amount: a currency value scaled by `MONEY_SCALE` (1e-9 units). */
-type MoneyAmount = bigint;
-
-/** Cost component keys, in report order. */
-const COST_COMPONENTS = ['cacheHitInputCost', 'cacheMissInputCost', 'outputCost'] as const;
-
-/** One component of a cost, as an exact scaled amount. */
-type CostComponent = (typeof COST_COMPONENTS)[number];
+import { emptyBuckets } from './core/buckets.ts';
+import type { CostTotals, TokenBuckets, TokenTotals, UsageRecord } from './core/types.ts';
+import { counterForBasis, type CostBreakdown, type PricingEngine, type RateComponent, type RecordCost } from './pricing/index.ts';
 
 /** Digits kept for money in the output: finer than any real per-request cost. */
 export const COST_DIGITS = 4;
 
-/** Exact cost of one (model, period, band) group. */
-interface CostGroup {
+/**
+ * Scale every amount is carried at: 1e-9 of the pricing currency.
+ *
+ * Arithmetic stays at this scale and only {@link renderAmount} divides it down,
+ * so an amount can pass through several merges without losing a digit.
+ */
+export const AMOUNT_SCALE_DIGITS = 9;
+
+/** Cost components at the arithmetic scale, before display rounding. */
+export interface ExactCost {
+  /** Amount per component id, at 1e-9 currency units. */
+  byComponent: Map<string, bigint>;
+  /** Sum of {@link ExactCost.byComponent}. */
+  total: bigint;
+}
+
+/** Report counters a charged component contributes tokens to. */
+type ReportCounter = 'cacheHitInputTokens' | 'cacheMissInputTokens' | 'outputTokens' | 'cacheWriteTokens';
+
+/** One (model, period, tier) group plus the tokens that produced it. */
+export interface CostGroup {
+  /** Model billed. */
   model: string;
+  /** Period the rate came from. */
   periodId: string;
+  /** Period label. */
   periodLabel: string;
-  band: string;
-  resolution: PricingResolution;
+  /** Tier the rate came from. */
+  tier: 'peak' | 'off-peak' | 'flat';
+  /** How the period was selected. */
+  resolution: CostBreakdown['resolution'];
+  /** Requests billed under this group. */
   requests: number;
-  cacheHitTokens: number;
-  cacheMissTokens: number;
-  outputTokens: number;
-  cacheWriteTokens: number;
-  cost: Record<CostComponent, MoneyAmount>;
+  /** Exact amount per component id. */
+  amounts: Map<string, bigint>;
+  /** Tokens attributed to each report counter. */
+  counters: Record<ReportCounter, number>;
 }
 
-/** Round a scaled amount to {@link COST_DIGITS} decimal places, half-up. */
-function roundAmount(value: MoneyAmount): MoneyAmount {
-  const divisor = 10n ** BigInt(9 - COST_DIGITS);
-  const negative = value < 0n;
-  const magnitude = negative ? -value : value;
-  const rounded = (magnitude + divisor / 2n) / divisor * divisor;
-  return negative ? -rounded : rounded;
+/** One component's contribution, for the token/rate detail table. */
+export interface ComponentUsage {
+  /** The component charged. */
+  component: RateComponent;
+  /** Tokens charged under it, across every request. */
+  tokens: number;
 }
 
-/** Multiply a scaled amount by a unit-less factor, keeping the scale. */
-function applyRate(value: MoneyAmount, factorScaled: MoneyAmount): MoneyAmount {
-  return (value * factorScaled) / 1_000_000_000n;
+/** What one set of records cost, in the provider's currency. */
+export interface UsageCost {
+  /** Token totals. */
+  tokens: TokenTotals;
+  /** Unrounded amounts per component id. */
+  exact: ExactCost;
+  /** Tokens charged per component, keyed by component id. */
+  components: Map<string, ComponentUsage>;
+  /** Requests that were billed. */
+  priced: number;
+  /** Records no schedule could price. */
+  unpriced: number;
+  /** Per (model, period, tier) groups, newest period first. */
+  groups: CostGroup[];
 }
 
-/** Internal accumulator pairing exact money with the token counters that produced it. */
-class CostAccumulator {
-  private readonly groups = new Map<string, CostGroup>();
-  private readonly engine: PricingEngine;
-  private readonly factor: MoneyAmount;
-
-  constructor(engine: PricingEngine, currencyRate: number) {
-    this.engine = engine;
-    this.factor = decimalFromNumber(currencyRate);
-  }
-
-  /** Charge one usage record. */
-  add(entry: UsageEntry): void {
-    const resolved = this.engine.rateAt(entry.model, entry.time);
-    if (resolved === undefined) {
-      throw new Error(`没有可用于模型 ${entry.model} 的价格表`);
-    }
-    const { period, band, rates, resolution } = resolved;
-    const groupKey = `${entry.model}\u0000${period.id}\u0000${band}`;
-    let group = this.groups.get(groupKey);
-    if (group === undefined) {
-      group = {
-        model: entry.model,
-        periodId: period.id,
-        periodLabel: period.label,
-        band,
-        resolution,
-        requests: 0,
-        cacheHitTokens: 0,
-        cacheMissTokens: 0,
-        outputTokens: 0,
-        cacheWriteTokens: 0,
-        cost: { cacheHitInputCost: 0n, cacheMissInputCost: 0n, outputCost: 0n },
-      };
-      this.groups.set(groupKey, group);
-    }
-    // DeepSeek bills cache writes at the cache-miss rate, so writes join the
-    // miss bucket; the separate counter is kept for transparency.
-    const missTokens = entry.tokens.input + entry.tokens.cacheWrite;
-    group.requests += 1;
-    group.cacheHitTokens += entry.tokens.cacheRead;
-    group.cacheMissTokens += missTokens;
-    group.outputTokens += entry.tokens.output;
-    group.cacheWriteTokens += entry.tokens.cacheWrite;
-    group.cost.cacheHitInputCost += scalePerMillion(entry.tokens.cacheRead, parseRate(rates.inputCacheHit));
-    group.cost.cacheMissInputCost += scalePerMillion(missTokens, parseRate(rates.inputCacheMiss));
-    group.cost.outputCost += scalePerMillion(entry.tokens.output, parseRate(rates.output));
-  }
-
-  /**
-   * The report's cost components, converted and rounded exactly once.
-   *
-   * Every aggregate in the CLI is built by summing these, so the displayed
-   * numbers always add up.
-   */
-  components(): Record<CostComponent, MoneyAmount> {
-    const totals: Record<CostComponent, MoneyAmount> = {
-      cacheHitInputCost: 0n,
-      cacheMissInputCost: 0n,
-      outputCost: 0n,
-    };
-    for (const group of this.groups.values()) {
-      for (const component of COST_COMPONENTS) {
-        totals[component] += applyRate(group.cost[component], this.factor);
-      }
-    }
-    for (const component of COST_COMPONENTS) {
-      totals[component] = roundAmount(totals[component]);
-    }
-    return totals;
-  }
-
-  /** Group rows, newest pricing period first. */
-  groupRows(): readonly CostGroup[] {
-    return [...this.groups.values()].sort(
-      (left, right) =>
-        right.periodId.localeCompare(left.periodId) ||
-        left.model.localeCompare(right.model) ||
-        left.band.localeCompare(right.band),
-    );
-  }
+/** Everything a caller needs to render a cost report. */
+export interface CostSummary {
+  /** Display totals, rounded once. */
+  totals: CostTotals;
+  /** Per-group breakdown with display amounts. */
+  breakdown: CostBreakdown[];
+  /** Tokens charged per component. */
+  components: Map<string, ComponentUsage>;
+  /** Requests that were billed. */
+  priced: number;
+  /** Records no schedule could price. */
+  unpriced: number;
 }
 
-/** Rate cards are authored as decimal literals; parse once per distinct literal. */
-const rateCache = new Map<string, bigint>();
-
-/** Memoized decimal parse — the same handful of rate literals recur constantly. */
-function parseRate(text: string): bigint {
-  let parsed = rateCache.get(text);
-  if (parsed === undefined) {
-    parsed = parseDecimal(text);
-    rateCache.set(text, parsed);
-  }
-  return parsed;
-}
-
-/** Convert a JavaScript number into the scaled decimal representation. */
-function decimalFromNumber(value: number): MoneyAmount {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`汇率必须是非负有限数字，收到 ${String(value)}`);
-  }
-  const text = value.toString();
-  if (text.includes('e') || text.includes('E')) {
-    return BigInt(Math.round(value * 1e9));
-  }
-  const [whole = '0', fraction = ''] = text.split('.');
-  return BigInt(`${whole}${fraction.padEnd(9, '0').slice(0, 9)}`);
-}
-
-/** Sum the raw provider buckets of a set of records. */
-export function sumTokens(entries: readonly UsageEntry[]): TokenTotals {
+/** Sum provider buckets across records. */
+export function sumTokens(records: readonly UsageRecord[]): TokenTotals {
   const totals = emptyBuckets();
-  for (const entry of entries) {
-    totals.input += entry.tokens.input;
-    totals.output += entry.tokens.output;
-    totals.cacheRead += entry.tokens.cacheRead;
-    totals.cacheWrite += entry.tokens.cacheWrite;
-    totals.reasoning += entry.tokens.reasoning;
+  for (const record of records) {
+    totals.input += record.tokens.input;
+    totals.output += record.tokens.output;
+    totals.cacheRead += record.tokens.cacheRead;
+    totals.cacheWrite += record.tokens.cacheWrite;
+    totals.reasoning += record.tokens.reasoning;
   }
   return totals;
 }
 
-/** Cost components at the arithmetic scale, before any display rounding. */
-export interface ExactCost {
-  cacheHitInputCost: bigint;
-  cacheMissInputCost: bigint;
-  outputCost: bigint;
+/**
+ * Round a scaled amount to {@link COST_DIGITS} places, half-up on the magnitude.
+ *
+ * The result stays at {@link AMOUNT_SCALE_DIGITS}, so summing rounded amounts is
+ * still exact.
+ */
+function round(value: bigint): bigint {
+  const divisor = 10n ** BigInt(AMOUNT_SCALE_DIGITS - COST_DIGITS);
+  const negative = value < 0n;
+  const magnitude = negative ? -value : value;
+  const rounded = ((magnitude + divisor / 2n) / divisor) * divisor;
+  return negative ? -rounded : rounded;
+}
+
+/** Render an amount at the arithmetic scale as a decimal string. */
+export function renderAmount(value: bigint): string {
+  const negative = value < 0n;
+  const magnitude = negative ? -value : value;
+  const text = magnitude.toString().padStart(AMOUNT_SCALE_DIGITS + 1, '0');
+  const whole = text.slice(0, text.length - AMOUNT_SCALE_DIGITS);
+  const fraction = text.slice(text.length - AMOUNT_SCALE_DIGITS);
+  return `${negative && magnitude !== 0n ? '-' : ''}${whole}.${fraction}`;
+}
+
+/** Render an amount rounded to {@link COST_DIGITS} places. */
+export function renderRounded(value: bigint): string {
+  const text = renderAmount(round(value));
+  return text.slice(0, text.length - (AMOUNT_SCALE_DIGITS - COST_DIGITS));
 }
 
 /**
- * A complete token + cost result for one group of usage records.
+ * Price a set of records.
  *
- * {@link UsageReport.cost} is rounded for display, while
- * {@link UsageReport.exactCost} keeps the unrounded scaled integers. Aggregates
- * must sum the exact values and round once at the end: adding already-rounded
- * per-session figures lets each session's rounding error accumulate, which is
- * enough to make the same total differ depending on how it was grouped.
+ * Pure and engine-agnostic: it asks the engine for each record's rates, groups by
+ * (model, period, tier), and accumulates exact amounts. Records the engine cannot
+ * price are counted rather than silently treated as free.
+ * @param records - the records to bill.
+ * @param engine - the engine supplying rates.
+ * @returns the exact cost, ready to be converted and rounded.
  */
-export interface UsageReport {
-  /** Aggregated provider buckets. */
-  tokens: TokenTotals;
-  /** Unrounded cost components, for aggregation. */
-  exactCost: ExactCost;
-  /** Aggregated cost, in the requested currency. */
-  cost: CostTotals;
-  /** Which pricing periods and bands contributed, newest first. */
-  bands: PricingBandSummary[];
-  /** Number of billed requests. */
-  requests: number;
-}
+export function priceRecords(records: readonly UsageRecord[], engine: PricingEngine): UsageCost {
+  const groups = new Map<string, CostGroup>();
+  const components = new Map<string, ComponentUsage>();
+  const exact: ExactCost = { byComponent: new Map(), total: 0n };
+  let priced = 0;
+  let unpriced = 0;
 
-/**
- * Public cost totals built from already-rounded exact components.
- *
- * The total sums the three rounded components as scaled integers, so the
- * displayed total always equals the displayed parts — no phantom 1e-16.
- */
-function toCostTotals(components: Record<CostComponent, MoneyAmount>): CostTotals {
-  const total =
-    components.cacheHitInputCost + components.cacheMissInputCost + components.outputCost;
+  for (const record of records) {
+    const cost: RecordCost | undefined = engine.costOf(record);
+    if (cost === undefined) {
+      unpriced += 1;
+      continue;
+    }
+    priced += 1;
+    const { period, tier, resolution, model } = cost.rate;
+    const groupKey = `${model}\u0000${period.id}\u0000${tier}`;
+    let group = groups.get(groupKey);
+    if (group === undefined) {
+      group = {
+        model,
+        periodId: period.id,
+        periodLabel: period.label,
+        tier,
+        resolution,
+        requests: 0,
+        amounts: new Map(),
+        counters: { cacheHitInputTokens: 0, cacheMissInputTokens: 0, outputTokens: 0, cacheWriteTokens: 0 },
+      };
+      groups.set(groupKey, group);
+    }
+    group.requests += 1;
+    for (const [id, amount] of cost.amounts) {
+      group.amounts.set(id, (group.amounts.get(id) ?? 0n) + amount);
+      exact.byComponent.set(id, (exact.byComponent.get(id) ?? 0n) + amount);
+      exact.total += amount;
+    }
+    // Attribute every charged component's tokens to a report counter, so the
+    // totals a reader sees explain the amounts printed beside them.
+    for (const component of cost.rate.components) {
+      const quantity = engine.quantityOf(component, record.tokens);
+      const known = components.get(component.id);
+      if (known === undefined) components.set(component.id, { component, tokens: quantity });
+      else known.tokens += quantity;
+      group.counters[counterForBasis(component.basis)] += quantity;
+    }
+  }
+
   return {
+    tokens: sumTokens(records),
+    exact,
+    components,
+    priced,
+    unpriced,
+    groups: [...groups.values()].sort(
+      (left, right) =>
+        right.periodId.localeCompare(left.periodId) ||
+        left.model.localeCompare(right.model) ||
+        left.tier.localeCompare(right.tier),
+    ),
+  };
+}
+
+/** Merge priced sets, summing at the arithmetic scale. */
+export function mergeCosts(costs: readonly UsageCost[]): UsageCost {
+  const groups = new Map<string, CostGroup>();
+  const components = new Map<string, ComponentUsage>();
+  const exact: ExactCost = { byComponent: new Map(), total: 0n };
+  const tokens = emptyBuckets();
+  let priced = 0;
+  let unpriced = 0;
+
+  for (const cost of costs) {
+    priced += cost.priced;
+    unpriced += cost.unpriced;
+    tokens.input += cost.tokens.input;
+    tokens.output += cost.tokens.output;
+    tokens.cacheRead += cost.tokens.cacheRead;
+    tokens.cacheWrite += cost.tokens.cacheWrite;
+    tokens.reasoning += cost.tokens.reasoning;
+    for (const [id, amount] of cost.exact.byComponent) {
+      exact.byComponent.set(id, (exact.byComponent.get(id) ?? 0n) + amount);
+    }
+    exact.total += cost.exact.total;
+    for (const [id, usage] of cost.components) {
+      const known = components.get(id);
+      if (known === undefined) components.set(id, { ...usage });
+      else known.tokens += usage.tokens;
+    }
+    for (const group of cost.groups) {
+      const key = `${group.model}\u0000${group.periodId}\u0000${group.tier}`;
+      const existing = groups.get(key);
+      if (existing === undefined) {
+        groups.set(key, { ...group, amounts: new Map(group.amounts), counters: { ...group.counters } });
+        continue;
+      }
+      existing.requests += group.requests;
+      for (const [id, amount] of group.amounts) {
+        existing.amounts.set(id, (existing.amounts.get(id) ?? 0n) + amount);
+      }
+      for (const counter of Object.keys(existing.counters) as ReportCounter[]) {
+        existing.counters[counter] += group.counters[counter];
+      }
+    }
+  }
+
+  return { tokens, exact, components, priced, unpriced, groups: [...groups.values()] };
+}
+
+/**
+ * Convert exact amounts and round them once.
+ *
+ * Applied after all merging, so a converted report's components always sum to
+ * its total.
+ * @param cost - the exact cost.
+ * @param convert - turns a scaled amount into the target currency.
+ * @returns display totals and per-group breakdown.
+ */
+export function summarize(cost: UsageCost, convert: (value: bigint) => bigint = (value) => value): CostSummary {
+  const rounded = new Map<string, bigint>();
+  let total = 0n;
+  for (const [id, amount] of cost.exact.byComponent) {
+    const value = round(convert(amount));
+    rounded.set(id, value);
+    total += value;
+  }
+
+  const totals: CostTotals = {
     cacheHitInputTokens: 0,
     cacheMissInputTokens: 0,
     outputTokens: 0,
     cacheWriteTokens: 0,
-    cacheHitInputCost: formatDecimal(components.cacheHitInputCost, COST_DIGITS),
-    cacheMissInputCost: formatDecimal(components.cacheMissInputCost, COST_DIGITS),
-    outputCost: formatDecimal(components.outputCost, COST_DIGITS),
-    total: formatDecimal(total, COST_DIGITS),
+    cacheHitInputCost: renderRounded(rounded.get('input-hit') ?? 0n),
+    cacheMissInputCost: renderRounded(rounded.get('input-miss') ?? 0n),
+    outputCost: renderRounded(rounded.get('output') ?? 0n),
+    cacheWriteInputCost: renderRounded(rounded.get('input-write') ?? 0n),
+    total: renderRounded(total),
   };
-}
+  for (const group of cost.groups) {
+    totals.cacheHitInputTokens += group.counters.cacheHitInputTokens;
+    totals.cacheMissInputTokens += group.counters.cacheMissInputTokens;
+    totals.outputTokens += group.counters.outputTokens;
+    totals.cacheWriteTokens += group.counters.cacheWriteTokens;
+  }
 
-/**
- * Compute tokens and cost for a set of usage records.
- * @param entries - the records to bill.
- * @param engine - the pricing engine supplying rates.
- * @param currencyRate - units of the target currency per 1 CNY; `1` keeps CNY.
- * @returns the report, with cost expressed in the target currency.
- */
-export function computeReport(
-  entries: readonly UsageEntry[],
-  engine: PricingEngine,
-  currencyRate = 1,
-): UsageReport {
-  const accumulator = new CostAccumulator(engine, currencyRate);
-  for (const entry of entries) accumulator.add(entry);
-  const tokens = sumTokens(entries);
-  const exact = accumulator.components();
-  const cost = toCostTotals(exact);
-  cost.cacheHitInputTokens = tokens.cacheRead;
-  cost.cacheMissInputTokens = tokens.input + tokens.cacheWrite;
-  cost.outputTokens = tokens.output;
-  cost.cacheWriteTokens = tokens.cacheWrite;
-  return {
-    tokens,
-    exactCost: exact,
-    cost,
-    bands: accumulator.groupRows().map((group) => ({
+  const breakdown: CostBreakdown[] = cost.groups.map((group) => {
+    const amounts: Record<string, string> = {};
+    let groupTotal = 0n;
+    for (const [id, amount] of group.amounts) {
+      const value = round(convert(amount));
+      amounts[id] = renderRounded(value);
+      groupTotal += value;
+    }
+    return {
+      model: group.model,
       periodId: group.periodId,
       periodLabel: group.periodLabel,
-      band: group.band,
+      tier: group.tier,
       resolution: group.resolution,
       requests: group.requests,
-    })),
-    requests: entries.length,
-  };
+      amounts,
+      total: renderRounded(groupTotal),
+    };
+  });
+
+  return { totals, breakdown, components: cost.components, priced: cost.priced, unpriced: cost.unpriced };
 }
 
-/** Render already-rounded exact components as display totals. */
-export function displayCost(components: ExactCost, tokens: TokenTotals): CostTotals {
-  const cost = toCostTotals(components);
-  cost.cacheHitInputTokens = tokens.cacheRead;
-  cost.cacheMissInputTokens = tokens.input + tokens.cacheWrite;
-  cost.outputTokens = tokens.output;
-  cost.cacheWriteTokens = tokens.cacheWrite;
-  return cost;
+/** Convert a JavaScript number into the scaled decimal representation. */
+function decimalFromNumber(value: number): bigint {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`汇率必须是非负有限数字，收到 ${String(value)}`);
+  }
+  const text = value.toString();
+  if (text.includes('e') || text.includes('E')) return BigInt(Math.round(value * 1e9));
+  const [whole = '0', fraction = ''] = text.split('.');
+  return BigInt(`${whole}${fraction.padEnd(9, '0').slice(0, 9)}`);
+}
+
+/** A currency conversion, or the identity when the rate is 1. */
+function converter(currencyRate: number): (value: bigint) => bigint {
+  const factor = decimalFromNumber(currencyRate);
+  return factor === 1_000_000_000n ? (value) => value : (value) => (value * factor) / 1_000_000_000n;
 }
 
 /**
- * Aggregate usage records of several sessions.
- * @param sessions - sessions whose records should be billed.
- * @param engine - the pricing engine supplying rates.
- * @param currencyRate - units of the target currency per 1 CNY.
- * @returns the combined report.
+ * Price, merge, convert, and round a set of records in one call.
+ * @param records - the records to bill.
+ * @param engine - the engine supplying rates.
+ * @param currencyRate - units of the target currency per 1 unit of the provider's currency.
+ * @returns the display summary.
  */
-export function reportForSessions(
-  sessions: readonly SessionRecord[],
+export function costOf(records: readonly UsageRecord[], engine: PricingEngine, currencyRate = 1): CostSummary {
+  return summarize(priceRecords(records, engine), converter(currencyRate));
+}
+
+/**
+ * Price several record sets and merge them at full precision before rounding.
+ *
+ * Merging rounded per-set summaries instead would let each set's rounding
+ * remainder accumulate, making the same grand total come out differently
+ * depending on how the records were grouped.
+ * @param sets - one record list per group.
+ * @param engine - the engine supplying rates.
+ * @param currencyRate - units of the target currency per 1 unit of the provider's currency.
+ * @returns the display summary for everything.
+ */
+export function costOfGrouped(
+  sets: readonly (readonly UsageRecord[])[],
   engine: PricingEngine,
   currencyRate = 1,
-): UsageReport {
-  const entries: UsageEntry[] = [];
-  for (const session of sessions) entries.push(...session.entries);
-  return computeReport(entries, engine, currencyRate);
+): CostSummary {
+  return summarize(mergeCosts(sets.map((records) => priceRecords(records, engine))), converter(currencyRate));
 }
 
 /**
- * Cross-check aggregated buckets against the harness' own projection totals.
- * @param tokens - buckets summed from the ledger.
- * @param projected - buckets the harness projection cache reports.
- * @returns a human-readable warning, or `undefined` when they agree.
+ * Cross-check aggregated buckets against a second opinion.
+ * @param tokens - buckets summed from the records.
+ * @param projected - buckets an independent source reports.
+ * @returns a warning describing the difference, or `undefined` when they agree.
  */
-export function reconcile(tokens: TokenTotals, projected: TokenTotals): string | undefined {
+export function reconcile(tokens: TokenTotals, projected: TokenBuckets): string | undefined {
   const diffs: string[] = [];
-  const compare = (label: string, ledger: number, cache: number): void => {
-    if (ledger !== cache) diffs.push(`${label} 账本 ${ledger} vs 投影缓存 ${cache}`);
+  const compare = (label: string, left: number, right: number): void => {
+    if (left !== right) diffs.push(`${label} ${left} vs ${right}`);
   };
   compare('未命中输入', tokens.input, projected.input);
   compare('输出', tokens.output, projected.output);
   compare('缓存命中输入', tokens.cacheRead, projected.cacheRead);
   compare('缓存写入', tokens.cacheWrite, projected.cacheWrite);
-  return diffs.length === 0 ? undefined : `会话用量与投影缓存不一致：${diffs.join('；')}`;
+  return diffs.length === 0 ? undefined : `用量与投影缓存不一致：${diffs.join('；')}`;
 }

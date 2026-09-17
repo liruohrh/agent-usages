@@ -1,17 +1,111 @@
-# dsh-usage
+# @agent/usages
 
-统计 **DeepSeek Harness (DSH)** 的 token 消耗与费用。
+统计 **coding agent** 的 token 消耗与费用。
 
-- **维度**：全部 / 按项目 / 按会话，可按项目、会话筛选（各支持多个）
+命令是 `agent-usages`。工具围绕**两个独立的可扩展维度**设计：
+
+| 维度 | 作用 | 当前支持 |
+| --- | --- | --- |
+| **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness）— 目前唯一 |
+| **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek 官方）— 目前唯一 |
+
+DeepSeek 只是**目前唯一支持的计价来源**，DSH 只是**目前唯一支持的 agent**。两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱，因此新增任何一方都只是加一个模块 + 一条注册项。
+
+- **维度**：全部 / 按项目 / 按会话 / 子代理，可按项目、会话筛选（各支持多个）
 - **时间范围**：今年、本月、今日、任意区间；不指定即为全部时间
-- **费用**：按 DeepSeek 官方**分时段（峰谷）定价**逐条计算，默认人民币，可用 `--currency-rate` 折算
+- **费用**：按价格表**分时段（峰谷）逐条**计算，默认取价格表的货币，可用 `--currency-rate` 折算
 - **`--json`**：所有命令都支持结构化输出
 
-读取对象是 DSH 自己的落盘数据，**只读**，不会修改任何 DSH 文件。
+读取 agent 自己的落盘数据，**只读**，不会修改任何 agent 文件。
 
 ---
 
 ## 快速开始
+
+```bash
+pnpm install
+
+# 全部用量汇总（默认维度）
+pnpm cli usage
+
+# 按项目 / 按会话
+pnpm cli usage --project
+pnpm cli usage --session
+
+# 列出所有项目与会话
+pnpm cli session list
+
+# 查看价格表；列出支持的 agent 与计价来源
+pnpm cli price
+pnpm cli agents
+```
+
+也可以直接用 Node 运行（无需构建，Node 原生擦除 TypeScript 类型）：
+
+```bash
+node src/cli.ts usage --year --json
+node src/cli.ts agents --json
+```
+
+或全局链接后使用 `agent-usages`：
+
+```bash
+pnpm link --global   # 之后可直接执行 agent-usages usage --month
+```
+
+要求 Node ≥ 22.6（类型擦除），开发时使用 Node 24。
+
+### 目标 agent 与数据目录
+
+默认会**自动探测**：在数据目录下找不到任何已支持 agent 的数据时才报错，因此常见情况下不需要任何参数。
+
+```bash
+agent-usages usage                       # 自动探测
+agent-usages usage --agent dsh           # 显式指定 agent
+agent-usages usage --home /path/to/.dsh  # 显式指定数据目录
+agent-usages agents                      # 看每个 agent 认哪些环境变量、默认目录在哪
+```
+
+`--home` 也可用各 agent 自己的环境变量替代（DSH 用 `DSH_HOME`，默认 `~/.dsh`）。`--agent` / `--home` / `--provider` / `--json` 都是全局选项，放在子命令前后都可以。
+
+---
+
+## 命令
+
+### `usage [range]`
+
+计算 token 消耗与费用。
+
+| 选项 | 说明 |
+| --- | --- |
+| `--all` | 只输出总量汇总（**默认**） |
+| `--project` | 按项目维度汇总 |
+| `--session` | 按会话维度汇总（每个项目下再列出会话明细） |
+| `--subagents` | 把子代理**单独列出**（默认并入其父会话）；详见[子代理](#子代理-subagent) |
+| `-p, --project-filter <sel>` | 只看指定项目：id、名称或路径；支持 `*` 通配；可重复 |
+| `-s, --session-filter <sel>` | 只看指定会话：完整 id 或唯一前缀；支持 `*` 通配；可重复 |
+| `--today` / `--month` / `--year` | 时间范围：今日 / 本月 / 今年 |
+| `--from <time>` | 起始时间（**含**），如 `2026-09-01`、`2026-09-01T10:30` |
+| `--to <time>` | 结束时间，日期形式**含当天**（内部按左闭右开实现） |
+| `--currency <code>` | 显示货币，默认取计价来源的货币 |
+| `--currency-rate <rate>` | 1 单位计价货币折算为目标货币的汇率，默认 1 |
+| `--agent` / `--home` / `--provider` / `--json` | 见上 |
+
+### `session list`
+
+列出所有项目与会话。**项目按首个会话时间降序，会话按时间降序**，支持 `--json`、`--subagents`、`-p/--project-filter`、`-s/--session-filter`。
+
+排序中的“会话时间”指该会话**首次计费请求**的时间；从未产生用量的会话回退到创建时间。默认只列出一级会话（其请求数已含子代理），加 `--subagents` 后子代理以 `↳` 缩进显示在其父会话下方。
+
+### `price`
+
+打印内置价格表：每个生效区间的峰谷时段、单价、来源链接与说明。**不会**读取任何数据，也不需要 `--home`。加 `--all` 列出全部计价来源。
+
+### `agents`
+
+列出支持的 agent 与计价来源：各自的 id、默认数据目录、认哪些环境变量，以及读取该 agent 数据时需要注意的事项。支持 `--json`。
+
+
 
 ```bash
 pnpm install
@@ -48,37 +142,67 @@ pnpm link --global   # 之后可直接执行 dsh-usage usage --month
 
 ---
 
-## 命令
+## 扩展：agent 与价格
 
-### `usage [range]`
+两个维度都通过「一个模块 + 一条注册项」扩展，核心层（聚合、报表、CLI）不需要改动。
 
-计算 token 消耗与费用。
+### 新增一个 agent
 
-| 选项 | 说明 |
-| --- | --- |
-| `--all` | 只输出总量汇总（**默认**） |
-| `--project` | 按项目维度汇总 |
-| `--session` | 按会话维度汇总（每个项目下再列出会话明细） |
-| `--subagents` | 把子代理**单独列出**（默认并入其父会话）；详见[子代理](#子代理-subagent) |
-| `-p, --project-filter <sel>` | 只看指定项目：workspace id、项目名或路径；支持 `*` 通配；可重复 |
-| `-s, --session-filter <sel>` | 只看指定会话：完整 id 或唯一前缀；支持 `*` 通配；可重复 |
-| `--today` / `--month` / `--year` | 时间范围：今日 / 本月 / 今年 |
-| `--from <time>` | 起始时间（**含**），如 `2026-09-01`、`2026-09-01T10:30` |
-| `--to <time>` | 结束时间，日期形式**含当天**（内部按左闭右开实现） |
-| `--currency <code>` | 显示货币，默认 `CNY` |
-| `--currency-rate <rate>` | 1 CNY 折算为目标货币的汇率，默认 1 |
-| `--json` | 输出 JSON（也可写在子命令前：`--json usage`） |
-| `--home <dir>` | DSH 主目录，默认 `~/.dsh`（或 `$DSH_HOME`） |
+实现 `AgentAdapter`（`src/agents/contract.ts`），放进 `src/agents/<id>/`，注册到 `src/agents/registry.ts`：
 
-### `session list`
+```ts
+export interface AgentAdapter {
+  id: string;                                  // --agent 的值
+  label: string;                               // 显示名
+  sessionNoun: string;
+  envVars: readonly string[];                  // 认哪些环境变量（`agents` 会打印）
+  defaultSource(env): string | null;           // 默认数据目录
+  hasData(source): Promise<boolean>;           // 用于自动探测
+  load(options): Promise<UsageDataset>;        // 读盘 → 中立模型
+  notes(): readonly string[];                  // 读这个 agent 数据时的注意事项
+}
+```
 
-列出所有项目与会话。**项目按首个会话时间降序，会话按时间降序**，支持 `--json`、`--subagents`、`-p/--project-filter`、`-s/--session-filter`。
+适配器只需要把该 agent 的落盘状态转换成中立模型：
 
-排序中的“会话时间”指该会话**首次计费请求**的时间；从未产生用量的会话回退到创建时间。默认只列出一级会话（其请求数已含子代理），加 `--subagents` 后子代理以 `↳` 缩进显示在其父会话下方。
+```ts
+UsageRecord  { id, time, model, modelLabel, tokens, seq?, turn?, step? }
+SessionRecord{ id, title, cwd, createdAt, records, parentId, depth, isSubagent, childIds, parentKnown }
+ProjectRecord{ id, name, path, sessions }
+UsageDataset { agent, source, projects, sessions, stats, warnings }
+```
 
-### `price`
+关键约定：**四个 token 桶互不重叠**（`input + cacheRead + cacheWrite` 才是完整 prompt），`reasoning` 已包含在 `output` 内、不另行计费。适配器**不接触任何货币概念**，因此换价格表永远不会影响它。
 
-打印内置的官方价格表：每个生效区间的峰谷时段、单价、来源链接与说明。**不会**发起网络请求。
+### 新增一个计价来源
+
+实现 `PricingProvider`（`src/pricing/contract.ts`），放进 `src/pricing/vendors/`，注册到 `src/pricing/registry.ts`：
+
+```ts
+export interface PricingProvider {
+  id: string;                    // --provider 的值
+  label: string;
+  currency: { code: string; symbol: string };
+  defaultModel: string | null;   // 未知模型时借用谁的价格；null 表示不计价
+  models(): readonly ModelPrice[];
+  find(model): ModelPrice | undefined;
+}
+```
+
+价格表是**纯数据**：每个模型一串按时间升序的 `PricePeriod`，每个区间给出若干 `RateComponent`（组件名、`basis` 指向哪些 token、单价、每多少 token）。厂商差异都落在数据里，而不是代码分支里：
+
+- **分时段**：区间给 `peakWindows`（本地时段 + 可选星期限制）与 `peak` 费率，引擎按请求**自身时刻**选区间、按区间**自己的时区**选峰谷；不给 `peak` 就是统一价。
+- **不按量计的桶**：不列该组件即可（例如 DeepSeek 不单独计缓存写入，就用 `basis: 'inputAndCacheWrite'` 把写入并入未命中输入）。
+- **别的货币**：`currency` 一填，`--currency-rate` 与显示符号自动跟着变。
+- **取不到价格**：`defaultModel: null` 时未知模型会被计入 `unpriced` 并给出提示，而不是当成免费。
+
+```bash
+agent-usages price              # 默认计价来源的价格表
+agent-usages price --all        # 全部计价来源
+agent-usages usage --provider deepseek
+```
+
+引擎本身与厂商无关，`test/pricing/engine.test.ts` 用一份**合成价格表**（不同货币、不同时区、每天生效的窗口、单独计费的缓存写入）验证这些机制，`test/pricing/deepseek.test.ts` 才去验证 DeepSeek 的具体数字。
 
 ---
 
@@ -258,6 +382,9 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 
 ```jsonc
 {
+  "agent": "dsh",
+  "source": "/home/user/.dsh",
+  "pricingProvider": "deepseek",
   "dimension": "session",
   "range": { "label": "本月", "from": 1786896000000, "to": 1789574400000,
              "fromIso": "2026-08-17T00:00:00.000Z", "toIso": "2026-09-17T00:00:00.000Z" },
@@ -282,13 +409,15 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
   "pricingBands": [ { "periodId": "2026-09-10", "periodLabel": "…",
                       "band": "off-peak", "resolution": "exact", "requests": 763 } ],
   "models":   [ { "model": "deepseek-v4-flash", "requests": 1730, "tokens": {}, "cost": {} } ],
-  "projects": [ { "workspaceId": "…", "name": "example-c", "path": "…",
+  "costComponents": [ { "id": "input-hit", "label": "缓存命中输入", "basis": "cacheRead",
+                        "rate": "0.02", "per": 1000000, "tokens": 130399872, "amount": "4.6782" } ],
+  "projects": [ { "id": "12345678-…", "name": "example-c", "path": "…",
                   "sessions": 44, "activeSessions": 44,
                   "subagentSessions": 42, "requests": 1447,
                   "firstUsage": 178…, "firstUsageIso": "2026-08-27T…",
                   "tokens": {}, "cost": {}, "pricingBands": [], "models": [],
                   "sessionReports": [ /* 仅 --session 维度出现 */
-                    { "sessionId": "…", "isSubagent": false, "subagentCount": 42,
+                    { "id": "session-…", "isSubagent": false, "subagentCount": 42,
                       "parentSessionId": null, "requests": 1374, "tokens": {}, "cost": {} }
                   ] } ],
   "warnings": []
@@ -303,9 +432,10 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 - `pricingBands[].band` ∈ `peak` / `off-peak` / `flat`；`resolution` ∈ `exact` / `fallback-later` / `fallback-earlier` / `fallback-default`，用于说明价格区间是精确命中还是按回退规则选取。
 - `sessionReports` 仅在 `--session` 维度出现；未产生用量的会话不会作为 0 值行出现。
 - `subagents` 区块在两种口径下都会给出子代理自身的请求数、token 与费用：合并时它是总量的一个子集，拆分时它就是那些独立行之和。
-- 每行另有 `isSubagent`（是否子代理）、`subagentCount`（合并口径下并入的子代理个数）、`parentSessionId`（子代理的父会话）。
+- 每行另有 `isSubagent`（是否子代理）、`subagentCount`（合并口径下并入的子代理个数）、`parentId`（子代理的父会话）。
+- `costComponents` 把「哪一项按什么单价计了多少 token、得到多少钱」逐项列出，因此换计价来源后输出仍然自解释。
 - `projects[].sessions` 在合并口径下是一级会话数，拆分口径下是全部会话数；`subagentSessions` 始终是范围内的子代理会话数。
-- `session list --json` 的每个会话另有 `isSubagent`、`delegationDepth`、`parentSessionId`、`subagentCount`、`subagentRequests`、`nested`（是否为缩进显示的子代理行）。
+- `session list --json` 每个项目有 `sessionCount`（范围内会话数）与 `listRows`（显示行数，合并口径下会少于前者）；每个会话有 `isSubagent`、`depth`、`parentId`、`subagentCount`、`subagentRequests`、`nested`。
 - `warnings` 汇总数据异常与筛选提示（如会话不存在、时间范围内无数据）。文本模式会把这些打印为“提示”。
 
 `session list --json` 输出 `{ totalProjects, totalSessions, projects: [{ …, sessions: [...] }] }`，顺序与文本模式一致。
@@ -322,7 +452,7 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 
 ## 数据来源与口径校验
 
-读取 `~/.dsh`（可用 `DSH_HOME` 或 `--home` 覆盖，**所有子命令都支持**）下的四类文件：
+以下都是 **DSH 适配器**的实现细节（其他 agent 各有自己的读法）。读取 `~/.dsh`（可用 `DSH_HOME` 或 `--home` 覆盖，**所有子命令都支持**）下的四类文件：
 
 | 文件 | 用途 |
 | --- | --- |
@@ -345,25 +475,49 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 
 ```bash
 pnpm install
-pnpm test        # vitest，146 个用例
+pnpm test        # vitest，172 个用例
 pnpm typecheck   # tsc --noEmit
 ```
 
-测试覆盖：价格区间选取与回退规则、峰谷时段边界（09:00/12:00/14:00/18:00）、2026-08-23 周末豁免前后的差异、跨区间跨峰谷的会话计费、货币折算、时间范围解析（含时区与日期边界）、账本跨分片合并、项目归组、筛选器、宽字符表格对齐、**子代理委派树重建与合并/拆分两种口径的一致性**、以及 CLI 端到端（`test/cli.test.ts` 会真正拉起进程并校验 JSON）。
+测试按层组织：
+
+| 文件 | 覆盖 |
+| --- | --- |
+| `test/pricing/engine.test.ts` | **与厂商无关**的机制：区间选取与回退、峰谷时段边界与星期规则、按组件计费、跨时区判定 |
+| `test/pricing/deepseek.test.ts` | DeepSeek 的具体数字：各区间单价、2026-08-23 周末豁免、2026-04-26 缓存命中降价、9-10 精确切换点 |
+| `test/unit/report.test.ts` | 聚合：维度、筛选、子代理合并/拆分、总量与各行的精确对账 |
+| `test/unit/format.test.ts`、`test/unit/timerange.test.ts` | 精确十进制、时间范围解析（含时区与日期边界） |
+| `test/agents/dsh.test.ts` | DSH 适配器：跨分片合并、项目归组、委派树重建、多帧 zstd 日志读取 |
+| `test/cli.test.ts` | 端到端：真正拉起进程，校验 JSON 结构、退出码、`--agent`/`--provider` 选择 |
+
+`test/support/` 提供合成数据集与**合成价格表**（`stub-pricing.ts`），因此机制类测试不依赖任何真实厂商或 agent 的文件格式。
 
 代码不引入构建步骤：`bin/dsh-usage.js` 直接用 Node 的类型擦除执行 `src/cli.ts`，因此源码即产物，不存在构建产物与源码不一致的问题。
 
 ### 目录
 
-| 文件 | 职责 |
-| --- | --- |
-| `src/pricing-data.ts` | 官方价格表（唯一需要随官方调价更新的文件） |
-| `src/pricing.ts` | 区间选取、峰谷判定、时区处理 |
-| `src/accounting.ts` | 逐条计费与精确金额累加 |
-| `src/report.ts` | 筛选、维度聚合、会话清单 |
-| `src/loader.ts` | 读取并合并 DSH 的落盘数据 |
-| `src/sessionlog.ts` | 读取会话日志首帧，重建委派树（多帧 zstd） |
-| `src/timerange.ts` | 时间范围解析 |
-| `src/format.ts` | 文本表格与 JSON 序列化 |
-| `src/money.ts` | 十进制精确算术 |
-| `src/cli.ts` | 命令行入口 |
+```text
+src/
+├── core/                  中立模型与基础设施（不认识任何 agent / 厂商）
+│   ├── types.ts           UsageRecord / SessionRecord / ProjectRecord / UsageDataset / CostTotals
+│   ├── money.ts           十进制精确算术
+│   └── buckets.ts         token 桶工具
+├── agents/                维度一：从哪里读用量
+│   ├── contract.ts        AgentAdapter 接口
+│   ├── registry.ts        注册表与自动探测
+│   └── dsh/               DSH 适配器
+│       ├── loader.ts        账本 / 项目注册表 / 投影缓存 → 中立模型
+│       └── sessionlog.ts    会话日志（多帧 zstd）→ 委派树
+├── pricing/               维度二：怎么算钱
+│   ├── contract.ts        PricingProvider / PricePeriod / RateComponent
+│   ├── engine.ts          与厂商无关的区间选取、峰谷判定、按组件计费
+│   ├── registry.ts        注册表
+│   └── vendors/deepseek.ts  DeepSeek 官方价格表（唯一随官方调价更新的文件）
+├── accounting.ts          逐条计费、精确累加与一次性取整
+├── report.ts              筛选、维度聚合、会话清单
+├── timerange.ts           时间范围解析
+├── format.ts              文本表格与 JSON 序列化
+└── cli.ts                 命令行入口
+```
+
+`src/index.ts`、`src/agents/index.ts`、`src/pricing/index.ts` 是库入口，可以只作为依赖使用而不走 CLI。
