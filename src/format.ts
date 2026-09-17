@@ -56,6 +56,30 @@ function clip(text: string, width: number): string {
   return `${result}…`;
 }
 
+/**
+ * Width of the label column every `key  value` block pads to.
+ *
+ * Wide enough for the longest label this tool prints, so the values line up in
+ * one column down the whole report.
+ */
+const LABEL_WIDTH = 18;
+
+/**
+ * Pad a label to the shared column.
+ *
+ * Measured in terminal cells, not characters: the labels mix ASCII and
+ * full-width parentheses, and a full-width one is a single character occupying
+ * two cells — so `padEnd` would leave exactly those rows short.
+ */
+function label(text: string): string {
+  return pad(text, LABEL_WIDTH);
+}
+
+/** One `label  value` line of an aligned block. */
+function labeled(text: string, value: string): string {
+  return `${label(text)}  ${value}`;
+}
+
 /** Render a column-aligned table. */
 function table(
   headers: readonly string[],
@@ -165,10 +189,11 @@ function tokenLines(requests: number, tokens: TokenTotals): string[] {
 }
 
 /**
- * Render one line per pricing component.
+ * Render one line per pricing component, as an aligned three-column block.
  *
  * The component list is the provider's, not this tool's, so a vendor that bills
- * a bucket nobody else does still gets a labelled line.
+ * a bucket nobody else does still gets a labelled line. Tokens and money each
+ * get their own column so the numbers can be compared down the block.
  */
 function costLines(
   cost: CostTotals,
@@ -179,19 +204,23 @@ function costLines(
 ): string[] {
   const lines: string[] = [];
   const seen = new Set<string>();
+  const row = (name: string, tokens: string, amount: string): string =>
+    `  ${pad(clip(name, LABEL_WIDTH), LABEL_WIDTH)}  ${pad(tokens, 14, 'right')}  ${amount}`;
   for (const [id, info] of components) {
     const amount = amountForComponent(id, cost);
     if (amount === undefined) continue;
     seen.add(id);
-    lines.push(`  ${clip(basisLabelText(info.component), 18).padEnd(18)} ${count(info.tokens)} tokens → ${money(amount, symbol)}`);
+    const tokens = id === 'input-miss' ? info.tokens + cost.cacheWriteTokens : info.tokens;
+    lines.push(row(basisLabelText(info.component), count(tokens), money(amount, symbol)));
   }
   for (const [id, amount] of componentAmounts(cost)) {
     if (seen.has(id)) continue;
-    lines.push(`  ${clip(id, 18).padEnd(18)} → ${money(amount, symbol)}`);
+    lines.push(row(id, '', money(amount, symbol)));
   }
-  lines.push(
-    `  ${'费用合计'.padEnd(18)} ${money(cost.total, symbol)}${currencyRate === 1 ? '' : `　(按 1:${currencyRate} 折算为 ${currency}，原始计价货币见 price)`}`,
-  );
+  lines.push(row('费用合计', '', money(cost.total, symbol)));
+  if (currencyRate !== 1) {
+    lines.push(`　(按 1:${currencyRate} 折算为 ${currency}，原始计价货币见 price)`);
+  }
   return lines;
 }
 
@@ -433,9 +462,10 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
   sections.push(
     [
       'Agent 会话列表',
-      `Agent     ${agentLabel === undefined ? result.agent : `${result.agent}（${agentLabel}）`}`,
-      `数据目录  ${result.source}`,
-      `项目数 ${count(result.projects.length)}　会话数 ${count(result.totalSessions)}`,
+      labeled('Agent', agentLabel === undefined ? result.agent : `${result.agent}（${agentLabel}）`),
+      labeled('数据目录', result.source),
+      labeled('项目数', count(result.projects.length)),
+      labeled('会话数', count(result.totalSessions)),
     ].join('\n'),
   );
   for (const project of result.projects) {

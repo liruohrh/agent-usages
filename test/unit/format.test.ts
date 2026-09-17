@@ -376,6 +376,99 @@ describe('table totals rows', () => {
   });
 });
 
+describe('label alignment', () => {
+  /** The value column of every `label  value` line, in terminal cells. */
+  function valueColumns(text: string): Map<string, number> {
+    const found = new Map<string, number>();
+    for (const line of text.split('\n')) {
+      const match = /^(\s*)(\S.*?)(\s{2,})(\S.*)$/.exec(line);
+      if (match === null) continue;
+      const [, indent = '', name = '', gap = '', value = ''] = match;
+      found.set(value, cells(`${indent}${name}${gap}`));
+      void value;
+    }
+    return found;
+  }
+
+  it('lines the header values up in one column', () => {
+    const text = formatUsageReport(report({ dimension: 'project' }), engine, '¤', 'An Agent');
+    const columns = new Set<string>();
+    for (const key of ['Agent', '数据目录', '维度', '时间范围', '计价来源']) {
+      // Skip the report title, which happens to begin with `Agent` too.
+      const line = text.split('\n').find((row) => new RegExp(`^${key}\\s{2,}\\S`).test(row));
+      expect(line, key).toBeDefined();
+      const match = /^(\S.*?)(\s{2,})(\S.*)$/.exec(line ?? '');
+      expect(match, key).not.toBeNull();
+      columns.add(String(cells(`${match?.[1] ?? ''}${match?.[2] ?? ''}`)));
+    }
+    expect(columns.size).toBe(1);
+  });
+
+  it('lines the token block values up despite mixed-width parentheses', () => {
+    // `输入(缓存未命中)` mixes an ASCII paren with a full-width one in the
+    // sibling label `输入（…）`-style rows; padding by character count would
+    // leave those rows short by one cell each.
+    const tokens: TokenTotals = { ...emptyBuckets(), input: 1, cacheRead: 2, cacheWrite: 3, output: 4, reasoning: 1 };
+    const text = formatUsageReport(report({ requests: 1, tokens }), engine, '¤');
+    const block = text.split('\n').filter((line) => /^(请求数|输入|输出|Token 总计)/.test(line));
+    expect(block).toHaveLength(9);
+    const columns = new Set(
+      block.map((line) => {
+        const match = /^(\S.*?)(\s{2,})(\S.*)$/.exec(line);
+        return String(cells(`${match?.[1] ?? ''}${match?.[2] ?? ''}`));
+      }),
+    );
+    expect(columns.size).toBe(1);
+  });
+
+  it('aligns the token and money columns of the cost block', () => {
+    const text = formatUsageReport(
+      report({
+        cost: cost('5.0200', { cacheHitInputCost: '0.0200', cacheMissInputCost: '1.0000', outputCost: '4.0000' }),
+        components: new Map([
+          ['input-hit', { component: { id: 'input-hit', label: '命中', basis: 'cacheRead', rate: '0.02', per: 1_000_000 }, tokens: 1_000_000 }],
+          ['input-miss', { component: { id: 'input-miss', label: '未命中输入很长的名字', basis: 'input', rate: '1', per: 1_000_000 }, tokens: 1_000_000 }],
+          ['output', { component: { id: 'output', label: '输出', basis: 'output', rate: '4', per: 1_000_000 }, tokens: 1_000_000 }],
+        ]),
+      }),
+      engine,
+      '¤',
+    );
+    const rows = text.split('\n').filter((line) => /^(  )(命中|未命中|输出|费用合计)/.test(line));
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    const tokenColumns = new Set<number>();
+    const moneyColumns = new Set<number>();
+    for (const line of rows) {
+      const tokenMatch = /\s(\d[\d,]*)\s+¤/.exec(line);
+      if (tokenMatch !== null) tokenColumns.add(cells(line.slice(0, tokenMatch.index + 1 + tokenMatch[1]!.length)));
+      const moneyMatch = /¤/.exec(line);
+      if (moneyMatch !== null) moneyColumns.add(cells(line.slice(0, moneyMatch.index)));
+    }
+    // Every row that has a token figure puts it in the same column, and every
+    // amount starts in the same column as well.
+    expect(tokenColumns.size).toBe(1);
+    expect(moneyColumns.size).toBe(1);
+  });
+
+  it('reports the input-miss row as the cache-miss counter plus cache writes', () => {
+    // The miss component charges `input + cacheWrite`, so the tokens printed
+    // beside its amount must include the writes — otherwise the line would not
+    // explain the money next to it.
+    const text = formatUsageReport(
+      report({
+        tokens: { ...emptyBuckets(), input: 1_000, cacheWrite: 500 },
+        cost: cost('1.5000', { cacheMissInputCost: '1.5000' }),
+        components: new Map([
+          ['input-miss', { component: { id: 'input-miss', label: '未命中', basis: 'inputAndCacheWrite', rate: '1', per: 1_000 }, tokens: 1_500 }],
+        ]),
+      }),
+      engine,
+      '¤',
+    );
+    expect(text).toContain('1,500');
+  });
+});
+
 describe('the by-scope table', () => {
   /** A result carrying a scope breakdown. */
   function scoped(own: [string, number], subagents: [string, number]): UsageResult {

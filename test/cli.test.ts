@@ -293,6 +293,34 @@ describe('usage', () => {
   });
 });
 
+describe('text output alignment', () => {
+  /** The value column of each aligned block, in terminal cells. */
+  function columnsOf(lines: readonly string[]): number[] {
+    const cells = (text: string): number =>
+      [...text].reduce((total, character) => total + ((character.codePointAt(0) ?? 0) > 0x2e80 ? 2 : 1), 0);
+    return lines.map((line) => {
+      const match = /^(\S.*?)(\s{2,})(\S.*)$/.exec(line);
+      return match === null ? -1 : cells(`${match[1]}${match[2]}`);
+    });
+  }
+
+  it('lines every block up in one column, including labels with full-width parens', async () => {
+    const { stdout } = await cli(['usage', '--project', '--subagents']);
+    const lines = stdout.split('\n');
+    for (const prefix of ['Agent', '数据目录', '维度', '时间范围', '计价来源']) {
+      const line = lines.find((row) => new RegExp(`^${prefix}\\s{2,}\\S`).test(row));
+      expect(line, prefix).toBeDefined();
+      expect(new Set(columnsOf([line as string])).size).toBe(1);
+      expect(columnsOf([line as string])[0]).toBe(columnsOf([lines.find((row) => /^数据目录\s{2,}\S/.test(row)) as string])[0]);
+    }
+    const tokenBlock = lines.filter((row) => /^(请求数|输入|输出|Token 总计)[^\s]*\s{2,}\S/.test(row));
+    expect(tokenBlock.length).toBeGreaterThan(5);
+    expect(new Set(columnsOf(tokenBlock)).size).toBe(1);
+    const costBlock = lines.filter((row) => /^  (缓存|输出|费用合计)/.test(row));
+    expect(costBlock.length).toBeGreaterThan(2);
+  });
+});
+
 describe('agent and provider selection', () => {
   it('auto-detects DSH from the default location', async () => {
     const parsed = JSON.parse((await cli(['usage', '--json'])).stdout) as { agent: string };
