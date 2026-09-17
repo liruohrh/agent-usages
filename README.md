@@ -401,6 +401,23 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 
 ---
 
+## 表格合计行
+
+文本模式的三张表（按项目、按会话、会话列表）在**行数多于一行**时，末尾会补一条 `合计` 行，方便直接核对；只有一行时省略——那时合计与该行完全重复，没有信息量。
+
+合计行取自报表本身的总量，而不是把上面各行相加：行是取整后的显示值，且合并口径下父会话行已经含了子代理，直接相加会得到错的数。
+
+```
+按项目:
+项目       路径                         会话  子代理   请求  未命中输入  缓存命中   输出      费用
+─────────  ───────────────────────────  ────  ──────  ─────  ──────────  ────────  ─────  ────────
+example-a  /home/user/wsme/example-a      1       2    530        439K    123.6M   397K   ¥7.3491
+example-b    /home/user/ws2/…/example-b       2       —    184        131K     25.6M   199K   ¥2.4305
+example-c   /home/user/ws2/…/example-c      2      42  1,447       1.83M    109.3M  1.66M  ¥14.8963
+─────────  ───────────────────────────  ────  ──────  ─────  ──────────  ────────  ─────  ────────
+合计                                       6      44  2,161       2.39M    258.5M  2.26M  ¥24.6759
+```
+
 ## JSON 输出
 
 `usage --json`：
@@ -453,6 +470,7 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 
 - **金额是十进制字符串**（如 `"18.9037"`），不是浮点数——货币不该被浮点误差污染，字符串也能无损穿过 JSON。token 数是整数。
 - 金额保留 4 位小数。**总量 = 各项目之和 = 各行之和**，精确到最后一位：总量是对范围内记录一次性算出的，不会把各行的取整余数累加进来（合并/拆分两种口径的总量因此完全相同）。
+
 - 时间同时给出 epoch 毫秒与 ISO 8601（UTC）。
 - `pricingBands[].band` ∈ `peak` / `off-peak` / `flat`；`resolution` ∈ `exact` / `fallback-later` / `fallback-earlier` / `fallback-default`，用于说明价格区间是精确命中还是按回退规则选取。
 - `sessionReports` 仅在 `--session` 维度出现；未产生用量的会话不会作为 0 值行出现。
@@ -500,7 +518,7 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 
 ```bash
 pnpm install
-pnpm test        # vitest，188 个用例
+pnpm test        # vitest，198 个用例
 pnpm typecheck   # tsc --noEmit
 ```
 
@@ -511,7 +529,8 @@ pnpm typecheck   # tsc --noEmit
 | `test/pricing/engine.test.ts` | **与厂商无关**的机制：区间选取与回退、峰谷时段边界与星期规则、按组件计费、跨时区判定 |
 | `test/pricing/deepseek.test.ts` | DeepSeek 的具体数字：各区间单价、2026-08-23 周末豁免、2026-04-26 缓存命中降价、9-10 精确切换点 |
 | `test/unit/report.test.ts` | 聚合：维度、筛选（含按标题搜索的语义）、子代理合并/拆分、总量与各行的精确对账 |
-| `test/unit/format.test.ts`、`test/unit/timerange.test.ts` | 精确十进制、时间范围解析（含时区与日期边界） |
+| `test/unit/format.test.ts` | 呈现层：表格对齐（含宽字符）、合计行、JSON 字段 |
+| `test/unit/money.test.ts`、`test/unit/timerange.test.ts` | 精确十进制、时间范围解析（含时区与日期边界） |
 | `test/agents/dsh.test.ts` | DSH 适配器：跨分片合并、项目归组、委派树重建、多帧 zstd 日志读取 |
 | `test/cli.test.ts` | 端到端：真正拉起进程，校验 JSON 结构、退出码、`--agent`/`--provider` 选择 |
 

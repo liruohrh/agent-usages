@@ -57,15 +57,28 @@ function clip(text: string, width: number): string {
 }
 
 /** Render a column-aligned table. */
-function table(headers: readonly string[], rows: readonly (readonly string[])[], aligns: readonly ('left' | 'right')[]): string {
+function table(
+  headers: readonly string[],
+  rows: readonly (readonly string[])[],
+  aligns: readonly ('left' | 'right')[],
+  totals?: readonly string[] | undefined,
+): string {
   const widths = headers.map((header, index) => {
     let width = displayWidth(header);
     for (const row of rows) width = Math.max(width, displayWidth(row[index] ?? ''));
+    // A totals row can be wider than every row above it (a summed number is the
+    // largest of its column), so it participates in sizing.
+    if (totals !== undefined) width = Math.max(width, displayWidth(totals[index] ?? ''));
     return width;
   });
   const renderRow = (row: readonly string[]): string =>
     row.map((cell, index) => pad(clip(cell, Math.max(widths[index] ?? 0, 3)), widths[index] ?? 0, aligns[index] ?? 'left')).join('  ').trimEnd();
-  return [renderRow(headers), widths.map((width) => '─'.repeat(width)).join('  '), ...rows.map(renderRow)].join('\n');
+  const separator = widths.map((width) => '─'.repeat(width)).join('  ');
+  const lines = [renderRow(headers), separator, ...rows.map(renderRow)];
+  // A total over a single row says nothing the row does not, so it is shown
+  // only when it actually adds up several rows.
+  if (totals !== undefined && rows.length > 1) lines.push(separator, renderRow(totals));
+  return lines.join('\n');
 }
 
 /** Render an integer with thousands separators. */
@@ -292,6 +305,19 @@ export function formatUsageReport(
             money(project.cost.total, symbol),
           ]),
           ['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
+          // The total is the report's own grand total, so this row is also the
+          // check that the rows above add up to it.
+          [
+            '合计',
+            '',
+            count(result.projects.reduce((total, project) => total + project.activeSessions, 0)),
+            count(result.subagents.rows),
+            count(result.requests),
+            compact(result.tokens.input),
+            compact(result.tokens.cacheRead),
+            compact(result.tokens.output),
+            money(result.cost.total, symbol),
+          ],
         ),
       ].join('\n'),
     );
@@ -316,6 +342,20 @@ export function formatUsageReport(
       }
     }
     if (rows.length > 0) {
+      // Totals come from the report rather than from the rendered rows: the rows
+      // are rounded for display and may fold subagents into a parent, so summing
+      // them would under-report the true total.
+      const totals: string[] = [
+        '合计',
+        '',
+        '',
+        '',
+        count(result.requests),
+        compact(result.tokens.input),
+        compact(result.tokens.cacheRead),
+        compact(result.tokens.output),
+        money(result.cost.total, symbol),
+      ];
       sections.push(
         [
           '按会话（↳ 为子代理）:',
@@ -323,6 +363,7 @@ export function formatUsageReport(
             ['项目', '标题', '会话 ID', '子代理', '请求', '未命中输入', '缓存命中', '输出', '费用'],
             rows,
             ['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right'],
+            totals,
           ),
         ].join('\n'),
       );
@@ -377,6 +418,18 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
           compact(session.tokens.output),
         ]),
         ['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right'],
+        // A folded row already contains its subagents, so summing the rows would
+        // count them twice; the total therefore comes from the sessions in scope.
+        [
+          '合计',
+          '',
+          dayLabel(project.firstUsage),
+          dayLabel(project.lastUsage),
+          '',
+          count(project.sessions.reduce((total, session) => total + session.requests, 0)),
+          compact(project.sessions.reduce((total, session) => total + totalTokens(session.tokens) - session.tokens.output, 0)),
+          compact(project.sessions.reduce((total, session) => total + session.tokens.output, 0)),
+        ],
       ),
     );
   }
