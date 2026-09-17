@@ -7,7 +7,7 @@
  * line instead of an empty cell.
  */
 
-import { totalTokens } from './core/buckets.ts';
+import { tokenBreakdown, totalTokens } from './core/buckets.ts';
 import type { CostTotals, TokenTotals } from './core/types.ts';
 import type { PricingEngine, RateComponent } from './pricing/index.ts';
 import type { SessionListResult, UsageResult } from './report.ts';
@@ -134,13 +134,21 @@ function basisLabel(engine: PricingEngine, component: RateComponent): string {
 
 /** Render the token totals block. */
 function tokenLines(requests: number, tokens: TokenTotals): string[] {
-  return [
-    `请求数            ${count(requests)}`,
-    `输入(缓存未命中)   ${count(tokens.input)}${tokens.cacheWrite > 0 ? `  (另有缓存写入 ${count(tokens.cacheWrite)})` : ''}`,
-    `输入(缓存命中)     ${count(tokens.cacheRead)}`,
-    `输出              ${count(tokens.output)}${tokens.reasoning > 0 ? `  (含推理 ${count(tokens.reasoning)})` : ''}`,
-    `Token 总计         ${count(totalTokens(tokens))}`,
+  const parts = tokenBreakdown(tokens);
+  const lines = [
+    `请求数              ${count(requests)}`,
+    `输入(缓存未命中)    ${count(parts.inputMiss)}`,
+    `输入(缓存命中)      ${count(parts.inputHit)}`,
   ];
+  if (parts.inputWrite > 0) lines.push(`输入(缓存写入)      ${count(parts.inputWrite)}`);
+  lines.push(`输入合计            ${count(parts.inputTotal)}`);
+  // Reasoning is reported inside the completion count, so it is shown as a part
+  // of the output rather than beside it; `输出合计` is that completion count.
+  lines.push(`输出(思考)          ${count(parts.reasoning)}`);
+  lines.push(`输出(非思考)        ${count(parts.outputOnly)}`);
+  lines.push(`输出合计            ${count(parts.outputTotal)}`);
+  lines.push(`Token 总计          ${count(parts.total)}`);
+  return lines;
 }
 
 /**
@@ -472,6 +480,9 @@ export function usageToJson(result: UsageResult, engine: PricingEngine): unknown
       requests: result.requests,
       unpriced: result.unpriced,
       tokens: result.tokens,
+      // The reader-facing roll-up: the four raw buckets are disjoint, so the
+      // totals are sums of them and are easy to get wrong by hand.
+      tokenBreakdown: tokenBreakdown(result.tokens),
       cost: result.cost,
     },
     costComponents: [...result.components].map(([id, info]) => ({

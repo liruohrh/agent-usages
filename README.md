@@ -375,6 +375,23 @@ dsh-usage usage --from 2026-08-01 --to 2026-09-01
 
 上述回退都会在输出的“计价区间”一节中显式标注（“按其后第一个区间的价格计算”等），不会静默处理。补充或修正价格只需改 `src/pricing-data.ts` 一处。
 
+### Token 统计口径
+
+四个桶**互不重叠**，因此合计是相加而不是取其一：
+
+| 行 | 含义 |
+| --- | --- |
+| 输入(缓存未命中) | 未命中缓存的 prompt token |
+| 输入(缓存命中) | 命中缓存的 prompt token |
+| 输入(缓存写入) | 缓存写入 token；该来源不写入时整行隐藏 |
+| **输入合计** | 上述三项之和 —— 一次请求的完整 prompt |
+| 输出(思考) | 推理 token |
+| 输出(非思考) | `输出 − 思考` |
+| **输出合计** | `非思考 + 思考`，即供应商报告的 completion 数 |
+| Token 总计 | 输入合计 + 输出合计 |
+
+**思考 token 是输出的一部分，不是额外部分**：供应商把它报在 completion 计数里面，所以「输出合计」等于供应商自己的 completion 数，思考在其中只计一次。把它单独列出是为了看清推理占比，而不是为了再加一遍。`usage --json` 的 `totals.tokenBreakdown` 给出同一组数字。
+
 ### 计费口径
 
 DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的 `@deepseek-ai/dsh-token-meter`）：
@@ -518,7 +535,7 @@ example-c   /home/user/ws2/…/example-c      2      42  1,447       1.83M    10
 
 ```bash
 pnpm install
-pnpm test        # vitest，198 个用例
+pnpm test        # vitest，206 个用例
 pnpm typecheck   # tsc --noEmit
 ```
 

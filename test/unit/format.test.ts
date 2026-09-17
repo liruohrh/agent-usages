@@ -99,13 +99,34 @@ describe('formatUsageReport', () => {
     expect(text).toContain('计价来源  Stub Vendor');
   });
 
-  it('groups thousands in token counts and keeps reasoning inside output', () => {
-    const tokens: TokenTotals = { ...emptyBuckets(), output: 1_000_000, reasoning: 250_000, cacheRead: 130_399_872 };
+  it('reports input, reasoning, output, and totals as separate lines', () => {
+    const tokens: TokenTotals = {
+      ...emptyBuckets(),
+      input: 1_000,
+      cacheRead: 130_399_872,
+      output: 1_000_000,
+      reasoning: 250_000,
+    };
     const text = formatUsageReport(report({ requests: 3, tokens }), engine, '¤');
-    expect(text).toContain('130,399,872');
-    expect(text).toContain('含推理 250,000');
-    // Output is counted once; reasoning is a subset, never added on top.
-    expect(text).toContain('Token 总计         131,399,872');
+    expect(text).toContain('输入(缓存未命中)    1,000');
+    expect(text).toContain('输入(缓存命中)      130,399,872');
+    // The input total adds the disjoint prompt buckets.
+    expect(text).toContain('输入合计            130,400,872');
+    // Reasoning and the rest of the completion are shown apart...
+    expect(text).toContain('输出(思考)          250,000');
+    expect(text).toContain('输出(非思考)        750,000');
+    // ...and the output total is the provider's own completion count, so
+    // reasoning appears in it exactly once.
+    expect(text).toContain('输出合计            1,000,000');
+    expect(text).toContain('Token 总计          131,400,872');
+  });
+
+  it('hides the cache-write line when the provider never writes', () => {
+    const none = formatUsageReport(report({ tokens: { ...emptyBuckets(), input: 1 } }), engine, '¤');
+    expect(none).not.toContain('输入(缓存写入)');
+    const some = formatUsageReport(report({ tokens: { ...emptyBuckets(), input: 1, cacheWrite: 5 } }), engine, '¤');
+    expect(some).toContain('输入(缓存写入)      5');
+    expect(some).toContain('输入合计            6');
   });
 
   it('lists the components the pricing provider charged', () => {
@@ -367,6 +388,24 @@ describe('usageToJson', () => {
     expect(json['agent']).toBe('test');
     expect(json['source']).toBe('/tmp/test');
     expect(json['pricingProvider']).toBe('stub');
+  });
+
+  it('emits the same token roll-up it prints', () => {
+    const json = usageToJson(
+      report({ tokens: { ...emptyBuckets(), input: 10, cacheRead: 20, output: 30, reasoning: 12 } }),
+      engine,
+    ) as { totals: { tokens: TokenTotals; tokenBreakdown: Record<string, number> } };
+    expect(json.totals.tokens.cacheRead).toBe(20);
+    expect(json.totals.tokenBreakdown).toEqual({
+      inputMiss: 10,
+      inputHit: 20,
+      inputWrite: 0,
+      inputTotal: 30,
+      reasoning: 12,
+      outputOnly: 18,
+      outputTotal: 30,
+      total: 60,
+    });
   });
 
   it('emits ISO timestamps beside the epoch values', () => {
