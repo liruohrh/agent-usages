@@ -19,10 +19,36 @@ describe('presetRange', () => {
     expect(new Date(range.to as number)).toEqual(new Date(2026, 9, 1, 0, 0, 0, 0));
   });
 
+  it('covers the current week, starting on Monday', () => {
+    // 2026-09-17 is a Thursday, so the week runs 09-14 → 09-21.
+    const range = presetRange('week', NOW);
+    expect(new Date(range.from as number)).toEqual(new Date(2026, 8, 14, 0, 0, 0, 0));
+    expect(new Date(range.to as number)).toEqual(new Date(2026, 8, 21, 0, 0, 0, 0));
+    expect(range.label).toBe('本周');
+  });
+
+  it('treats Sunday as the last day of the week, not the first', () => {
+    const sunday = new Date(2026, 8, 20, 23, 0, 0, 0);
+    const range = presetRange('week', sunday);
+    expect(new Date(range.from as number)).toEqual(new Date(2026, 8, 14, 0, 0, 0, 0));
+  });
+
   it('covers the whole current year', () => {
     const range = presetRange('year', NOW);
     expect(new Date(range.from as number)).toEqual(new Date(2026, 0, 1, 0, 0, 0, 0));
     expect(new Date(range.to as number)).toEqual(new Date(2027, 0, 1, 0, 0, 0, 0));
+  });
+});
+
+describe('week tokens', () => {
+  it('accepts both spellings and offsets them by whole weeks', () => {
+    const current = resolveRange({ spec: 'week', now: NOW });
+    expect(current.label).toBe('本周');
+    const previous = resolveRange({ spec: 'week-1', now: NOW });
+    expect(previous.label).toBe('本周前1周');
+    expect(new Date(previous.from as number)).toEqual(new Date(2026, 8, 7, 0, 0, 0, 0));
+    expect(new Date(previous.to as number)).toEqual(new Date(2026, 8, 14, 0, 0, 0, 0));
+    expect(resolveRange({ spec: '本周', now: NOW }).from).toBe(current.from);
   });
 });
 

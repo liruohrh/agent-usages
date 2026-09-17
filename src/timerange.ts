@@ -18,7 +18,7 @@ export interface TimeRange {
 }
 
 /** Built-in relative presets. */
-export type RangePreset = 'today' | 'month' | 'year';
+export type RangePreset = 'today' | 'week' | 'month' | 'year';
 
 /** A local calendar date/time, before timezone resolution. */
 interface LocalParts {
@@ -33,7 +33,7 @@ interface LocalParts {
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
-const PRESET_PATTERN = /^(today|month|year|今日|本月|今年|今天)(?:([+-])(\d+))?$/;
+const PRESET_PATTERN = /^(today|week|month|year|今日|本周|这周|本月|今年|今天)(?:([+-])(\d+))?$/;
 
 /** Parse a bare ISO date, rejecting impossible calendar dates. */
 function parseDate(text: string): LocalParts | undefined {
@@ -137,6 +137,9 @@ const PRESET_ALIASES: Readonly<Record<string, RangePreset>> = {
   today: 'today',
   '今日': 'today',
   '今天': 'today',
+  week: 'week',
+  '本周': 'week',
+  '这周': 'week',
   month: 'month',
   '本月': 'month',
   year: 'year',
@@ -146,25 +149,30 @@ const PRESET_ALIASES: Readonly<Record<string, RangePreset>> = {
 /** Shift a preset's anchor date by whole calendar units, staying in local time. */
 function shiftAnchor(anchor: Date, preset: RangePreset, amount: number): Date {
   if (preset === 'today') return new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + amount);
+  if (preset === 'week') {
+    // Weeks start on Monday, so Sunday (0) counts as the seventh day.
+    const sinceMonday = (anchor.getDay() + 6) % 7;
+    return new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - sinceMonday + amount * 7);
+  }
   if (preset === 'month') return new Date(anchor.getFullYear(), anchor.getMonth() + amount, 1);
   return new Date(anchor.getFullYear() + amount, 0, 1);
 }
 
 /**
  * Resolve a named preset to a half-open range.
- * @param preset - `today`, `month`, or `year`.
+ * @param preset - `today`, `week`, `month`, or `year`.
  * @param now - the reference instant; defaults to the current time.
  * @returns the range covering the whole current period.
  */
 export function presetRange(preset: RangePreset, now: Date = new Date()): TimeRange {
-  const labels: Record<RangePreset, string> = { today: '今日', month: '本月', year: '今年' };
+  const labels: Record<RangePreset, string> = { today: '今日', week: '本周', month: '本月', year: '今年' };
   const start = shiftAnchor(now, preset, 0);
   const end = shiftAnchor(now, preset, 1);
   return { from: start.getTime(), to: end.getTime(), label: labels[preset] };
 }
 
 /**
- * Resolve a `today|month|year` token, optionally offset, e.g. `month-1`.
+ * Resolve a `today|week|month|year` token, optionally offset, e.g. `month-1`.
  * @param token - the user's token.
  * @param now - the reference instant.
  * @returns the resolved range, or `undefined` when the token is not a preset.
@@ -185,7 +193,7 @@ export function presetFromToken(token: string, now: Date = new Date()): TimeRang
   return {
     from: start.getTime(),
     to: end.getTime(),
-    label: `${base}${direction}${Math.abs(offset)}${preset === 'today' ? '天' : preset === 'month' ? '个月' : '年'}`,
+    label: `${base}${direction}${Math.abs(offset)}${preset === 'today' ? '天' : preset === 'week' ? '周' : preset === 'month' ? '个月' : '年'}`,
   };
 }
 
@@ -195,7 +203,7 @@ export interface RangeInput {
   from?: string | undefined;
   /** Upper bound text, already parsed from `--to`. */
   to?: string | undefined;
-  /** A preset selected by `--today` / `--month` / `--year`. */
+  /** A preset selected by `--today` / `--week` / `--month` / `--year`. */
   preset?: RangePreset | undefined;
   /** A positional range spec: a preset token or `A..B`. */
   spec?: string | undefined;
@@ -213,7 +221,7 @@ export function resolveRange(input: RangeInput = {}): TimeRange {
   const now = input.now ?? new Date();
   const given = [input.preset !== undefined, input.spec !== undefined, input.from !== undefined || input.to !== undefined];
   if (given.filter(Boolean).length > 1) {
-    throw new Error('时间范围只能指定一次：--today/--month/--year、位置参数、或 --from/--to 三选一');
+    throw new Error('时间范围只能指定一次：--today/--week/--month/--year、位置参数、或 --from/--to 三选一');
   }
 
   let from: number | null = null;
