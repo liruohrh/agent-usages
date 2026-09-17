@@ -249,10 +249,16 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const sessions: SessionRecord[] = [];
   const projectOfSession = new Map<string, string>();
   for (const sessionId of sessionIds) {
-    const records = logIndex.records.get(sessionId) ?? [];
-    records.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
     const sessionMeta = metaByCanonical.get(sessionId);
     const log = enrich ? logIndex.byId.get(sessionId) : undefined;
+    // A resumed/forked session's log opens with a copy of its parent's events.
+    // DSH records how long that seeded prefix is, and the parent already owns
+    // those requests, so the inherited part is dropped rather than billed twice.
+    const seedLength = log?.seedLength ?? null;
+    const records = (logIndex.records.get(sessionId) ?? []).filter(
+      (record) => seedLength === null || (record.seq ?? 0) > seedLength,
+    );
+    records.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
     const cwd = sessionMeta?.cwd ?? log?.cwd ?? null;
     const projectKey = resolveProjectKey(cwd, workspaceByPath) ?? syntheticProjectKey(cwd ?? undefined);
     const session = buildSession(sessionId, records, {
@@ -324,16 +330,19 @@ function buildSession(
     byId: ReadonlyMap<string, SessionLogInfo>;
   },
 ): SessionRecord {
-  const parentId = resolveParentId(meta.log, meta.byId);
-  const depth = meta.log?.delegationDepth ?? (parentId === null ? 0 : 1);
-  const isSubagent = parentId !== null || depth > 0;
+  // Delegation depth is the authority, not the mere presence of a parent: DSH
+  // records a resumed/forked session's `parentSession` with depth 0, and such a
+  // session is a continuation of its source, not a subagent it spawned.
+  const depth = meta.log?.delegationDepth ?? 0;
+  const isSubagent = depth > 0;
+  const parentId = isSubagent ? resolveParentId(meta.log, meta.byId) : null;
   return {
     id,
     title: meta.title,
     cwd: meta.cwd,
     createdAt: meta.createdAt,
     records,
-    parentId: isSubagent ? parentId : null,
+    parentId,
     depth,
     isSubagent,
     childIds: [],

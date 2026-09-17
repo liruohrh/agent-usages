@@ -64,6 +64,13 @@ export interface SessionLogInfo {
   cwd: string | null;
   /** Projected title from the log, used for subagents the projection cache omits. */
   title: string | null;
+  /**
+   * Length of the seeded prefix when this session resumed/forked another one.
+   *
+   * A resumed session's log starts with a copy of its parent's events; DSH marks
+   * how much was copied so the inherited requests are not billed twice.
+   */
+  seedLength: number | null;
 }
 
 /** A session log's header facts plus the billed requests it records. */
@@ -287,6 +294,7 @@ export async function readSessionLog(
     createdAt: asInteger(state.header['createdAt']) ?? null,
     cwd: asString(state.header['cwd']) ?? null,
     title: state.title ?? null,
+    seedLength: asInteger(state.header['seedLength']) ?? null,
     // The header carries the id, so every record can now be keyed
     // `<sessionId>:step:<turn>:<step>`.
     records: [...state.records.values()].map((pending) => ({

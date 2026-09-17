@@ -717,3 +717,67 @@ describe('session inventory', () => {
     expect(exampleApp?.sessions.slice(parentIndex + 1).every((session) => session.nested)).toBe(true);
   });
 });
+
+describe('resumed sessions', () => {
+  it('drops the inherited seed and does not call a fork a subagent', async () => {
+    const resumed = await mkdtemp(join(tmpdir(), 'agent-usages-fork-'));
+    const parentId = 'session-f0f0f0f0-0000-4000-8000-0000000000f0';
+    const childId = 'session-f1f1f1f1-0000-4000-8000-0000000000f1';
+    const cwd = '/home/user/ws/fork';
+    const usageEvent = (seq: number, time: number, input: number): string =>
+      JSON.stringify({
+        type: 'assistant/message',
+        seq,
+        time,
+        data: {
+          turn: 1,
+          step: seq,
+          message: { source: { provider: 'deepseek-official', model: 'deepseek-flash' } },
+          usage: { inputTokens: input, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: input + 1 },
+        },
+      });
+    const logs: [string, string][] = [
+      [
+        parentId,
+        [
+          JSON.stringify({ type: 'session', id: parentId, createdAt: 1, cwd, delegationDepth: 0 }),
+          usageEvent(10, AT.septemberOffPeak, 100),
+          usageEvent(20, AT.septemberOffPeak + 1, 200),
+        ].join('\n'),
+      ],
+      [
+        childId,
+        [
+          // A resumed session: DSH copies the parent's events and marks how long
+          // the seeded prefix is.
+          JSON.stringify({
+            type: 'session',
+            id: childId,
+            createdAt: 2,
+            cwd,
+            delegationDepth: 0,
+            parentSession: parentId,
+            seedLength: 20,
+          }),
+          usageEvent(10, AT.septemberOffPeak, 100),
+          usageEvent(20, AT.septemberOffPeak + 1, 200),
+          usageEvent(30, AT.septemberOffPeak + 2, 300),
+        ].join('\n'),
+      ],
+    ];
+    for (const [id, log] of logs) {
+      await mkdir(join(resumed, 'sessions', '--home-user-ws-fork--', id), { recursive: true });
+      await writeFile(join(resumed, 'sessions', '--home-user-ws-fork--', id, 'session.jsonl'), `${log}\n`);
+    }
+
+    const data = await dshAgent.load({ home: resumed });
+    const byId = new Map(data.sessions.map((session) => [session.id, session]));
+    expect(byId.get(parentId)?.records).toHaveLength(2);
+    // The copied prefix is the parent's history, already billed there.
+    expect(byId.get(childId)?.records.map((record) => record.seq)).toEqual([30]);
+    expect(byId.get(childId)?.isSubagent).toBe(false);
+    expect(byId.get(childId)?.parentId).toBeNull();
+    expect(byId.get(parentId)?.childIds).toEqual([]);
+    await rm(resumed, { recursive: true, force: true });
+  });
+});
