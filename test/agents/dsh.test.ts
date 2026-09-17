@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { dshAgent, resolveDshHome } from '../../src/agents/dsh/loader.ts';
-import { readSessionLog } from '../../src/agents/dsh/sessionlog.ts';
+import { locateSessionLogs, readSessionLog } from '../../src/agents/dsh/sessionlog.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { deepseekPricing } from '../../src/pricing/vendors/deepseek.ts';
 import { listSessions, resolveSessionSelectors, runQuery, type UsageQuery } from '../../src/report.ts';
@@ -127,13 +127,28 @@ async function writeShard(home: string, sessionId: string, record: Record<string
   );
 }
 
-/** Write an uncompressed session log: header frame plus an optional title frame. */
+/** One per-step usage event to embed in a fixture session log. */
+interface LogUsage {
+  turn: number;
+  step: number;
+  time: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite?: number;
+  reasoning?: number;
+  model?: string;
+  provider?: string;
+}
+
+/** Write an uncompressed session log: header frame, optional title, optional usage. */
 async function writeSessionLog(
   home: string,
   sessionId: string,
   cwd: string,
   header: { parentSession?: string; delegationDepth: number; createdAt: number },
   title?: string,
+  usage: readonly LogUsage[] = [],
 ): Promise<void> {
   const projectKey = `--${cwd.replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+/, '')}--`;
   const dir = join(home, 'sessions', projectKey, sessionId);
@@ -153,6 +168,29 @@ async function writeSessionLog(
   if (title !== undefined) {
     lines.push(JSON.stringify({ type: 'session/title', seq: 3, time: header.createdAt + 1000, data: { title } }));
   }
+  usage.forEach((entry, index) => {
+    lines.push(
+      JSON.stringify({
+        type: 'assistant/message',
+        seq: 10 + index,
+        time: entry.time,
+        data: {
+          turn: entry.turn,
+          step: entry.step,
+          message: {
+            source: { provider: entry.provider ?? 'deepseek-official', model: entry.model ?? 'deepseek-v4-flash' },
+          },
+          usage: {
+            inputTokens: entry.input,
+            outputTokens: entry.output,
+            cacheReadTokens: entry.cacheRead,
+            cacheWriteTokens: entry.cacheWrite ?? 0,
+            reasoningTokens: entry.reasoning ?? 0,
+          },
+        },
+      }),
+    );
+  });
   // DSH appends one zstd frame per batch; an uncompressed log is equally valid
   // input for the reader and keeps the fixture readable.
   await writeFile(join(dir, 'session.jsonl'), `${lines.join('\n')}\n`);
@@ -256,16 +294,95 @@ async function buildHome(): Promise<string> {
   return home;
 }
 
+const LOG_ONLY = {
+  parent: 'session-11111111-0000-4000-8000-0000000000a1',
+  child: 'session-22222222-0000-4000-8000-0000000000a2',
+  idle: 'session-33333333-0000-4000-8000-0000000000a3',
+} as const;
+const LOGONLY_WORKSPACE = 'cccccccc-3333-4333-8333-333333333333';
+const LOGONLY_PATH = '/home/user/ws/logonly';
+
+/**
+ * A stock DSH home: no `dsh-all-usage` ledger, only session logs.
+ *
+ * The harness itself already records each step's usage, so the adapter must
+ * produce the same report as the ledger path does from these logs alone.
+ */
+async function buildLogOnlyHome(): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), 'agent-usages-dsh-logs-'));
+  await mkdir(join(home, 'storages'), { recursive: true });
+
+  await writeFile(
+    join(home, 'storages', 'workspace.json'),
+    JSON.stringify({
+      unit: { name: 'workspace', version: 2 },
+      global: { initialized: true, workspaceIds: [LOGONLY_WORKSPACE], archivedSessionIds: [] },
+      tables: {
+        workspaces: {
+          [LOGONLY_WORKSPACE]: { path: LOGONLY_PATH, title: 'logonly', sessionIds: [], createdAt: 'x', updatedAt: 'x' },
+        },
+      },
+    }),
+  );
+
+  await writeFile(
+    join(home, 'storages', 'session_projcache.json'),
+    JSON.stringify({
+      unit: { name: 'session_projcache', version: 3 },
+      global: null,
+      tables: {
+        sessions: {
+          [LOG_ONLY.idle]: {
+            identity: { createdAt: Date.parse('2026-09-12T00:00:00Z'), cwd: LOGONLY_PATH },
+            rows: { title: { ver: 1, seq: 9, val: '从未计费的会话' } },
+          },
+        },
+      },
+    }),
+  );
+
+  // Two off-peak requests on a top-level session and one on its subagent; the
+  // third session only exists in the projection cache.
+  await writeSessionLog(
+    home,
+    LOG_ONLY.parent,
+    LOGONLY_PATH,
+    { delegationDepth: 0, createdAt: Date.parse('2026-09-11T10:00:00Z') },
+    '只用日志的会话',
+    [
+      { turn: 1, step: 1, time: AT.septemberOffPeak, input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, reasoning: 400_000 },
+      { turn: 1, step: 2, time: AT.septemberOffPeak + 1000, input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 },
+    ],
+  );
+  await writeSessionLog(
+    home,
+    LOG_ONLY.child,
+    LOGONLY_PATH,
+    { parentSession: LOG_ONLY.parent, delegationDepth: 1, createdAt: Date.parse('2026-09-11T10:30:00Z') },
+    '日志里的子代理',
+    [{ turn: 1, step: 1, time: AT.septemberOffPeak + 2000, input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }],
+  );
+  await writeSessionLog(home, LOG_ONLY.idle, LOGONLY_PATH, {
+    delegationDepth: 0,
+    createdAt: Date.parse('2026-09-12T00:00:00Z'),
+  });
+
+  return home;
+}
+
 let home: string;
+let logOnlyHome: string;
 const engine = createPricingEngine(deepseekPricing);
 const context = { engine, pricingProvider: engine.provider.id };
 
 beforeEach(async () => {
   home = await buildHome();
+  logOnlyHome = await buildLogOnlyHome();
 });
 
 afterEach(async () => {
   await rm(home, { recursive: true, force: true });
+  await rm(logOnlyHome, { recursive: true, force: true });
 });
 
 /** A query over the fixture, overridden per test. */
@@ -372,10 +489,11 @@ describe('reading a DSH home', () => {
     expect(data.sessions.every((session) => session.parentId === null)).toBe(true);
   });
 
-  it('fails with an actionable message when the ledger is missing', async () => {
+  it('fails with an actionable message when there is neither a ledger nor a log', async () => {
     const empty = await mkdtemp(join(tmpdir(), 'agent-usages-empty-'));
     await mkdir(join(empty, 'storages'), { recursive: true });
-    await expect(dshAgent.load({ home: empty })).rejects.toThrow(/没有找到 all_usage_ledger_\*.json/);
+    await expect(dshAgent.load({ home: empty })).rejects.toThrow(/没有找到 DSH 用量数据/);
+    expect(await dshAgent.hasData(empty)).toBe(false);
     await rm(empty, { recursive: true, force: true });
   });
 
@@ -599,5 +717,85 @@ describe('session inventory', () => {
     expect(topLevel.map((session) => session.id)).toEqual([SID.current, SID.spanning]);
     const parentIndex = exampleApp?.sessions.findIndex((session) => session.id === SID.spanning) ?? -1;
     expect(exampleApp?.sessions.slice(parentIndex + 1).every((session) => session.nested)).toBe(true);
+  });
+});
+
+describe('reading a DSH home without the usage ledger', () => {
+  it('detects a home that only has session logs', async () => {
+    expect(await dshAgent.hasData(logOnlyHome)).toBe(true);
+  });
+
+  it('builds records, projects, and the delegation tree from logs alone', async () => {
+    const data = await dshAgent.load({ home: logOnlyHome });
+    expect(data.sessions).toHaveLength(3);
+    expect(data.stats.records).toBe(3);
+    expect(data.stats.filesRead).toHaveLength(3);
+    expect(data.projects.map((project) => project.name)).toEqual(['logonly']);
+    expect(data.projects[0]?.sessions).toHaveLength(3);
+
+    const byId = new Map(data.sessions.map((session) => [session.id, session]));
+    expect(byId.get(LOG_ONLY.parent)?.isSubagent).toBe(false);
+    expect(byId.get(LOG_ONLY.child)?.parentId).toBe(LOG_ONLY.parent);
+    expect(byId.get(LOG_ONLY.child)?.depth).toBe(1);
+    expect(byId.get(LOG_ONLY.parent)?.childIds).toEqual([LOG_ONLY.child]);
+    expect(byId.get(LOG_ONLY.parent)?.title).toBe('只用日志的会话');
+    // A session the logs never mention still comes from the projection cache.
+    expect(byId.get(LOG_ONLY.idle)?.records).toHaveLength(0);
+
+    const first = byId.get(LOG_ONLY.parent)?.records[0];
+    expect(first?.id).toBe(`${LOG_ONLY.parent}:step:1:1`);
+    expect(first?.model).toBe('deepseek-v4-flash');
+    expect(first?.modelLabel).toBe('deepseek-official / deepseek-v4-flash');
+    expect(first?.tokens).toEqual({ input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 0, reasoning: 400_000 });
+  });
+
+  it('prices log-derived usage exactly like the ledger would', async () => {
+    const data = await dshAgent.load({ home: logOnlyHome });
+    const result = runQuery(data, query(), context);
+    expect(result.requests).toBe(3);
+    // Three off-peak post-change requests at 5.02 CNY each.
+    expect(result.cost.total).toBe('15.0600');
+    expect(result.tokens.reasoning).toBe(400_000);
+    expect(result.bands.every((band) => band.resolution === 'exact')).toBe(true);
+  });
+
+  it('reads a mirrored v3 stream instead of the legacy seed file', async () => {
+    const dir = join(home, 'sessions', '--home-dev-ws-example-app--', SID.current);
+    await rm(join(dir, 'session.jsonl'), { force: true });
+    const { zstdCompressSync } = await import('node:zlib');
+    const header = JSON.stringify({
+      type: 'session',
+      version: 0,
+      id: SID.current,
+      createdAt: 1,
+      cwd: WPSEARCH,
+      delegationDepth: 0,
+    });
+    // The live release keeps a header-only seed at `session.jsonl.zstd` and
+    // appends the real stream to `session.v3.jsonl.zstd`; only the latter counts.
+    await writeFile(join(dir, 'session.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header}\n`)));
+    const event = JSON.stringify({
+      type: 'assistant/message',
+      seq: 2,
+      time: AT.septemberOffPeak,
+      data: {
+        turn: 1,
+        step: 1,
+        message: { source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheWriteTokens: 0, reasoningTokens: 5 },
+      },
+    });
+    await writeFile(join(dir, 'session.v3.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header}\n${event}\n`)));
+
+    const located = await locateSessionLogs(home);
+    expect(located.find((log) => log.directoryName === SID.current)?.path).toMatch(/session\.v3\.jsonl\.zstd$/);
+
+    const scan = await readSessionLog(join(dir, 'session.v3.jsonl.zstd'), { collectUsage: true });
+    expect(scan.records).toHaveLength(1);
+    expect(scan.records[0]).toMatchObject({
+      id: `${SID.current}:step:1:1`,
+      model: 'deepseek-v4-flash',
+      tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 0, reasoning: 5 },
+    });
   });
 });

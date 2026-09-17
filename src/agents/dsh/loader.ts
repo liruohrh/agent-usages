@@ -2,18 +2,23 @@
  * The DSH agent adapter.
  *
  * Reads DeepSeek Harness' on-disk usage stores and converts them into the
- * agent-neutral {@link UsageDataset}. Three file families under the DSH home
+ * agent-neutral {@link UsageDataset}. Four file families under the DSH home
  * directory matter:
  *
- * - `storages/all_usage_ledger_*.json` — the durable per-request usage ledger.
- *   Each shard is an independent key/value unit and a session lives in exactly
- *   one shard, so sessions are unioned across shards; within a shard a session
- *   appears once.
+ * - `storages/all_usage_ledger_*.json` — the durable per-request usage ledger,
+ *   when the third-party `dsh-all-usage` plugin is installed. Each shard is an
+ *   independent key/value unit and a session lives in exactly one shard, so
+ *   sessions are unioned across shards; within a shard a session appears once.
+ * - `sessions/<projectKey>/<id>/session.jsonl[.zstd]` — the session logs: the
+ *   delegation tree, and the fallback per-request usage source. Every
+ *   `assistant/message` event repeats the `usage` block for that step, which is
+ *   exactly what the ledger records, so a stock home without the plugin is still
+ *   fully reportable.
  * - `storages/workspace.json` — the workspace ("project") registry: title,
  *   path, and member session ids.
  * - `storages/session_projcache.json` — projection cache: session title, cwd,
  *   creation time, and the harness' own token totals, which are used only to
- *   cross-check the ledger.
+ *   cross-check the per-request records.
  *
  * Nothing here writes to the DSH home; the adapter is strictly read-only.
  */
@@ -31,7 +36,7 @@ import type {
   UsageRecord,
 } from '../../core/types.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
-import { readSessionLogIndex, type SessionLogInfo } from './sessionlog.ts';
+import { readSessionLogIndex, locateSessionLogs, type SessionLogInfo } from './sessionlog.ts';
 
 /** Narrow an unknown JSON value to a record. */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -187,11 +192,22 @@ async function readWorkspaces(home: string, warnings: string[]): Promise<Workspa
   return result;
 }
 
-/** Read every ledger shard, merging sessions and reporting duplicate keys. */
+/**
+ * Read every ledger shard, merging sessions and reporting duplicate keys.
+ *
+ * A missing ledger is not an error: the third-party `dsh-all-usage` plugin that
+ * writes it may simply not be installed, in which case the caller falls back to
+ * the harness' own session logs. `present` tells the two cases apart.
+ *
+ * @param home - DSH home directory.
+ * @param warnings - collects non-fatal problems.
+ * @returns the merged ledger, or an empty result with `present: false`.
+ */
 async function readLedger(
   home: string,
   warnings: string[],
 ): Promise<{
+  present: boolean;
   records: Map<string, UsageRecord[]>;
   workspaceIds: Map<string, string>;
   sourceCwds: Map<string, string>;
@@ -206,14 +222,12 @@ async function readLedger(
   try {
     names = await readdir(storageDir);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`DSH 数据目录不存在: ${storageDir}（可用 --home 指定，或设置 DSH_HOME）`);
-    }
-    throw error;
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return { present: false, records, workspaceIds, sourceCwds, shards };
   }
   const ledgerFiles = names.filter((name) => /^all_usage_ledger_\d+\.json$/.test(name)).sort();
   if (ledgerFiles.length === 0) {
-    throw new Error(`在 ${storageDir} 下没有找到 all_usage_ledger_*.json，无法统计用量`);
+    return { present: false, records, workspaceIds, sourceCwds, shards };
   }
 
   for (const name of ledgerFiles) {
@@ -271,7 +285,7 @@ async function readLedger(
       }
     }
   }
-  return { records, workspaceIds, sourceCwds, shards };
+  return { present: true, records, workspaceIds, sourceCwds, shards };
 }
 
 /**
@@ -340,10 +354,18 @@ function resolveProjectKey(
 /**
  * Read a DSH home directory into the agent-neutral dataset.
  *
- * @param options - resolved adapter options; `enrich: false` skips the per-session
- *   logs, which is faster but loses titles for subagents and every delegation link.
+ * Usage comes from the `dsh-all-usage` ledger when it exists — it is the
+ * authoritative per-request record — and otherwise from the harness' own
+ * session logs, which repeat each step's `usage` block. The two sources are
+ * never mixed: a ledger is complete on its own, and merging a fallback into it
+ * would double-count.
+ *
+ * @param options - resolved adapter options; `enrich: false` skips the
+ *   per-session logs when the ledger already answers the token question, which
+ *   is faster but loses titles for subagents and every delegation link. Without
+ *   a ledger the logs are the only usage source and are read regardless.
  * @returns the dataset, with each project's sessions ordered by first usage ascending.
- * @throws when the data root is absent or carries no usage ledger.
+ * @throws when the data root carries neither a usage ledger nor any session log.
  */
 async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const source = resolve(options.home ?? defaultSource(options.env ?? process.env) ?? '');
@@ -351,16 +373,35 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   if (options.home !== undefined && !isAbsolute(options.home)) {
     throw new Error(`数据目录必须是绝对路径，收到 ${JSON.stringify(options.home)}`);
   }
-  const [ledger, workspaces, meta, logIndex] = await Promise.all([
-    readLedger(source, warnings),
+
+  const ledger = await readLedger(source, warnings);
+  // Without usable ledger records the session logs are the only per-request
+  // source, so they must be scanned in full even when no enrichment was asked
+  // for. A shard that parsed to nothing counts as unusable.
+  const useLogs = !ledger.present || ledger.records.size === 0;
+  const enrich = options.enrich !== false;
+  const [workspaces, meta, logIndex] = await Promise.all([
     readWorkspaces(source, warnings),
     readSessionMeta(source, warnings),
-    // A session log answers the delegation question that neither the ledger nor
-    // the projection cache records. An unreadable log degrades attribution to
-    // "top-level session" rather than failing the whole report.
-    options.enrich === false ? Promise.resolve({ byId: new Map<string, SessionLogInfo>(), warnings: [] }) : readSessionLogIndex(source),
+    // A session log also answers the delegation question that neither the ledger
+    // nor the projection cache records. An unreadable log degrades attribution
+    // to "top-level session" rather than failing the whole report.
+    useLogs || enrich
+      ? readSessionLogIndex(source, { collectUsage: useLogs })
+      : Promise.resolve({
+          byId: new Map<string, SessionLogInfo>(),
+          records: new Map<string, UsageRecord[]>(),
+          files: [],
+          warnings: [],
+        }),
   ]);
   warnings.push(...logIndex.warnings);
+
+  if (useLogs && logIndex.files.length === 0) {
+    throw new Error(
+      `在 ${source} 下没有找到 DSH 用量数据：既没有 storages/all_usage_ledger_*.json，也没有 sessions/ 下的会话日志（可用 --home 指定，或设置 DSH_HOME）`,
+    );
+  }
 
   const workspaceOf = new Map<string, WorkspaceMeta>();
   for (const workspace of workspaces) workspaceOf.set(workspace.workspaceId, workspace);
@@ -378,12 +419,24 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     }
   }
 
+  // A ledger is authoritative when it has records; session logs are the fallback
+  // so a stock DSH home with no third-party plugin still reports usage.
+  const recordsOf = useLogs ? logIndex.records : ledger.records;
+
+  // Every session any source knows about: billed sessions come from the ledger
+  // (or, without one, from the logs), while the projection cache supplies the
+  // ones that never billed a request.
+  const sessionIds = new Set<string>(recordsOf.keys());
+  for (const sessionId of meta.keys()) sessionIds.add(sessionId);
+  if (useLogs) for (const info of logIndex.byId.values()) sessionIds.add(info.sessionId);
+
   const sessions: SessionRecord[] = [];
   const projectOfSession = new Map<string, string>();
-  for (const [sessionId, records] of ledger.records) {
+  for (const sessionId of sessionIds) {
+    const records = recordsOf.get(sessionId) ?? [];
     records.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
     const sessionMeta = meta.get(sessionId);
-    const log = logIndex.byId.get(sessionId);
+    const log = enrich ? logIndex.byId.get(sessionId) : undefined;
     const cwd = sessionMeta?.cwd ?? log?.cwd ?? ledger.sourceCwds.get(sessionId) ?? null;
     const projectKey =
       resolveProjectKey(ledger.workspaceIds.get(sessionId), cwd, workspaceOf, workspaceByPath, warnings) ??
@@ -398,28 +451,6 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       byId: logIndex.byId,
     });
     if (sessionMeta?.projectedTotals !== undefined && sessionMeta.projectedTotals !== null) {
-      session.extra = { projectedTotals: sessionMeta.projectedTotals };
-    }
-    sessions.push(session);
-    projectOfSession.set(sessionId, projectKey);
-  }
-
-  // Sessions the projection cache knows about but the ledger does not carry made
-  // no billed requests; they are still listed so the inventory matches what DSH
-  // itself shows.
-  for (const [sessionId, sessionMeta] of meta) {
-    if (ledger.records.has(sessionId)) continue;
-    const log = logIndex.byId.get(sessionId);
-    const cwd = sessionMeta.cwd ?? log?.cwd ?? null;
-    const projectKey = resolveProjectKey(undefined, cwd, workspaceOf, workspaceByPath, warnings) ?? syntheticProjectKey(cwd ?? undefined);
-    const session = buildSession(sessionId, [], {
-      title: sessionMeta.title ?? log?.title ?? null,
-      cwd,
-      createdAt: sessionMeta.createdAt ?? log?.createdAt ?? null,
-      log,
-      byId: logIndex.byId,
-    });
-    if (sessionMeta.projectedTotals !== undefined && sessionMeta.projectedTotals !== null) {
       session.extra = { projectedTotals: sessionMeta.projectedTotals };
     }
     sessions.push(session);
@@ -460,7 +491,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   projects.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 
   const stats: DatasetStats = {
-    filesRead: ledger.shards,
+    filesRead: useLogs ? logIndex.files : ledger.shards,
     sessions: sessions.length,
     records: sessions.reduce((total, session) => total + session.records.length, 0),
   };
@@ -577,14 +608,19 @@ export const dshAgent: AgentAdapter = {
   hasData: async (source) => {
     try {
       const names = await readdir(join(source, 'storages'));
-      return names.some((name) => /^all_usage_ledger_\d+\.json$/.test(name));
+      if (names.some((name) => /^all_usage_ledger_\d+\.json$/.test(name))) return true;
+    } catch {
+      // No storages directory: the session logs below are still worth checking.
+    }
+    try {
+      return (await locateSessionLogs(source)).length > 0;
     } catch {
       return false;
     }
   },
   load,
   notes: () => [
-    '用量账本由 DSH 插件 dsh-all-usage 写入；若从未安装该插件，则没有可统计的逐请求用量。',
+    '逐请求用量优先取自 DSH 插件 dsh-all-usage 写入的账本；未安装该插件时改用会话日志中每步的 usage 记录，两种来源不会混用。',
     '账本中的 cost 字段不可用（其价格目录从未成功拉取，恒为 0），本工具只取其 token 数与时间戳并自行计价。',
     '子代理关系只存在于会话日志首帧，需要在 sessions/ 下额外读取每个会话的日志。',
   ],

@@ -436,14 +436,14 @@ dsh-usage usage --from 2026-08-01 --to 2026-09-01
 
 DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的 `@deepseek-ai/dsh-token-meter`）：
 
-| 账本字段 | 含义 | 单价 |
+| 字段（账本 / 日志） | 含义 | 单价 |
 | --- | --- | --- |
-| `values.input` | **未命中缓存的输入**（`prompt_tokens − cached_tokens`），不含缓存部分 | 缓存未命中价 |
-| `values.cacheRead` | **命中缓存的输入** | 缓存命中价 |
-| `values.output` | 补全 token，**已包含推理 token** | 输出价 |
-| `values.cacheWrite` | 缓存写入 token；DeepSeek 适配器不产生该桶，恒为 0 | 按未命中价计（与 DeepSeek 一致） |
+| `values.input` / `usage.inputTokens` | **未命中缓存的输入**（`prompt_tokens − cached_tokens`），不含缓存部分 | 缓存未命中价 |
+| `values.cacheRead` / `usage.cacheReadTokens` | **命中缓存的输入** | 缓存命中价 |
+| `values.output` / `usage.outputTokens` | 补全 token，**已包含推理 token** | 输出价 |
+| `values.cacheWrite` / `usage.cacheWriteTokens` | 缓存写入 token；DeepSeek 适配器不产生该桶，恒为 0 | 按未命中价计（与 DeepSeek 一致） |
 
-- **推理 token 不重复计费**：`values.reasoning` 是 `output` 的子集，仅用于展示。
+- **推理 token 不重复计费**：`values.reasoning` / `usage.reasoningTokens` 是 `output` 的子集，仅用于展示。
 - **缓存写入不单独计费**：DeepSeek 的硬盘缓存自动写入，仅对读取计费。
 
 因此：
@@ -575,26 +575,28 @@ example-c   /home/user/ws2/…/example-c      2      42  1,447       1.83M    10
 
 | 文件 | 用途 |
 | --- | --- |
-| `storages/all_usage_ledger_*.json` | 逐请求用量账本（分片存储，**权威计费依据**） |
+| `storages/all_usage_ledger_*.json` | 逐请求用量账本（分片存储，装了 `dsh-all-usage` 插件时才存在，是**首选计费依据**） |
 | `storages/workspace.json` | 项目注册表：名称、路径 |
 | `storages/session_projcache.json` | 会话标题、工作目录、创建时间、harness 自身统计 |
-| `sessions/<projectKey>/<id>/session.jsonl[.zstd]` | 会话头：**委派关系**（子代理与父会话）、日志内的标题 |
+| `sessions/<projectKey>/<id>/session.jsonl[.zstd]` | 会话头：**委派关系**（子代理与父会话）、日志内的标题；**未装插件时的逐请求用量来源** |
 
 几处容易踩坑的地方，本工具已分别处理：
 
-1. **账本按 `FNV-1a-32(sessionId) % 32` 分片**，同一分片文件可能不存在（懒创建）。工具读取全部分片并按 session id 合并，同时按 `key` 去重，避免重复计费。
-2. **会话是逐 step 采样、可被覆盖的**：账本按 `` `${sid}:step:${turn}:${step}` `` 去重，同一步的早期 `assistant/chunk` 采样会被后续 `assistant/message` 覆盖而非累加。工具按记录原样求和，并拒绝同一会话内的重复键。
-3. **账本里的 `cost` 字段不可用**：它由第三方插件 `dsh-all-usage` 写入，价格取自 models.dev 目录；该目录在本机从未成功拉取，因此所有 `cost.total` 都是 `0`。本工具因此**完全忽略账本的 `cost`**，只用其中的 token 数与时间戳，自行按官方价格重算。
-4. **`workspace.json` 的 `sessionIds` 不是完整名册**：它由一次性 bootstrap 加后续显式挂载填充，实测只记录 7 个会话，而账本有 51 个。工具改用**工作目录路径索引**归组（与账本写入方一致），因此 44 个会话都能正确落到所属项目。
-5. **会话的 `session-` 前缀**：磁盘与 UI 用 `session-<uuid>`，账本按裸 uuid 记录。筛选器两种写法都能匹配。
-6. **委派关系只存在于会话日志**：账本与投影缓存都没有 parent 字段，因此子代理的识别依赖读取 `sessions/` 下的日志首帧；某个日志读不出来时只会退化为“按一级会话处理”，不会让整份报表失败。
-7. **账本与 harness 投影缓存不一致时会提示**：`session_projcache.json` 的 `tokenUsage` 是 harness 自己折叠出的累计值，可用于交叉校验；不一致会作为 warning 输出（本机当前有一个会话存在该情况）。
+1. **没有账本也能统计**：`assistant/message` 事件里就带着该步的 `usage`（`inputTokens` / `outputTokens` / `cacheReadTokens` / `cacheWriteTokens` / `reasoningTokens`），与账本记的是同一件事。适配器优先用账本；账本不存在时改用会话日志，两者**绝不混用**（否则会重复计费）。本机的日志求和与 `session_projcache.json` 的 `tokenUsage` 逐会话完全一致。
+2. **账本按 `FNV-1a-32(sessionId) % 32` 分片**，同一分片文件可能不存在（懒创建）。工具读取全部分片并按 session id 合并，同时按 `key` 去重，避免重复计费。
+3. **会话是逐 step 采样、可被覆盖的**：账本按 `` `${sid}:step:${turn}:${step}` `` 去重，同一步的早期 `assistant/chunk` 采样会被后续 `assistant/message` 覆盖而非累加。日志来源同样按这个键去重（后写入者胜出），因此两个来源对「一次请求」的定义一致。
+4. **账本里的 `cost` 字段不可用**：它由第三方插件 `dsh-all-usage` 写入，价格取自 models.dev 目录；该目录在本机从未成功拉取，因此所有 `cost.total` 都是 `0`。本工具因此**完全忽略账本的 `cost`**，只用其中的 token 数与时间戳，自行按官方价格重算。
+5. **`workspace.json` 的 `sessionIds` 不是完整名册**：它由一次性 bootstrap 加后续显式挂载填充，实测只记录 7 个会话，而账本有 51 个。工具改用**工作目录路径索引**归组（与账本写入方一致），因此其余会话都能正确落到所属项目。
+6. **会话的 `session-` 前缀**：磁盘与 UI 用 `session-<uuid>`，账本按裸 uuid 记录。筛选器两种写法都能匹配。
+7. **委派关系只存在于会话日志**：账本与投影缓存都没有 parent 字段，因此子代理的识别依赖读取 `sessions/` 下的日志首帧；某个日志读不出来时只会退化为“按一级会话处理”，不会让整份报表失败。
+8. **日志可能是镜像文件**：当前版本把实时流写在 `session.v3.jsonl.zstd`，同时留一个只含头部的 `session.jsonl.zstd` 种子文件。工具每个会话只读一个文件，且优先 `session.v3`，因此种子文件不会被当成空会话。
+9. **账本与 harness 投影缓存不一致时会提示**：`session_projcache.json` 的 `tokenUsage` 是 harness 自己折叠出的累计值，可用于交叉校验；不一致会作为 warning 输出。
 
 ## 开发
 
 ```bash
 pnpm install
-pnpm test        # vitest，227 个用例
+pnpm test        # vitest，231 个用例
 pnpm typecheck   # tsc --noEmit
 ```
 
@@ -607,7 +609,7 @@ pnpm typecheck   # tsc --noEmit
 | `test/unit/report.test.ts` | 聚合：维度、筛选（含按标题搜索的语义）、子代理合并/拆分、总量与各行的精确对账 |
 | `test/unit/format.test.ts` | 呈现层：按**显示宽度**对齐与补齐、表格列、合计行、费用/区间表、JSON 字段 |
 | `test/unit/money.test.ts`、`test/unit/timerange.test.ts` | 精确十进制、时间范围解析（含时区与日期边界） |
-| `test/agents/dsh.test.ts` | DSH 适配器：跨分片合并、项目归组、委派树重建、多帧 zstd 日志读取 |
+| `test/agents/dsh.test.ts` | DSH 适配器：跨分片合并、项目归组、委派树重建、多帧 zstd 日志读取、无账本时从日志回退 |
 | `test/cli.test.ts` | 端到端：真正拉起进程，校验 JSON 结构、退出码、`--agent`/`--provider` 选择 |
 
 `test/support/` 提供合成数据集与**合成价格表**（`stub-pricing.ts`），因此机制类测试不依赖任何真实厂商或 agent 的文件格式。
@@ -626,8 +628,8 @@ src/
 │   ├── contract.ts        AgentAdapter 接口
 │   ├── registry.ts        注册表与自动探测
 │   └── dsh/               DSH 适配器
-│       ├── loader.ts        账本 / 项目注册表 / 投影缓存 → 中立模型
-│       └── sessionlog.ts    会话日志（多帧 zstd）→ 委派树
+│       ├── loader.ts        账本 / 会话日志 / 项目注册表 / 投影缓存 → 中立模型
+│       └── sessionlog.ts    会话日志（多帧 zstd）→ 委派树与逐请求用量
 ├── pricing/               维度二：怎么算钱
 │   ├── contract.ts        PricingProvider / PricePeriod / RateComponent
 │   ├── engine.ts          与厂商无关的区间选取、峰谷判定、按组件计费
