@@ -155,17 +155,14 @@ describe('usage', () => {
     expect(() => JSON.parse(stdout) as unknown).not.toThrow();
   });
 
-  it('honours the dimension flags', async () => {
-    for (const [flag, expected] of [['--all', 'all'], ['--project', 'project'], ['--session', 'session']] as const) {
-      const parsed = JSON.parse((await cli(['usage', flag, '--json'])).stdout) as { dimension: string };
-      expect(parsed.dimension).toBe(expected);
+  it('retires the old dimension flags', async () => {
+    // The tree always shows projects and their sessions, so the three
+    // mutually exclusive flags are gone rather than silently ignored.
+    for (const flag of ['--all', '--project', '--session']) {
+      const { code, stderr } = await cli(['usage', flag]);
+      expect(code, flag).toBe(1);
+      expect(stderr, flag).toMatch(/unknown option/);
     }
-  });
-
-  it('rejects two mutually exclusive dimension flags', async () => {
-    const { code, stderr } = await cli(['usage', '--all', '--project']);
-    expect(code).toBe(1);
-    expect(stderr).toMatch(/只能指定一个/);
   });
 
   it('filters by project and session, warning when nothing matches', async () => {
@@ -231,20 +228,23 @@ describe('usage', () => {
     expect(stderr).toMatch(/汇率必须是非负数字/);
   });
 
-  it('renders a text report by default, naming both axes', async () => {
+  it('renders the project/session tree by default, naming both axes', async () => {
     const { stdout } = await cli(['usage']);
     expect(stdout).toContain('Agent 用量统计');
     expect(stdout).toContain('DeepSeek Harness (DSH)');
     expect(stdout).toContain('DeepSeek 官方');
-    expect(stdout).toContain('¥5.02');
-    expect(stdout).toContain('费用明细');
+    expect(stdout).toContain('演示会话');
+    // The fixture is one project with one session, so both aggregate levels
+    // collapse and a single metric line remains.
+    expect(stdout).toContain('I 1.00M · I/C 1.00M · I/T 2.00M · O 1.00M · R 0 · O/T 1.00M · T 3.00M · Q 1 · ¥5.02');
+    expect(stdout.match(/ · Q /g)).toHaveLength(1);
   });
 
   it('distinguishes the three subagent modes', async () => {
     const cases = [
-      [['usage', '--session', '--json'], 'total', false],
-      [['usage', '--session', '--subagent', '--json'], 'subagents', true],
-      [['usage', '--session', '--subagents', '--json'], 'detail', true],
+      [['usage', '--json'], 'total', false],
+      [['usage', '--subagent', '--json'], 'subagents', true],
+      [['usage', '--subagents', '--json'], 'detail', true],
     ] as const;
     for (const [args, mode, hasBreakdown] of cases) {
       const parsed = JSON.parse((await cli([...args])).stdout) as {
@@ -269,18 +269,20 @@ describe('usage', () => {
       };
       return (parsed.projects[0]?.sessionReports ?? []).filter((row) => row.isSubagent).length;
     };
-    expect(await rows(['usage', '--session', '--json'])).toBe(0);
-    expect(await rows(['usage', '--session', '--subagent', '--json'])).toBe(0);
-    expect(await rows(['usage', '--session', '--subagents', '--json'])).toBe(0);
+    // The fixture has no subagents, so no mode invents a row for one.
+    expect(await rows(['usage', '--json'])).toBe(0);
+    expect(await rows(['usage', '--subagent', '--json'])).toBe(0);
+    expect(await rows(['usage', '--subagents', '--json'])).toBe(0);
   });
 
-  it('renders the by-scope table when asked for it', async () => {
-    const text = (await cli(['usage', '--subagent'])).stdout;
-    expect(text).toContain('按范围:');
-    expect(text).toContain('主会话自身');
-    expect(text).toContain('全部子代理');
+  it('adds the cost tables only with --cost, and windows only with --windows', async () => {
     const plain = (await cli(['usage'])).stdout;
-    expect(plain).not.toContain('按范围:');
+    expect(plain).not.toContain('费用明细');
+    expect(plain).not.toContain('时间窗口');
+    expect((await cli(['usage', '--cost'])).stdout).toContain('费用明细（单价见计价区间）');
+    const windows = (await cli(['usage', '--windows'])).stdout;
+    expect(windows).toContain('时间窗口  总 / 今日 / 本周 / 本月 / 今年');
+    for (const label of ['总', '今日', '本周', '本月', '今年']) expect(windows).toContain(`\n${label}\n`);
   });
 
   it('exits 2 when the filter matches no usage', async () => {
@@ -299,46 +301,27 @@ describe('text output alignment', () => {
     });
   }
 
-  it('lines every key/value block up in one column', async () => {
-    const { stdout } = await cli(['usage', '--project', '--subagents']);
+  it('lines the header values up in one column', async () => {
+    const { stdout } = await cli(['usage']);
     const lines = stdout.split('\n');
     const valueColumn = (line: string): number => {
       const match = /^(\S.*?)(\s{2,})(\S.*)$/.exec(line);
       return match === null ? -1 : cells(`${match[1]}${match[2]}`);
     };
     // The header block: every field's value starts in the same column.
-    const header = lines.filter((line) => /^(Agent|数据目录|维度|时间范围|计价来源)\s{2,}\S/.test(line));
-    expect(header).toHaveLength(5);
+    const header = lines.filter((line) => /^(Agent|数据目录|时间范围|计价来源)\s{2,}\S/.test(line));
+    expect(header).toHaveLength(4);
     expect(new Set(header.map(valueColumn)).size).toBe(1);
-    // The totals block, whose labels are the compact token figures. Scoped to
-    // its own section so the cost table's rows are not pulled in.
-    const totalsSection = stdout.slice(stdout.indexOf('总量:'), stdout.indexOf('按范围:'));
-    const totals = totalsSection
-      .split('\n')
-      .filter((line) => /^(请求数|I|O|T)\S*\s{2,}\S/.test(line));
-    expect(totals).toHaveLength(8);
-    expect(new Set(totals.map(valueColumn)).size).toBe(1);
-    // The two blocks need not share a column, but each must be internally even.
-    expect(new Set([...header, ...totals].map(valueColumn)).size).toBe(2);
   });
 
-  it('reports the same token column set in every table', async () => {
-    const { stdout } = await cli(['usage', '--project', '--subagents']);
-    const columns = ['I', 'I/C', 'I/T', 'O', 'O/R', 'O/T', 'T'];
-    const modelTable = stdout.slice(stdout.indexOf('模型明细:'), stdout.indexOf('按项目:'));
-    const projectTable = stdout.slice(stdout.indexOf('按项目:'));
-    const scopeTable = stdout.slice(stdout.indexOf('按范围:'), stdout.indexOf('费用明细'));
-    for (const [name, block] of [
-      ['模型明细', modelTable],
-      ['按项目', projectTable],
-      ['按范围', scopeTable],
-    ] as const) {
-      const header = block.split('\n').find((line) => line.includes('I/T'));
-      expect(header, name).toBeDefined();
-      // The token labels, in order, exactly once each — single-letter labels
-      // make a substring check meaningless, so compare the words themselves.
-      const words = (header ?? '').trim().split(/\s+/);
-      expect(words.filter((word) => columns.includes(word)), name).toEqual(columns);
+  it('prints the same compact label set on every node', async () => {
+    const { stdout } = await cli(['usage', '--cost', '--models']);
+    const metrics = stdout.split('\n').filter((line) => line.includes(' · Q '));
+    expect(metrics.length).toBeGreaterThan(0);
+    for (const line of metrics) {
+      const labels = line.trim().split(' · ').map((segment) => segment.split(' ')[0] ?? '');
+      expect(labels.slice(0, 8)).toEqual(['I', 'I/C', 'I/T', 'O', 'R', 'O/T', 'T', 'Q']);
+      expect(labels[8]?.startsWith('¥')).toBe(true);
     }
   });
 });

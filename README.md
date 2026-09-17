@@ -76,16 +76,18 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 
 计算 token 消耗与费用。
 
+默认输出一棵「总 → 项目 → 会话」的树，每个节点两行：名称行和指标行。指标行的十个字段与读法见 [输出与格式](docs/output.md)。
+
 | 选项 | 说明 |
 | --- | --- |
-| `--all` | 只输出总量汇总（**默认**） |
-| `--project` | 按项目维度汇总 |
-| `--session` | 按会话维度汇总（每个项目下再列出会话明细） |
-| `--subagent` | 额外按范围汇总：主会话自身 / 全部子代理 / 总计（默认全部并入总量） |
-| `--subagents` | 在按范围汇总之外，把每个子代理也单独列成一行 |
+| `--subagent` | 每个项目与会话再拆成 **总 / 自身 / 子代理** 三行 |
+| `--subagents` | 在 `--subagent` 之外，把每个子代理也单独列出 |
+| `--windows` | 同时输出 **总 / 今日 / 本周 / 本月 / 今年** 五个窗口 |
+| `--cost` | 附上费用明细与计价区间（单价） |
+| `--models` | 附上按模型的明细 |
 | `-p, --project-filter <sel>` | 只看指定项目：id、名称或路径；支持 `*` 通配；可重复 |
 | `-s, --session-filter <sel>` | 只看指定会话：完整 id、唯一 id 前缀，或**标题**（标题需完全一致，忽略前后空格）；支持 `*` 通配；可重复 |
-| `--today` / `--month` / `--year` | 时间范围：今日 / 本月 / 今年 |
+| `--today` / `--week` / `--month` / `--year` | 时间范围：今日 / 本周（周一开始）/ 本月 / 今年 |
 | `--from <time>` | 起始时间（**含**），如 `2026-09-01`、`2026-09-01T10:30` |
 | `--to <time>` | 结束时间，日期形式**含当天**（内部按左闭右开实现） |
 | `--currency <code>` | 显示货币，默认取计价来源的货币 |
@@ -112,36 +114,31 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 
 DSH 的每一次子代理调用都是一个**独立会话**，因此每笔子代理请求都归属于一个独立 session id。本工具会重建“谁派生了谁”的委派树，并据此提供两种口径。委派关系从哪里读、怎么识别，见 [DSH 适配器](docs/agents/dsh.md)。
 
-### 三个档位
+### 子代理怎么显示
 
-`usage` 默认只有「总量」一个数（子代理已并入其父会话）。想看清子代理占多少，再加 `--subagent` 或 `--subagents`——两者都不改变总量，只是把同一个总量拆得更细：
+每个会话标题后面会标出它覆盖了多少个子代理（如 `创建回忆主题HTML风格展示集（5 个子代理）`）。默认子代理并入其父会话，不单独占行；想看拆分：
 
 | 档位 | 输出 |
 | --- | --- |
-| （默认） | 总量 + 每行一个会话（父会话行已含其子代理） |
-| `--subagent` | 再加一张**按范围**表：主会话自身 / 全部子代理 / 总计，各带费用与占比 |
-| `--subagents` | 再加每个子代理的单独一行（父会话行变成它自身的用量） |
+| （默认） | 项目 → 会话；父会话行已含其子代理 |
+| `--subagent` | 每个项目、每个会话再拆成 **总 / 自身 / 子代理** 三行（没有子代理的节点自动合成一行） |
+| `--subagents` | 在 `--subagent` 之外，把每个子代理也逐个列出 |
 
 ```
-$ agent-usages usage --subagent -p example-c
-总量:
-会话口径  含子代理（42 个子代理会话已并入其父会话，由 1 个会话派生）
-请求数              1,447
-输入合计            111,108,967
-输出合计            1,664,135
-...
-
-按范围:
-范围        会话   请求  输入合计  输出合计      费用   占比
-──────────  ────  ─────  ────────  ────────  ────────  ─────
-主会话自身     2    342     56.9M      283K   ¥4.9984  33.6%
-全部子代理    42  1,105     54.2M     1.38M   ¥9.8979  66.4%
-总计          44  1,447    111.1M     1.66M  ¥14.8963   100%
+$ agent-usages usage -p example-c --subagent
+Memolink
+  总      I 889K · I/C 257.6M · I/T 258.5M · O 368K · R 558K · O/T 926K · T 259.4M · Q 1,027 · ¥22.0154
+  自身    I 680K · I/C 252.3M · I/T 253.0M · O 274K · R 489K · O/T 763K · T 253.8M · Q 931 · ¥18.0882
+  子代理  I 209K · I/C 5.27M · I/T 5.48M · O 93K · R 69K · O/T 163K · T 5.65M · Q 96 · ¥3.9273
+  查看草稿未解决问题
+    I 258K · I/C 178.9M · I/T 179.1M · O 141K · R 342K · O/T 483K · T 179.6M · Q 488 · ¥8.1405
+  创建回忆主题HTML风格展示集（5 个子代理）
+    总      I 258K · I/C 8.93M · I/T 9.19M · O 127K · R 95K · O/T 222K · T 9.41M · Q 153 · ¥4.452
+    自身    I 49K · I/C 3.66M · I/T 3.71M · O 34K · R 26K · O/T 59K · T 3.77M · Q 57 · ¥0.5248
+    子代理  I 209K · I/C 5.27M · I/T 5.48M · O 93K · R 69K · O/T 163K · T 5.65M · Q 96 · ¥3.9273
 ```
 
-三者关系是恒等式：**主会话自身 + 全部子代理 = 总计**，会话数、请求数、token、费用逐项成立（有测试断言）。`--subagents` 时每行显示的父会话费用就是「主会话自身」那一档。
-
-`--subagents` 会隐含 `--subagent`：既然已经把每个子代理拆成行，却不给它们加总，反而比默认更难看懂。
+恒等式在各个层级都成立：**自身 + 子代理 = 总**，请求数、token、费用逐项相等（有测试断言）。`--subagents` 会隐含 `--subagent`。
 
 ### 按会话筛选
 
@@ -194,18 +191,31 @@ agent-usages session list --subagents -p example-c
 ### CLI 输出示例
 
 ```
-总量:
-会话口径  含子代理（2 个子代理会话已并入其父会话，另计 ¥1.399）
+$ agent-usages usage
+Agent 用量统计
+Agent     dsh（DeepSeek Harness (DSH)）
+数据目录  /home/user/.dsh
+时间范围  全部时间
+计价来源  DeepSeek 官方（CNY）
 
-按会话（↳ 为子代理）:
-项目       标题            会话 ID                                       子代理  请求  …
-─────────  ──────────────  ────────────────────────────────────────────  ──────  ────
-example-a  统计 CLI 用量   session-11111111-1111-4111-8111-111111111111       2   337
-  ↳ example-a  调研任务…       22222222-2222-4222-8222-222222222222               —    26
-  ↳ example-a  示例子代理…     33333333-3333-4333-8333-333333333333               —    79
+总
+  I 1.87M · I/C 821.4M · I/T 823.3M · O 960.4K · R 558.6K · O/T 1.52M · T 824.8M · Q 2,162 · ¥50.0057
+
+agent-usages
+  ❯ pnpm cli $ node
+    I 365K · I/C 141.1M · I/T 141.5M · O 355K · R 0 · O/T 355K · T 141.9M · Q 450 · ¥4.6091
+
+Memolink
+  I 889K · I/C 257.6M · I/T 258.5M · O 368K · R 558K · O/T 926K · T 259.4M · Q 1,027 · ¥22.0154
+  查看草稿未解决问题
+    I 258K · I/C 178.9M · I/T 179.1M · O 141K · R 342K · O/T 483K · T 179.6M · Q 488 · ¥8.1405
+  创建回忆主题HTML风格展示集（5 个子代理）
+    I 258K · I/C 8.93M · I/T 9.19M · O 127K · R 95K · O/T 222K · T 9.41M · Q 153 · ¥4.452
 ```
 
-JSON 里对应 `subagents` 区块与每行的 `isSubagent` / `subagentCount` / `parentSessionId` 字段（见下）。
+- 名称行只有名字；数字都在下一行，所以标题再长也不会把行撑开。
+- 只有一个会话的项目、只有一个子代理的会话会省掉重复的聚合行。
+- 指标字段：`I` 未命中输入、`I/C` 缓存命中、`I/T` 输入合计、`O` 输出（非思考）、`R` 思考、`O/T` 输出合计、`T` Token 总计、`Q` 请求数、`¥` 费用。
 
 ---
 
@@ -215,9 +225,11 @@ JSON 里对应 `subagents` 区块与每行的 `isSubagent` / `subagentCount` / `
 
 ```bash
 agent-usages usage --today          # 今日
+agent-usages usage --week           # 本周（周一开始）
 agent-usages usage --month          # 本月
 agent-usages usage --year           # 今年
-agent-usages usage today            # 位置参数：today / month / year，支持偏移 month-1、today-7
+agent-usages usage --windows        # 总 + 今日 + 本周 + 本月 + 今年 一起输出
+agent-usages usage week-1           # 位置参数：today / week / month / year，支持偏移 week-1、month-1
 agent-usages usage 2026-09-01..2026-09-10
 agent-usages usage --from 2026-08-01 --to 2026-09-01
 ```
@@ -269,9 +281,11 @@ agent-usages usage --from 2026-08-01 --to 2026-09-01
                   "subagentSessions": 42, "requests": 1447,
                   "firstUsage": 178…, "firstUsageIso": "2026-08-27T…",
                   "tokens": {}, "cost": {}, "pricingBands": [], "models": [],
-                  "sessionReports": [ /* 仅 --session 维度出现 */
+                  "own": {}, "spawned": {}, "nodeTotal": {},   // 自身 / 子代理 / 两者之和
+                  "sessionReports": [
                     { "id": "session-…", "isSubagent": false, "subagentCount": 42,
-                      "parentSessionId": null, "requests": 1374, "tokens": {}, "cost": {} }
+                      "parentId": null, "requests": 1374, "tokens": {}, "cost": {},
+                      "own": {}, "spawned": {}, "nodeTotal": {} }
                   ] } ],
   "warnings": []
 }
@@ -283,7 +297,8 @@ agent-usages usage --from 2026-08-01 --to 2026-09-01
 - 金额保留 4 位小数。**总量 = 各项目之和 = 各行之和**，精确到最后一位：总量是对范围内记录一次性算出的，不会把各行的取整余数累加进来（合并/拆分两种口径的总量因此完全相同）。
 - 时间同时给出 epoch 毫秒与 ISO 8601（UTC）。
 - `pricingBands[].band` ∈ `peak` / `off-peak` / `flat`；`resolution` ∈ `exact` / `fallback-later` / `fallback-earlier` / `fallback-default`，用于说明价格区间是精确命中还是按回退规则选取。
-- `sessionReports` 仅在 `--session` 维度出现；未产生用量的会话不会作为 0 值行出现。
+- `sessionReports` 给出每个会话一行；未产生用量的会话不会作为 0 值行出现。每个项目与会话都带 `own` / `spawned` / `nodeTotal` 三段（自身 / 子代理 / 两者之和），与文本里的 **自身 + 子代理 = 总** 对应。
+- `--windows` 时顶层是 `sections: [{ label, … }]`，每个窗口一份与单窗口相同结构的数据。
 - `subagentMode` 说明当前档位；`subagents` 给出范围内的子代理会话数与派生它们的会话数。
 - `scopeBreakdown` 只在 `--subagent` / `--subagents` 时出现，三段各自带 `tokenBreakdown`，且 `own + subagents == total`。
 - 每行另有 `isSubagent`（是否子代理）、`subagentCount`（合并口径下并入的子代理个数）、`parentId`（子代理的父会话）。

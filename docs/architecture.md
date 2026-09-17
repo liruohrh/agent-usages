@@ -75,7 +75,7 @@ agent-usages usage --provider deepseek
 
 ```bash
 pnpm install
-pnpm test        # vitest，231 个用例
+pnpm test        # vitest，221 个用例
 pnpm typecheck   # tsc --noEmit
 ```
 
@@ -86,7 +86,7 @@ pnpm typecheck   # tsc --noEmit
 | `test/pricing/engine.test.ts` | **与厂商无关**的机制：区间选取与回退、峰谷时段边界与星期规则、按组件计费、跨时区判定 |
 | `test/pricing/deepseek.test.ts` | DeepSeek 的具体数字：各区间单价、2026-08-23 周末豁免、2026-04-26 缓存命中降价、9-10 精确切换点 |
 | `test/unit/report.test.ts` | 聚合：维度、筛选（含按标题搜索的语义）、子代理合并/拆分、总量与各行的精确对账 |
-| `test/unit/format.test.ts` | 呈现层：按**显示宽度**对齐与补齐、表格列、合计行、费用/区间表、JSON 字段 |
+| `test/unit/format.test.ts` | 呈现层：项目/会话树的缩进与折叠、指标行、附加表开关、JSON 字段 |
 | `test/unit/money.test.ts`、`test/unit/timerange.test.ts` | 精确十进制、时间范围解析（含时区与日期边界） |
 | `test/agents/dsh.test.ts` | DSH 适配器：逐请求用量提取、项目归组、委派树重建、多帧 zstd 日志读取、无 storages 时的合成项目 |
 | `test/cli.test.ts` | 端到端：真正拉起进程，校验 JSON 结构、退出码、`--agent`/`--provider` 选择 |

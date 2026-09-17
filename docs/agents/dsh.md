@@ -54,7 +54,7 @@ v0.1.1-rc.2 根本没有 `messages` 实现。于是：
 
 本机正是这样：`deepseek-v4-flash-vision-exp` 与 `deepseek-v4-pro` 的 2380 条请求条条带
 `reasoningTokens`，而 0.1.6 下新建会话（模型名 `deepseek-flash`）的 321 条一条都没有。
-字段缺失时本工具无从得知，`O/R`（思考）一律计 0，**不会去估算**；`O` 与 `O/T` 仍然是真实
+字段缺失时本工具无从得知，`R`（思考）一律计 0，**不会去估算**；`O` 与 `O/T` 仍然是真实
 的 completion 数。
 
 想让新版把思考也写下来，把 provider 切回 chat-completions 即可（这是 DSH 侧配置，不是

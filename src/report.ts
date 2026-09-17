@@ -122,6 +122,18 @@ export interface SessionReport {
   tokens: TokenTotals;
   /** Cost totals. */
   cost: CostTotals;
+  /**
+   * This session's own requests, never folded with anything it spawned.
+   *
+   * `own` + `spawned` is the whole picture; the row's {@link requests} is that
+   * sum when subagents are folded into it and just `own` when they are listed
+   * separately.
+   */
+  own: ScopeTotals;
+  /** Everything this session spawned, folded or not. */
+  spawned: ScopeTotals;
+  /** `own` + `spawned`, summed at full precision. */
+  total: ScopeTotals;
   /** Which bands contributed. */
   bands: BandSummary[];
   /** Per-model figures. */
@@ -154,6 +166,12 @@ export interface ProjectReport {
   tokens: TokenTotals;
   /** Cost totals. */
   cost: CostTotals;
+  /** Requests from sessions a human started, excluding every subagent. */
+  own: ScopeTotals;
+  /** Requests from every subagent under this project. */
+  spawned: ScopeTotals;
+  /** `own` + `spawned`, summed at full precision. */
+  total: ScopeTotals;
   /** Which bands contributed. */
   bands: BandSummary[];
   /** Per-model figures. */
@@ -466,6 +484,9 @@ function bandsOf(summary: CostSummary, engine: PricingEngine, records: readonly 
 function sessionReport(
   session: SessionRecord,
   records: UsageRecord[],
+  ownRecords: UsageRecord[],
+  spawnedRecords: UsageRecord[],
+  spawnedSessions: number,
   project: ProjectRecord,
   engine: PricingEngine,
   currencyRate: number,
@@ -488,11 +509,30 @@ function sessionReport(
     requests: records.length,
     tokens: summary.totals === undefined ? emptyBuckets() : sumOf(records),
     cost: summary.totals,
+    own: totalsOf(ownRecords, 1, engine, currencyRate),
+    spawned: totalsOf(spawnedRecords, spawnedSessions, engine, currencyRate),
+    total: totalsOf([...ownRecords, ...spawnedRecords], 1 + spawnedSessions, engine, currencyRate),
     bands: bandsOf(summary, engine, records),
     models: modelsOf(records, engine, currencyRate),
   };
   if (warning !== undefined) row.warning = warning;
   return row;
+}
+
+/** Aggregate a record set (and how many sessions produced it) into a scope row. */
+function totalsOf(
+  records: readonly UsageRecord[],
+  sessions: number,
+  engine: PricingEngine,
+  currencyRate: number,
+): ScopeTotals {
+  const summary = costOf(records as UsageRecord[], engine, currencyRate);
+  return {
+    sessions,
+    requests: summary.priced + summary.unpriced,
+    tokens: sumOf(records as UsageRecord[]),
+    cost: summary.totals,
+  };
 }
 
 /** Aggregate a set of in-scope sessions into one scope row. */
@@ -632,10 +672,13 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   for (const project of selectedProjects) {
     const ownRows = scopedByProject.get(project.id) ?? [];
     const projectScope = inScopeByProject.get(project.id) ?? [];
+    const rowById = new Map(projectScope.map((entry) => [entry.session.id, entry]));
     // One pricing pass per project, merged at full precision.
     const summary = costOfGrouped(ownRows.map((row) => row.records), engine, query.currencyRate);
     const activeRows = ownRows.filter((row) => row.records.length > 0);
     const projectRecords = ownRows.flatMap((row) => row.records);
+    const topLevelScope = projectScope.filter((entry) => !entry.session.isSubagent);
+    const subagentScope = projectScope.filter((entry) => entry.session.isSubagent);
     const row: ProjectReport = {
       id: project.id,
       name: project.name,
@@ -644,12 +687,15 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
       activeSessions: splitRows
         ? projectScope.filter((entry) => entry.records.length > 0).length
         : activeRows.length,
-      subagentSessions: projectScope.filter((entry) => entry.session.isSubagent).length,
+      subagentSessions: subagentScope.length,
       requests: summary.priced + summary.unpriced,
       firstUsage: minOf(activeRows, (entry) => entry.records[0]?.time ?? null),
       lastUsage: maxOf(activeRows, (entry) => entry.records[entry.records.length - 1]?.time ?? null),
       tokens: sumOf(projectRecords),
       cost: summary.totals,
+      own: totalsOf(topLevelScope.flatMap((entry) => entry.records), topLevelScope.length, engine, query.currencyRate),
+      spawned: totalsOf(subagentScope.flatMap((entry) => entry.records), subagentScope.length, engine, query.currencyRate),
+      total: totalsOf(projectScope.flatMap((entry) => entry.records), projectScope.length, engine, query.currencyRate),
       bands: bandsOf(summary, engine, projectRecords),
       models: modelsOf(projectRecords, engine, query.currencyRate),
     };
@@ -658,14 +704,22 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
       for (const { session, records } of ownRows) {
         if (records.length === 0) continue;
         const warning = adapterWarning(session, records);
+        // A row's own records are never its folded ones: the split has to stay
+        // exact in both modes so `自身 + 子代理` always explains the node.
+        const ownRecords = rowById.get(session.id)?.records ?? records;
+        const descendantIds = collectDescendantIds(dataset, session.id);
+        const spawnedRecords = [...descendantIds].flatMap((id) => rowById.get(id)?.records ?? []);
         sessionRows.push(
           sessionReport(
             session,
             records,
+            ownRecords,
+            spawnedRecords,
+            descendantIds.size,
             project,
             engine,
             query.currencyRate,
-            splitRows ? 0 : collectDescendantIds(dataset, session.id).size,
+            splitRows ? 0 : descendantIds.size,
             warning,
           ),
         );

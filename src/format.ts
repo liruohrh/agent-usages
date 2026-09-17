@@ -9,10 +9,11 @@
 
 import stringWidth from 'string-width';
 
-import { tokenBreakdown, totalTokens } from './core/buckets.ts';
+import { tokenBreakdown } from './core/buckets.ts';
 import type { CostTotals, TokenTotals } from './core/types.ts';
 import type { PricingEngine, RateComponent } from './pricing/index.ts';
-import type { SessionListResult, UsageResult } from './report.ts';
+import type { ProjectReport, ScopeTotals, SessionListResult, SessionReport, UsageResult } from './report.ts';
+import type { TimeRange } from './timerange.ts';
 
 /**
  * Display width of a string, in terminal cells.
@@ -68,15 +69,6 @@ function clip(text: string, width: number): string {
  * one column down the whole report.
  */
 const LABEL_WIDTH = 18;
-
-/**
- * Width of the token block's label column.
- *
- * The block prints a request count plus the seven token figures; every label is
- * at most three display cells (`请求数` is six), so the column is sized to that
- * rather than to the report's general label width.
- */
-const TOKEN_LABEL_WIDTH = 6;
 
 /**
  * Width the title column is clipped to.
@@ -146,19 +138,6 @@ function compact(value: number): string {
   return `${(value / 1_000_000_000).toFixed(2)}B`;
 }
 
-/**
- * A scope's share of a total, as a rounded percentage.
- *
- * Computed from the exact decimal strings rather than from floats, so a share of
- * a very small total does not come out as `NaN` or a negative zero.
- */
-function share(part: string, whole: string): string {
-  const numerator = Number(part);
-  const denominator = Number(whole);
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) return '—';
-  return `${((numerator / denominator) * 100).toFixed(1)}%`;
-}
-
 /** Render an exact decimal amount with a currency symbol. */
 function money(amount: string, symbol: string): string {
   const [whole = '0', fraction = ''] = amount.split('.');
@@ -200,30 +179,6 @@ const RESOLUTION_NOTES: Readonly<Record<string, string>> = {
 /** How a provider's billing basis reads in a breakdown. */
 function basisLabel(engine: PricingEngine, component: RateComponent): string {
   return component.label.length > 0 ? component.label : engine.describeBasis(component.basis);
-}
-
-/** One `label  value` line of the token block. */
-function tokenFigure(text: string, value: string): string {
-  return `${pad(text, TOKEN_LABEL_WIDTH)}  ${value}`;
-}
-
-/** Render the token totals block. */
-function tokenLines(requests: number, tokens: TokenTotals): string[] {
-  const parts = tokenBreakdown(tokens);
-  const lines = [
-    tokenFigure('请求数', count(requests)),
-    tokenFigure('I', count(parts.inputMiss)),
-    tokenFigure('I/C', count(parts.inputHit)),
-  ];
-  if (parts.inputWrite > 0) lines.push(tokenFigure('I/W', count(parts.inputWrite)));
-  lines.push(tokenFigure('I/T', count(parts.inputTotal)));
-  // Reasoning is reported inside the completion count, so it is shown as a part
-  // of the output rather than beside it; `O/T` is that completion count.
-  lines.push(tokenFigure('O', count(parts.outputOnly)));
-  lines.push(tokenFigure('O/R', count(parts.reasoning)));
-  lines.push(tokenFigure('O/T', count(parts.outputTotal)));
-  lines.push(tokenFigure('T', count(parts.total)));
-  return lines;
 }
 
 /**
@@ -387,9 +342,9 @@ function componentShortLabel(id: string): string {
  * table past the terminal width:
  *
  * `I` 未命中输入 · `I/C` 缓存命中 · `I/T` 输入合计 ·
- * `O` 输出(非思考) · `O/R` 输出(思考) · `O/T` 输出合计 · `T` Token 总计
+ * `O` 输出(非思考) · `R` 输出(思考) · `O/T` 输出合计 · `T` Token 总计
  */
-const TOKEN_HEADERS = ['I', 'I/C', 'I/T', 'O', 'O/R', 'O/T', 'T'] as const;
+const TOKEN_HEADERS = ['I', 'I/C', 'I/T', 'O', 'R', 'O/T', 'T'] as const;
 
 /** Token figures in {@link TOKEN_HEADERS} order, comma-compacted for table width. */
 function tokenCells(tokens: TokenTotals): string[] {
@@ -428,150 +383,191 @@ function modelTable(result: UsageResult, symbol: string): string {
   );
 }
 
+/** One time window of a report: its heading, its range, and its data. */
+export interface ReportSection {
+  /** Heading shown for the window (`总`, `今日`, `本周`, …). */
+  label: string;
+  /** The range this section covers. */
+  range: TimeRange;
+  /** The aggregate for that range. */
+  result: UsageResult;
+}
+
+/** What the terminal renderer prints beyond the default tree. */
+export interface FormatOptions {
+  /** Agent display name, shown beside its id. */
+  agentLabel?: string | undefined;
+  /** Print each node's 总 / 自身 / 子代理 split. */
+  scope?: boolean | undefined;
+  /** List every subagent under its session's 子代理 line. */
+  expandSubagents?: boolean | undefined;
+  /** Append the per-component cost table and the pricing bands. */
+  cost?: boolean | undefined;
+  /** Append the per-model table. */
+  models?: boolean | undefined;
+}
+
+/** Indentation of one tree level. */
+function indent(level: number): string {
+  return '  '.repeat(level);
+}
+
 /**
- * Render a usage result for the terminal.
- * @param result - the aggregated result.
+ * The metric line every node prints.
+ *
+ * Terse by design — `I/C` is cache-read input, `R` reasoning, `Q` requests — so
+ * the seven token figures, the request count, and the money fit one line without
+ * a table's fixed columns and their width limit.
+ */
+function metricsLine(tokens: TokenTotals, requests: number, cost: string, symbol: string): string {
+  const parts = tokenBreakdown(tokens);
+  return [
+    `I ${compact(parts.inputMiss)}`,
+    `I/C ${compact(parts.inputHit)}`,
+    `I/T ${compact(parts.inputTotal)}`,
+    `O ${compact(parts.outputOnly)}`,
+    `R ${compact(parts.reasoning)}`,
+    `O/T ${compact(parts.outputTotal)}`,
+    `T ${compact(parts.total)}`,
+    `Q ${count(requests)}`,
+    money(cost, symbol),
+  ].join(' · ');
+}
+
+/** Width of the 总 / 自身 / 子代理 labels, in display cells. */
+const SCOPE_LABEL_WIDTH = 6;
+
+/** The 总 / 自身 / 子代理 lines of one node. */
+function scopeLines(
+  node: { own: ScopeTotals; spawned: ScopeTotals; total: ScopeTotals },
+  level: number,
+  symbol: string,
+): string[] {
+  const at = indent(level);
+  const line = (name: string, totals: ScopeTotals): string =>
+    `${at}${pad(name, SCOPE_LABEL_WIDTH)}  ${metricsLine(totals.tokens, totals.requests, totals.cost.total, symbol)}`;
+  return [line('总', node.total), line('自身', node.own), line('子代理', node.spawned)];
+}
+
+/** One session and, recursively, everything it spawned. */
+function sessionLines(
+  session: SessionReport,
+  childrenOf: ReadonlyMap<string, readonly SessionReport[]>,
+  level: number,
+  symbol: string,
+  options: FormatOptions,
+): string[] {
+  const children = childrenOf.get(session.id) ?? [];
+  const badge = session.subagentCount > 0 ? `（${count(session.subagentCount)} 个子代理）` : '';
+  const lines = [`${indent(level)}${clip(session.title ?? '(无标题)', TITLE_WIDTH)}${badge}`];
+  const metric = (totals: ScopeTotals): string =>
+    `${indent(level + 1)}${metricsLine(totals.tokens, totals.requests, totals.cost.total, symbol)}`;
+  // The split is worth printing only when there is something to split off; a
+  // session with no subagents says everything in one line.
+  const split = session.spawned.requests > 0 || children.length > 0;
+  if (options.scope === true && split) {
+    lines.push(...scopeLines(session, level + 1, symbol));
+    if (options.expandSubagents === true) {
+      for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 2, symbol, options));
+    }
+    return lines;
+  }
+  lines.push(metric(session.total));
+  if (options.expandSubagents === true) {
+    for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 1, symbol, options));
+  }
+  return lines;
+}
+
+/** One project's block: its name, its metrics, and its sessions. */
+function projectLines(project: ProjectReport, symbol: string, options: FormatOptions): string[] {
+  const rows = project.sessionReports ?? [];
+  const known = new Set(rows.map((row) => row.id));
+  const roots = rows.filter((row) => row.parentId === null || !known.has(row.parentId));
+  const childrenOf = new Map<string, SessionReport[]>();
+  for (const row of rows) {
+    if (row.parentId === null) continue;
+    const bucket = childrenOf.get(row.parentId);
+    if (bucket === undefined) childrenOf.set(row.parentId, [row]);
+    else bucket.push(row);
+  }
+  const lines = [project.name];
+  // A project whose whole tree is one session repeats that session's numbers,
+  // so its own line is dropped; a session whose only children it already lists
+  // collapses the same way.
+  const split = project.spawned.requests > 0 || rows.some((row) => row.isSubagent);
+  if (rows.length !== 1) {
+    lines.push(
+      options.scope === true && split
+        ? [...scopeLines(project, 1, symbol)].join('\n')
+        : `${indent(1)}${metricsLine(project.total.tokens, project.total.requests, project.total.cost.total, symbol)}`,
+    );
+  }
+  for (const root of roots) lines.push(...sessionLines(root, childrenOf, 1, symbol, options));
+  return lines;
+}
+
+/** Render one window: its heading, the root total, and the project tree. */
+function renderSection(section: ReportSection, engine: PricingEngine, symbol: string, options: FormatOptions): string[] {
+  const { result } = section;
+  const lines = [section.label];
+  // A project that billed nothing in range has no rows to show.
+  const active = result.projects.filter((project) => (project.sessionReports ?? []).length > 0);
+  // One project already prints exactly the report's own numbers, so the root
+  // block would only repeat them.
+  if (active.length !== 1) {
+    lines.push(
+      options.scope === true && result.scopeBreakdown !== undefined
+        ? [...scopeLines({ own: result.scopeBreakdown.own, spawned: result.scopeBreakdown.subagents, total: result.scopeBreakdown.total }, 1, symbol)].join('\n')
+        : `${indent(1)}${metricsLine(result.tokens, result.requests, result.cost.total, symbol)}`,
+    );
+  }
+  for (const project of active) {
+    lines.push('', ...projectLines(project, symbol, options));
+  }
+  if (options.cost === true) {
+    lines.push('', '费用明细（单价见计价区间）:', ...costLines(result.cost, result.components, symbol, result.currency, result.currencyRate));
+    const bands = bandTable(result, engine, symbol);
+    if (bands.length > 0) lines.push('', ...bands);
+  }
+  if (options.models === true && result.models.length > 0) {
+    lines.push('', '模型明细:', modelTable(result, symbol));
+  }
+  if (result.warnings.length > 0) {
+    lines.push('', '提示:', ...result.warnings.map((warning) => `  - ${warning}`));
+  }
+  return lines;
+}
+
+/**
+ * Render a usage report for the terminal.
+ * @param sections - one window, or several when the caller asked for them together.
  * @param engine - pricing engine, for period descriptions and component labels.
  * @param symbol - currency symbol to print.
+ * @param options - what to include beyond the default tree.
  * @returns the text to print.
  */
 export function formatUsageReport(
-  result: UsageResult,
+  sections: readonly ReportSection[],
   engine: PricingEngine,
   symbol: string,
-  agentLabel?: string,
+  options: FormatOptions = {},
 ): string {
-  const sections: string[] = [];
-  sections.push(
-    [
-      'Agent 用量统计',
-      `Agent     ${agentLabel === undefined ? result.agent : `${result.agent}（${agentLabel}）`}`,
-      `数据目录  ${result.source}`,
-      `维度      ${DIMENSION_LABELS[result.dimension] ?? result.dimension}`,
-      `时间范围  ${result.range.label}`,
-      `计价来源  ${engine.provider.label}（${result.currency}${result.currencyRate === 1 ? '' : `，1:${result.currencyRate}`}）`,
-    ].join('\n'),
-  );
-
-  const scope: string[] = [];
-  if (result.subagentMode === 'detail') {
-    scope.push(`会话口径  每个子代理单独一行（${count(result.subagents.sessions)} 个子代理会话；父会话行为其自身用量）`);
-  } else if (result.subagents.sessions > 0) {
-    scope.push(
-      `会话口径  含子代理（${count(result.subagents.sessions)} 个子代理会话已并入其父会话，由 ${count(result.subagents.parents)} 个会话派生）`,
-    );
-  } else {
-    scope.push('会话口径  含子代理');
-  }
-  sections.push(['总量:', ...scope, ...tokenLines(result.requests, result.tokens)].join('\n'));
-
-  // The three scopes answer the question the single total cannot: how much of it
-  // came from subagents at all.
-  if (result.scopeBreakdown !== undefined) {
-    const { own, subagents, total } = result.scopeBreakdown;
-    sections.push(
-      [
-        '按范围:',
-        table(
-          ['范围', '会话', '请求', ...TOKEN_HEADERS, symbol, '占比'],
-          [
-            ['主会话自身', count(own.sessions), count(own.requests), ...tokenCells(own.tokens), money(own.cost.total, symbol), share(own.cost.total, total.cost.total)],
-            ['全部子代理', count(subagents.sessions), count(subagents.requests), ...tokenCells(subagents.tokens), money(subagents.cost.total, symbol), share(subagents.cost.total, total.cost.total)],
-            ['总计', count(total.sessions), count(total.requests), ...tokenCells(total.tokens), money(total.cost.total, symbol), '100%'],
-          ],
-          tokenAligns(1, 2),
-        ),
-      ].join('\n'),
-    );
-  }
-
-  sections.push(
-    [
-      '费用明细（单价见计价区间）:',
-      ...costLines(result.cost, result.components, symbol, result.currency, result.currencyRate),
-    ].join('\n'),
-  );
-
-  const bands = bandTable(result, engine, symbol);
-  if (bands.length > 0) sections.push(bands.join('\n'));
-
-  if (result.models.length > 0) sections.push(['模型明细:', modelTable(result, symbol)].join('\n'));
-
-  if (result.dimension === 'project' || result.dimension === 'session') {
-    sections.push(
-      [
-        '按项目:',
-        table(
-          ['项目', '会话', '子代理', '请求', ...TOKEN_HEADERS, symbol],
-          result.projects.map((project) => [
-            project.name,
-            count(project.activeSessions),
-            project.subagentSessions > 0 ? count(project.subagentSessions) : '—',
-            count(project.requests),
-            ...tokenCells(project.tokens),
-            money(project.cost.total, symbol),
-          ]),
-          tokenAligns(1, 1),
-          [
-            '合计',
-            count(result.projects.reduce((total, project) => total + project.activeSessions, 0)),
-            result.subagents.sessions > 0 ? count(result.subagents.sessions) : '—',
-            count(result.requests),
-            ...tokenCells(result.tokens),
-            money(result.cost.total, symbol),
-          ],
-        ),
-      ].join('\n'),
-    );
-  }
-
-  if (result.dimension === 'session') {
-    const rows: string[][] = [];
-    for (const project of result.projects) {
-      for (const session of project.sessionReports ?? []) {
-        const sub = session.isSubagent;
-        rows.push([
-          `${sub ? '  ↳ ' : ''}${project.name}`,
-          `${sub ? '  ' : ''}${clip(session.title ?? '(无标题)', TITLE_WIDTH)}`,
-          sub ? '—' : session.subagentCount > 0 ? count(session.subagentCount) : '—',
-          count(session.requests),
-          ...tokenCells(session.tokens),
-          money(session.cost.total, symbol),
-        ]);
-      }
-    }
-    if (rows.length > 0) {
-      // Totals come from the report rather than from the rendered rows: the rows
-      // are rounded for display and may fold subagents into a parent, so summing
-      // them would under-report the true total.
-      const totals: string[] = [
-        '合计',
-        '',
-        '',
-        count(result.requests),
-        ...tokenCells(result.tokens),
-        money(result.cost.total, symbol),
-      ];
-      sections.push(
-        [
-          '按会话（↳ 为子代理；会话 ID 见 --json 或 session list）:',
-          table(['项目', '标题', '子代理', '请求', ...TOKEN_HEADERS, symbol], rows, tokenAligns(2, 1), totals),
-        ].join('\n'),
-      );
-    }
-  }
-
-  if (result.warnings.length > 0) {
-    sections.push(['提示:', ...result.warnings.map((warning) => `  - ${warning}`)].join('\n'));
-  }
-  return `${sections.join('\n\n')}\n`;
+  const [first] = sections;
+  if (first === undefined) return '';
+  const header = [
+    'Agent 用量统计',
+    `Agent     ${options.agentLabel === undefined ? first.result.agent : `${first.result.agent}（${options.agentLabel}）`}`,
+    `数据目录  ${first.result.source}`,
+    sections.length === 1
+      ? `时间范围  ${first.range.label}`
+      : `时间窗口  ${sections.map((section) => section.label).join(' / ')}`,
+    `计价来源  ${engine.provider.label}（${first.result.currency}${first.result.currencyRate === 1 ? '' : `，1:${first.result.currencyRate}`}）`,
+  ].join('\n');
+  const blocks = [header];
+  for (const section of sections) blocks.push(renderSection(section, engine, symbol, options).join('\n'));
+  return `${blocks.join('\n\n')}\n`;
 }
-
-const DIMENSION_LABELS: Readonly<Record<string, string>> = {
-  all: '全部',
-  project: '按项目',
-  session: '按会话',
-};
 
 /**
  * Render the session inventory for the terminal.
@@ -636,7 +632,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
  * @param engine - pricing engine, for component labels.
  * @returns a plain object with ISO timestamps beside every epoch value.
  */
-export function usageToJson(result: UsageResult, engine: PricingEngine): unknown {
+function resultToJson(result: UsageResult, engine: PricingEngine): Record<string, unknown> {
   return {
     agent: result.agent,
     source: result.source,
@@ -699,6 +695,9 @@ export function usageToJson(result: UsageResult, engine: PricingEngine): unknown
       lastUsageIso: iso(project.lastUsage),
       tokens: project.tokens,
       cost: project.cost,
+      own: scopeToJson(project.own),
+      spawned: scopeToJson(project.spawned),
+      nodeTotal: scopeToJson(project.total),
       pricingBands: project.bands,
       models: project.models,
       ...(project.sessionReports === undefined
@@ -722,6 +721,9 @@ export function usageToJson(result: UsageResult, engine: PricingEngine): unknown
               requests: session.requests,
               tokens: session.tokens,
               cost: session.cost,
+              own: scopeToJson(session.own),
+              spawned: scopeToJson(session.spawned),
+              nodeTotal: scopeToJson(session.total),
               pricingBands: session.bands,
               models: session.models,
               ...(session.warning === undefined ? {} : { warning: session.warning }),
@@ -729,6 +731,27 @@ export function usageToJson(result: UsageResult, engine: PricingEngine): unknown
           }),
     })),
     warnings: result.warnings,
+  };
+}
+
+/**
+ * Serialise one report window as JSON-ready data.
+ * @param sections - the windows that were rendered.
+ * @param engine - pricing engine, for component labels.
+ * @returns the single window's object, or one object per window under `sections`.
+ */
+export function usageToJson(sections: readonly ReportSection[], engine: PricingEngine): unknown {
+  const [first] = sections;
+  if (first === undefined) return {};
+  if (sections.length === 1) return resultToJson(first.result, engine);
+  return {
+    agent: first.result.agent,
+    source: first.result.source,
+    pricingProvider: first.result.pricingProvider,
+    currency: first.result.currency,
+    currencyRate: first.result.currencyRate,
+    subagentMode: first.result.subagentMode,
+    sections: sections.map((section) => ({ label: section.label, ...resultToJson(section.result, engine) })),
   };
 }
 
