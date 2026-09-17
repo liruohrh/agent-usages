@@ -282,7 +282,7 @@ describe('usage', () => {
     expect((await cli(['usage', '--cost'])).stdout).toContain('费用明细（单价见计价区间）');
     const windows = (await cli(['usage', '--windows'])).stdout;
     expect(windows).toContain('时间窗口  总 / 今日 / 本周 / 本月 / 今年');
-    for (const label of ['总', '今日', '本周', '本月', '今年']) expect(windows).toContain(`\n${label}\n`);
+    for (const label of ['总', '今日', '本周', '本月', '今年']) expect(windows).toMatch(new RegExp(`\\n${label}( · |\\n)`));
   });
 
   it('exits 2 when the filter matches no usage', async () => {

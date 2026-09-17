@@ -69,6 +69,8 @@ function report(overrides: Partial<UsageResult> = {}): UsageResult {
     subagentMode: 'total',
     subagents: { sessions: 0, parents: 0 },
     requests: 0,
+    firstUsage: null,
+    lastUsage: null,
     unpriced: 0,
     tokens: emptyBuckets(),
     cost: cost('0.0000'),
@@ -405,6 +407,77 @@ describe('formatUsageReport', () => {
     const line = text.split('\n').find((row) => row.includes('👨‍👩‍👧')) ?? '';
     expect(line.endsWith('…')).toBe(true);
     expect([...line].every((glyph) => glyph === undefined || !glyph.includes('\u200d') || true)).toBe(true);
+  });
+});
+
+describe('date labels', () => {
+  /** A local wall-clock instant, so the test is timezone-independent. */
+  const at = (year: number, month: number, day: number, hour = 0, minute = 0): number =>
+    new Date(year, month - 1, day, hour, minute).getTime();
+
+  const window = (label: string, from: number | null, to: number | null): string =>
+    formatUsageReport(
+      [{ label, range: { from, to, label }, result: report({ firstUsage: from, lastUsage: to }) }],
+      engine,
+      '¤',
+    );
+
+  const titled = (projectStart: number | null, sessionEnd: number | null, sessionCount = 2): string =>
+    render(
+      report({
+        projects: [
+          projectRow({
+            id: 'demo',
+            requests: 2,
+            tokens: SMALL,
+            cost: cost('2.0000'),
+            firstUsage: projectStart,
+            lastUsage: sessionEnd,
+            own: totals(SMALL, 2, '2.0000'),
+            spawned: totals(emptyBuckets(), 0, '0.0000', 0),
+            total: totals(SMALL, 2, '2.0000'),
+            sessionReports: [
+              sessionRow({ id: 'a1', title: 'A one', lastUsage: sessionEnd, requests: 1, tokens: SMALL, cost: cost('1.0000') }),
+              ...(sessionCount > 1
+                ? [sessionRow({ id: 'a2', title: 'A two', lastUsage: null, requests: 1, tokens: SMALL, cost: cost('1.0000') })]
+                : []),
+            ],
+          }),
+        ],
+      }),
+    );
+
+  it('writes a same-day span with its hours', () => {
+    expect(window('今日', at(2026, 7, 1, 8), at(2026, 7, 1, 23))).toContain('今日 · 2026-07-01 8h~23h');
+  });
+
+  it('drops the closing hour when the whole span sits inside one hour', () => {
+    expect(window('今日', at(2026, 7, 1, 8, 5), at(2026, 7, 1, 8, 50))).toContain('今日 · 2026-07-01 8h ~');
+  });
+
+  it('writes one month once', () => {
+    expect(window('本月', at(2026, 7, 1), at(2026, 7, 9))).toContain('本月 · 2026-07-01 ~ 09');
+  });
+
+  it('writes both dates across months', () => {
+    expect(window('总', at(2026, 7, 1), at(2026, 8, 5))).toContain('总 · 2026-07-01 ~ 2026-08-05');
+  });
+
+  it('writes no span when the window billed nothing', () => {
+    expect(window('今日', null, null)).toContain('\n今日\n');
+  });
+
+  it('labels a project with its start date and a session with its end date', () => {
+    const text = titled(at(2026, 7, 1), at(2026, 7, 9));
+    expect(text).toContain('demo 2026-07-01');
+    expect(text).toContain('A one 2026-07-09');
+  });
+
+  it('omits a session date that repeats the project date', () => {
+    const text = titled(at(2026, 7, 9), at(2026, 7, 9));
+    expect(text).toContain('demo 2026-07-09');
+    expect(text).toContain('\n  A one\n');
+    expect(text).not.toContain('A one 2026-07-09');
   });
 });
 

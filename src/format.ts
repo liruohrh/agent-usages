@@ -407,6 +407,45 @@ export interface FormatOptions {
   models?: boolean | undefined;
 }
 
+/** Two-digit zero pad. */
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/** `YYYY-MM-DD` in the machine's local zone. */
+function dayText(instant: number): string {
+  const date = new Date(instant);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+/**
+ * The effective span of a window, terse.
+ *
+ * The span is derived from the billed requests, not from the nominal bounds, so
+ * a half-open `to` never shows up as the next day. Only a span inside one day
+ * carries hours: `2026-07-01 8h~23h`, or `2026-07-01 8h ~` when the whole span
+ * sits inside a single hour.
+ */
+function spanText(from: number, to: number): string {
+  const start = new Date(from);
+  const end = new Date(to);
+  const sameDay =
+    start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth() && start.getDate() === end.getDate();
+  if (sameDay) {
+    const first = start.getHours();
+    const last = end.getHours();
+    return first === last ? `${dayText(from)} ${first}h ~` : `${dayText(from)} ${first}h~${last}h`;
+  }
+  const sameMonth = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth();
+  return sameMonth ? `${dayText(from)} ~ ${pad2(end.getDate())}` : `${dayText(from)} ~ ${dayText(to)}`;
+}
+
+/** The date a node labels itself with, or `undefined` when it has none. */
+function nodeDate(instant: number | null, kind: 'start' | 'end'): string | undefined {
+  const at = kind === 'start' ? instant : instant;
+  return at === null ? undefined : dayText(at);
+}
+
 /** Indentation of one tree level. */
 function indent(level: number): string {
   return '  '.repeat(level);
@@ -456,10 +495,14 @@ function sessionLines(
   level: number,
   symbol: string,
   options: FormatOptions,
+  parentDate: string | undefined,
 ): string[] {
   const children = childrenOf.get(session.id) ?? [];
   const badge = session.subagentCount > 0 ? `（${count(session.subagentCount)} 个子代理）` : '';
-  const lines = [`${indent(level)}${clip(session.title ?? '(无标题)', TITLE_WIDTH)}${badge}`];
+  const end = nodeDate(session.lastUsage, 'end');
+  // The date is only worth repeating when it differs from the row above.
+  const suffix = end === undefined || end === parentDate ? '' : ` ${end}`;
+  const lines = [`${indent(level)}${clip(session.title ?? '(无标题)', TITLE_WIDTH)}${badge}${suffix}`];
   const metric = (totals: ScopeTotals): string =>
     `${indent(level + 1)}${metricsLine(totals.tokens, totals.requests, totals.cost.total, symbol)}`;
   // The split is worth printing only when there is something to split off; a
@@ -468,13 +511,13 @@ function sessionLines(
   if (options.scope === true && split) {
     lines.push(...scopeLines(session, level + 1, symbol));
     if (options.expandSubagents === true) {
-      for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 2, symbol, options));
+      for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 2, symbol, options, end));
     }
     return lines;
   }
   lines.push(metric(session.total));
   if (options.expandSubagents === true) {
-    for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 1, symbol, options));
+    for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 1, symbol, options, end));
   }
   return lines;
 }
@@ -491,7 +534,8 @@ function projectLines(project: ProjectReport, symbol: string, options: FormatOpt
     if (bucket === undefined) childrenOf.set(row.parentId, [row]);
     else bucket.push(row);
   }
-  const lines = [project.name];
+  const projectStart = project.firstUsage === null ? undefined : dayText(project.firstUsage);
+  const lines = [projectStart === undefined ? project.name : `${project.name} ${projectStart}`];
   // A project whose whole tree is one session repeats that session's numbers,
   // so its own line is dropped; a session whose only children it already lists
   // collapses the same way.
@@ -503,14 +547,16 @@ function projectLines(project: ProjectReport, symbol: string, options: FormatOpt
         : `${indent(1)}${metricsLine(project.total.tokens, project.total.requests, project.total.cost.total, symbol)}`,
     );
   }
-  for (const root of roots) lines.push(...sessionLines(root, childrenOf, 1, symbol, options));
+  for (const root of roots) lines.push(...sessionLines(root, childrenOf, 1, symbol, options, projectStart));
   return lines;
 }
 
 /** Render one window: its heading, the root total, and the project tree. */
 function renderSection(section: ReportSection, engine: PricingEngine, symbol: string, options: FormatOptions): string[] {
   const { result } = section;
-  const lines = [section.label];
+  const span =
+    result.firstUsage === null || result.lastUsage === null ? undefined : spanText(result.firstUsage, result.lastUsage);
+  const lines = [span === undefined ? section.label : `${section.label} · ${span}`];
   // A project that billed nothing in range has no rows to show.
   const active = result.projects.filter((project) => (project.sessionReports ?? []).length > 0);
   // One project already prints exactly the report's own numbers, so the root

@@ -232,6 +232,10 @@ export interface UsageResult {
   scopeBreakdown?: ScopeBreakdown | undefined;
   /** Requests billed. */
   requests: number;
+  /** First billed request in range, or `null` when nothing billed. */
+  firstUsage: number | null;
+  /** Last billed request in range, or `null` when nothing billed. */
+  lastUsage: number | null;
   /** Records nothing could price. */
   unpriced: number;
   /** Token totals. */
@@ -770,6 +774,8 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
     subagents: { sessions: subagentSessions.length, parents: parents.size },
     ...(scopeBreakdown === undefined ? {} : { scopeBreakdown }),
     requests: mergedAll.priced + mergedAll.unpriced,
+    firstUsage: allRecords[0]?.time ?? null,
+    lastUsage: allRecords[allRecords.length - 1]?.time ?? null,
     unpriced: mergedAll.unpriced,
     tokens: sumOf(allRecords),
     cost: mergedAll.totals,
