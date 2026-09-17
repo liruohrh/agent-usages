@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import stringWidth from 'string-width';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import type { CostTotals, TokenTotals } from '../../src/core/types.ts';
@@ -77,9 +78,15 @@ function report(overrides: Partial<UsageResult> = {}): UsageResult {
   };
 }
 
-/** Display width in terminal cells, counting wide characters as two. */
+
+/**
+ * Display width in terminal cells.
+ *
+ * Deliberately the renderer's own measurement: a test that measures with a
+ * different rule could pass while the terminal still renders ragged columns.
+ */
 function cells(line: string): number {
-  return [...line].reduce((total, character) => total + ((character.codePointAt(0) ?? 0) > 0x2e80 ? 2 : 1), 0);
+  return stringWidth(line);
 }
 
 describe('formatUsageReport', () => {
@@ -279,6 +286,89 @@ function row(
     nested: false,
     ...overrides,
   };
+}
+
+describe('terminal width, beyond CJK', () => {
+  it('fits every row into the same number of cells, whatever the script', () => {
+    // Each name stresses a different width rule. A `codePoint > 0x2e80` test gets
+    // a ZWJ family (one grapheme, two cells), a flag (two regional indicators),
+    // a combining mark (zero extra cells) and half-width katakana (one cell each)
+    // wrong, so the rows would end at different cells.
+    const names = ['👨‍👩‍👧 family', '🇨🇳 flag', 'e\u0301 combining', 'ｱｲｳｴｵ katakana', '中文项目名称', 'plain'];
+    const table = projectTable(names).slice(projectTable(names).indexOf('按项目:'));
+    const rows = table
+      .split('\n')
+      .filter((line) => line.trim().length > 0 && !line.includes('─') && !line.startsWith('按项目:'));
+    // Header, six projects and the totals row: every one ends at the same cell.
+    // A wrong width rule leaves each script a different number of cells short,
+    // and a trailing trim leaves a right-aligned last column ragged.
+    expect(rows).toHaveLength(8);
+    expect(new Set(rows.map((line) => cells(line))).size).toBe(1);
+  });
+
+  it('measures half-width katakana as one cell', () => {
+    // ｱ is a single-cell character whose code point is above 0x2e80, so the
+    // naive rule counted it as two and every following column drifted.
+    expect(cells('ｱｲｳｴｵ')).toBe(5);
+    const text = projectTable(['ｱｲｳｴｵ', '中文项目名称']);
+    const table = text.slice(text.indexOf('按项目:'));
+    const rows = table.split('\n').filter((line) => /^(ｱｲｳｴｵ|中文项目名称)/.test(line));
+    expect(rows).toHaveLength(2);
+    expect(cells(rows[0] ?? '')).toBe(cells(rows[1] ?? ''));
+  });
+
+  it('clips a long session title on a grapheme boundary', () => {
+    // The session table clips titles to a fixed width, so this is where clipping
+    // is observable. It must not split a ZWJ sequence or leave a bare joiner.
+    const long = '👨‍👩‍👧'.repeat(6) + ' analysis of a very long session title';
+    const sessions: SessionReport[] = [
+      {
+        id: 'parent',
+        title: long,
+        cwd: null,
+        projectName: 'demo',
+        projectId: 'demo',
+        createdAt: null,
+        firstUsage: null,
+        lastUsage: null,
+        isSubagent: false,
+        subagentCount: 0,
+        parentId: null,
+        requests: 1,
+        tokens: emptyBuckets(),
+        cost: cost('0.0000'),
+        bands: [],
+        models: [],
+      },
+    ];
+    const text = formatUsageReport(
+      report({
+        dimension: 'session',
+        requests: 1,
+        projects: [projectRow({ id: 'demo', sessionReports: sessions })],
+      }),
+      engine,
+      '¤',
+    );
+    const row = text.split('\n').find((line) => line.includes('…'));
+    expect(row).toBeDefined();
+    // No dangling zero-width joiner before the ellipsis, and no half a cluster.
+    expect(row).not.toContain('\u200d…');
+    // The clipped title fits the reserved column, ellipsis included.
+    const title = /^\S+\s{2}(.*?)…/.exec(row ?? '')?.[1] ?? '';
+    expect(cells(`${title}…`)).toBeLessThanOrEqual(32);
+    // Six family emoji are 12 cells of the 32, so the rest is text.
+    expect(cells('👨‍👩‍👧'.repeat(6))).toBe(12);
+  });
+});
+
+/** A project table with one row per name, for width tests. */
+function projectTable(names: readonly string[]): string {
+  return formatUsageReport(
+    report({ dimension: 'project', projects: names.map((name) => projectRow({ id: name, name })) }),
+    engine,
+    '¤',
+  );
 }
 
 describe('table totals rows', () => {

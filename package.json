@@ -22,7 +22,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "commander": "^14.0.0"
+    "commander": "^14.0.0",
+    "string-width": "^8.2.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

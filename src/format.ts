@@ -7,33 +7,36 @@
  * line instead of an empty cell.
  */
 
+import stringWidth from 'string-width';
+
 import { tokenBreakdown, totalTokens } from './core/buckets.ts';
 import type { CostTotals, TokenTotals } from './core/types.ts';
 import type { PricingEngine, RateComponent } from './pricing/index.ts';
 import type { SessionListResult, UsageResult } from './report.ts';
 
-/** Display width of a string, counting East-Asian wide characters as two cells. */
+/**
+ * Display width of a string, in terminal cells.
+ *
+ * Delegated to `string-width`, which implements the Unicode east-asian-width
+ * table plus emoji and ANSI handling. A hand-rolled `codePoint > 0x2e80` test is
+ * right for CJK and full-width punctuation but wrong for half-width katakana,
+ * ZWJ emoji sequences, regional-indicator flags, variation selectors, and
+ * combining marks — each of which would shear a column.
+ */
 function displayWidth(text: string): number {
-  let width = 0;
-  for (const character of text) {
-    const code = character.codePointAt(0) ?? 0;
-    width += isWide(code) ? 2 : 1;
-  }
-  return width;
+  return stringWidth(text);
 }
 
-/** Whether a code point occupies two terminal cells. */
-function isWide(code: number): boolean {
-  return (
-    (code >= 0x1100 && code <= 0x115f) ||
-    (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
-    (code >= 0xac00 && code <= 0xd7a3) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0xfe30 && code <= 0xfe6f) ||
-    (code >= 0xff00 && code <= 0xff60) ||
-    (code >= 0xffe0 && code <= 0xffe6) ||
-    (code >= 0x20000 && code <= 0x3fffd)
-  );
+/** Grapheme segmentation, so clipping never splits an emoji or combining mark. */
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/** The grapheme clusters of a string, in order. */
+function graphemes(text: string): string[] {
+  const parts: string[] = [];
+  // `Intl.Segmenter.segment` yields the clusters; older inputs without it fall
+  // back to code points, which is still better than code units.
+  for (const segment of segmenter.segment(text)) parts.push(segment.segment);
+  return parts;
 }
 
 /** Pad a string to a display width. */
@@ -45,12 +48,14 @@ function pad(text: string, width: number, align: 'left' | 'right' = 'left'): str
 /** Truncate to a display width, appending an ellipsis when cut. */
 function clip(text: string, width: number): string {
   if (displayWidth(text) <= width) return text;
+  // Reserve one cell for the ellipsis, and cut on a grapheme boundary so an
+  // emoji or a combining mark is never left half-written.
   let result = '';
   let used = 0;
-  for (const character of text) {
-    const size = displayWidth(character);
+  for (const grapheme of graphemes(text)) {
+    const size = displayWidth(grapheme);
     if (used + size > width - 1) break;
-    result += character;
+    result += grapheme;
     used += size;
   }
   return `${result}…`;
@@ -104,9 +109,14 @@ function table(
     if (totals !== undefined) width = Math.max(width, displayWidth(totals[index] ?? ''));
     return width;
   });
+  // Padded to the full column width, with no trailing trim: a right-aligned last
+  // column (an amount) would otherwise leave the header one cell shorter than the
+  // rows beneath it, which shows up as a ragged right edge.
   const renderRow = (row: readonly string[]): string =>
-    row.map((cell, index) => pad(clip(cell, Math.max(widths[index] ?? 0, 3)), widths[index] ?? 0, aligns[index] ?? 'left')).join('  ').trimEnd();
-  const separator = widths.map((width) => '─'.repeat(width)).join('  ');
+    row
+      .map((cell, index) => pad(clip(cell, Math.max(widths[index] ?? 0, 3)), widths[index] ?? 0, aligns[index] ?? 'left'))
+      .join('  ');
+  const separator = widths.map((width) => '─'.repeat(width)).join('  ').trimEnd();
   const lines = [renderRow(headers), separator, ...rows.map(renderRow)];
   // A total over a single row says nothing the row does not, so it is shown
   // only when it actually adds up several rows.
