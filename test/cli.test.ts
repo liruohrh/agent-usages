@@ -306,17 +306,16 @@ describe('text output alignment', () => {
       const match = /^(\S.*?)(\s{2,})(\S.*)$/.exec(line);
       return match === null ? -1 : cells(`${match[1]}${match[2]}`);
     };
-    // The header block: every field's value starts in the same column, even
-    // though one label mixes ASCII and full-width parentheses.
+    // The header block: every field's value starts in the same column.
     const header = lines.filter((line) => /^(Agent|数据目录|维度|时间范围|计价来源)\s{2,}\S/.test(line));
     expect(header).toHaveLength(5);
     expect(new Set(header.map(valueColumn)).size).toBe(1);
-    // The totals block, whose labels include `输入(缓存未命中)`. Scoped to its
-    // own section so the cost table's rows are not pulled in.
+    // The totals block, whose labels are the compact token figures. Scoped to
+    // its own section so the cost table's rows are not pulled in.
     const totalsSection = stdout.slice(stdout.indexOf('总量:'), stdout.indexOf('按范围:'));
     const totals = totalsSection
       .split('\n')
-      .filter((line) => /^(请求数|输入|输出|Token 总计)\S*\s{2,}\S/.test(line));
+      .filter((line) => /^(请求数|I|O|T)\S*\s{2,}\S/.test(line));
     expect(totals).toHaveLength(8);
     expect(new Set(totals.map(valueColumn)).size).toBe(1);
     // The two blocks need not share a column, but each must be internally even.
@@ -325,7 +324,7 @@ describe('text output alignment', () => {
 
   it('reports the same token column set in every table', async () => {
     const { stdout } = await cli(['usage', '--project', '--subagents']);
-    const columns = ['未命中输入', '缓存命中', '输入合计', '输出(思考)', '输出(非思考)', '输出合计', 'Token 总计'];
+    const columns = ['I', 'I/C', 'I/T', 'O', 'O/R', 'O/T', 'T'];
     const modelTable = stdout.slice(stdout.indexOf('模型明细:'), stdout.indexOf('按项目:'));
     const projectTable = stdout.slice(stdout.indexOf('按项目:'));
     const scopeTable = stdout.slice(stdout.indexOf('按范围:'), stdout.indexOf('费用明细'));
@@ -334,9 +333,12 @@ describe('text output alignment', () => {
       ['按项目', projectTable],
       ['按范围', scopeTable],
     ] as const) {
-      const header = block.split('\n').find((line) => line.includes('未命中输入'));
+      const header = block.split('\n').find((line) => line.includes('I/T'));
       expect(header, name).toBeDefined();
-      for (const column of columns) expect(header, `${name} / ${column}`).toContain(column);
+      // The token labels, in order, exactly once each — single-letter labels
+      // make a substring check meaningless, so compare the words themselves.
+      const words = (header ?? '').trim().split(/\s+/);
+      expect(words.filter((word) => columns.includes(word)), name).toEqual(columns);
     }
   });
 });

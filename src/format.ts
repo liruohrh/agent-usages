@@ -70,6 +70,15 @@ function clip(text: string, width: number): string {
 const LABEL_WIDTH = 18;
 
 /**
+ * Width of the token block's label column.
+ *
+ * The block prints a request count plus the seven token figures; every label is
+ * at most three display cells (`请求数` is six), so the column is sized to that
+ * rather than to the report's general label width.
+ */
+const TOKEN_LABEL_WIDTH = 6;
+
+/**
  * Width the title column is clipped to.
  *
  * Titles are free-form and can be arbitrarily long, while the token columns
@@ -193,22 +202,27 @@ function basisLabel(engine: PricingEngine, component: RateComponent): string {
   return component.label.length > 0 ? component.label : engine.describeBasis(component.basis);
 }
 
+/** One `label  value` line of the token block. */
+function tokenFigure(text: string, value: string): string {
+  return `${pad(text, TOKEN_LABEL_WIDTH)}  ${value}`;
+}
+
 /** Render the token totals block. */
 function tokenLines(requests: number, tokens: TokenTotals): string[] {
   const parts = tokenBreakdown(tokens);
   const lines = [
-    `请求数              ${count(requests)}`,
-    `输入(缓存未命中)    ${count(parts.inputMiss)}`,
-    `输入(缓存命中)      ${count(parts.inputHit)}`,
+    tokenFigure('请求数', count(requests)),
+    tokenFigure('I', count(parts.inputMiss)),
+    tokenFigure('I/C', count(parts.inputHit)),
   ];
-  if (parts.inputWrite > 0) lines.push(`输入(缓存写入)      ${count(parts.inputWrite)}`);
-  lines.push(`输入合计            ${count(parts.inputTotal)}`);
+  if (parts.inputWrite > 0) lines.push(tokenFigure('I/W', count(parts.inputWrite)));
+  lines.push(tokenFigure('I/T', count(parts.inputTotal)));
   // Reasoning is reported inside the completion count, so it is shown as a part
-  // of the output rather than beside it; `输出合计` is that completion count.
-  lines.push(`输出(思考)          ${count(parts.reasoning)}`);
-  lines.push(`输出(非思考)        ${count(parts.outputOnly)}`);
-  lines.push(`输出合计            ${count(parts.outputTotal)}`);
-  lines.push(`Token 总计          ${count(parts.total)}`);
+  // of the output rather than beside it; `O/T` is that completion count.
+  lines.push(tokenFigure('O', count(parts.outputOnly)));
+  lines.push(tokenFigure('O/R', count(parts.reasoning)));
+  lines.push(tokenFigure('O/T', count(parts.outputTotal)));
+  lines.push(tokenFigure('T', count(parts.total)));
   return lines;
 }
 
@@ -245,7 +259,7 @@ function costLines(
   }
   const lines = [
     table(
-      ['计费项', '计费 token', '金额'],
+      ['计费项', '计费 token', symbol],
       rows,
       ['left', 'right', 'right'],
       ['费用合计', '', money(cost.total, symbol)],
@@ -318,7 +332,7 @@ function bandTable(result: UsageResult, engine: PricingEngine, symbol: string): 
   const lines = [
     '计价区间:',
     table(
-      ['区间', '时段', '请求', '输入', '单价', '金额'],
+      ['区间', '时段', '请求', 'I/T', '单价', symbol],
       rows,
       ['left', 'left', 'right', 'right', 'left', 'right'],
     ),
@@ -364,14 +378,18 @@ function componentShortLabel(id: string): string {
 }
 
 /**
- * The token figures every table reports, in one order.
+ * The token figures every table reports, in one order and one vocabulary.
  *
  * Each table used to pick its own three columns, which made the tables
  * incomparable: the `总量` block reports seven figures, so a reader could not
  * check a project's input total or its reasoning against it. Every table now
- * carries the same set.
+ * carries the same set — abbreviated, because seven spelled-out headers push a
+ * table past the terminal width:
+ *
+ * `I` 未命中输入 · `I/C` 缓存命中 · `I/T` 输入合计 ·
+ * `O` 输出(非思考) · `O/R` 输出(思考) · `O/T` 输出合计 · `T` Token 总计
  */
-const TOKEN_HEADERS = ['未命中输入', '缓存命中', '输入合计', '输出(思考)', '输出(非思考)', '输出合计', 'Token 总计'] as const;
+const TOKEN_HEADERS = ['I', 'I/C', 'I/T', 'O', 'O/R', 'O/T', 'T'] as const;
 
 /** Token figures in {@link TOKEN_HEADERS} order, comma-compacted for table width. */
 function tokenCells(tokens: TokenTotals): string[] {
@@ -380,8 +398,8 @@ function tokenCells(tokens: TokenTotals): string[] {
     compact(parts.inputMiss),
     compact(parts.inputHit),
     compact(parts.inputTotal),
-    compact(parts.reasoning),
     compact(parts.outputOnly),
+    compact(parts.reasoning),
     compact(parts.outputTotal),
     compact(parts.total),
   ];
@@ -399,7 +417,7 @@ function tokenAligns(leading: number, trailing: number): ('left' | 'right')[] {
 /** Render a per-model table. */
 function modelTable(result: UsageResult, symbol: string): string {
   return table(
-    ['模型', '请求', ...TOKEN_HEADERS, '费用'],
+    ['M', '请求', ...TOKEN_HEADERS, symbol],
     result.models.map((model) => [
       model.model,
       count(model.requests),
@@ -455,7 +473,7 @@ export function formatUsageReport(
       [
         '按范围:',
         table(
-          ['范围', '会话', '请求', ...TOKEN_HEADERS, '费用', '占比'],
+          ['范围', '会话', '请求', ...TOKEN_HEADERS, symbol, '占比'],
           [
             ['主会话自身', count(own.sessions), count(own.requests), ...tokenCells(own.tokens), money(own.cost.total, symbol), share(own.cost.total, total.cost.total)],
             ['全部子代理', count(subagents.sessions), count(subagents.requests), ...tokenCells(subagents.tokens), money(subagents.cost.total, symbol), share(subagents.cost.total, total.cost.total)],
@@ -484,7 +502,7 @@ export function formatUsageReport(
       [
         '按项目:',
         table(
-          ['项目', '会话', '子代理', '请求', ...TOKEN_HEADERS, '费用'],
+          ['项目', '会话', '子代理', '请求', ...TOKEN_HEADERS, symbol],
           result.projects.map((project) => [
             project.name,
             count(project.activeSessions),
@@ -537,7 +555,7 @@ export function formatUsageReport(
       sections.push(
         [
           '按会话（↳ 为子代理；会话 ID 见 --json 或 session list）:',
-          table(['项目', '标题', '子代理', '请求', ...TOKEN_HEADERS, '费用'], rows, tokenAligns(2, 1), totals),
+          table(['项目', '标题', '子代理', '请求', ...TOKEN_HEADERS, symbol], rows, tokenAligns(2, 1), totals),
         ].join('\n'),
       );
     }

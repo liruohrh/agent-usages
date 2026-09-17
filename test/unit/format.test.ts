@@ -109,25 +109,25 @@ describe('formatUsageReport', () => {
       reasoning: 250_000,
     };
     const text = formatUsageReport(report({ requests: 3, tokens }), engine, '¤');
-    expect(text).toContain('输入(缓存未命中)    1,000');
-    expect(text).toContain('输入(缓存命中)      130,399,872');
+    expect(text).toContain('I       1,000');
+    expect(text).toContain('I/C     130,399,872');
     // The input total adds the disjoint prompt buckets.
-    expect(text).toContain('输入合计            130,400,872');
+    expect(text).toContain('I/T     130,400,872');
     // Reasoning and the rest of the completion are shown apart...
-    expect(text).toContain('输出(思考)          250,000');
-    expect(text).toContain('输出(非思考)        750,000');
+    expect(text).toContain('O/R     250,000');
+    expect(text).toContain('O       750,000');
     // ...and the output total is the provider's own completion count, so
     // reasoning appears in it exactly once.
-    expect(text).toContain('输出合计            1,000,000');
-    expect(text).toContain('Token 总计          131,400,872');
+    expect(text).toContain('O/T     1,000,000');
+    expect(text).toContain('T       131,400,872');
   });
 
   it('hides the cache-write line when the provider never writes', () => {
     const none = formatUsageReport(report({ tokens: { ...emptyBuckets(), input: 1 } }), engine, '¤');
-    expect(none).not.toContain('输入(缓存写入)');
+    expect(none).not.toContain('I/W');
     const some = formatUsageReport(report({ tokens: { ...emptyBuckets(), input: 1, cacheWrite: 5 } }), engine, '¤');
-    expect(some).toContain('输入(缓存写入)      5');
-    expect(some).toContain('输入合计            6');
+    expect(some).toContain('I/W     5');
+    expect(some).toContain('I/T     6');
   });
 
   it('lists the components the pricing provider charged', () => {
@@ -461,7 +461,7 @@ describe('table totals rows', () => {
       const index = line.indexOf(needle);
       return index === -1 ? -1 : [...line.slice(0, index)].reduce((n, c) => n + ((c.codePointAt(0) ?? 0) > 0x2e80 ? 2 : 1), 0);
     };
-    expect(offsetOf(lines[1] ?? '', '¤')).toBe(offsetOf(lines[0] ?? '', '费用'));
+    expect(offsetOf(lines[1] ?? '', '¤')).toBe(offsetOf(lines[0] ?? '', '¤'));
   });
 
   it('totals the request column of the session list', () => {
@@ -555,13 +555,16 @@ describe('label alignment', () => {
     expect(columns.size).toBe(1);
   });
 
-  it('lines the token block values up despite mixed-width parentheses', () => {
-    // `输入(缓存未命中)` mixes an ASCII paren with a full-width one in the
-    // sibling label `输入（…）`-style rows; padding by character count would
-    // leave those rows short by one cell each.
+  it('lines the token block values up in one column', () => {
+    // The labels are compact token figures (`I`, `I/C`, `I/T`, …) of different
+    // widths; the value column must still line up across all nine rows.
     const tokens: TokenTotals = { ...emptyBuckets(), input: 1, cacheRead: 2, cacheWrite: 3, output: 4, reasoning: 1 };
     const text = formatUsageReport(report({ requests: 1, tokens }), engine, '¤');
-    const block = text.split('\n').filter((line) => /^(请求数|输入|输出|Token 总计)/.test(line));
+    const labels = ['请求数', 'I', 'I/C', 'I/W', 'I/T', 'O', 'O/R', 'O/T', 'T'];
+    const block = text.split('\n').filter((line) => {
+      const run = line.search(/\s{2,}/);
+      return run > 0 && labels.includes(line.slice(0, run));
+    });
     expect(block).toHaveLength(9);
     const columns = new Set(
       block.map((line) => {
