@@ -744,7 +744,7 @@ function adapterWarning(session: SessionRecord, records: readonly UsageRecord[])
   const totals = sumOf(records);
   const diffs: string[] = [];
   const compare = (label: string, left: number, right: number): void => {
-    if (left !== right) diffs.push(`${label} 账本 ${left} vs 投影缓存 ${right}`);
+    if (left !== right) diffs.push(`${label} 日志 ${left} vs 投影缓存 ${right}`);
   };
   compare('未命中输入', totals.input, projected.input);
   compare('输出', totals.output, projected.output);

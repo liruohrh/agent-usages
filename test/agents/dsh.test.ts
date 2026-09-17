@@ -1,11 +1,11 @@
 /**
  * DSH adapter tests.
  *
- * These build a real DSH home on disk — ledger shards, a workspace registry, a
- * projection cache, and session logs — and assert that the adapter converts it
- * into the neutral model correctly. The two things that are easy to get wrong
- * and are therefore pinned here: shard union, and delegation, which exists
- * *only* in the session logs.
+ * These build a real DSH home on disk — a workspace registry, a projection
+ * cache, and session logs — and assert that the adapter converts it into the
+ * neutral model correctly. The two things that are easy to get wrong and are
+ * therefore pinned here: per-step usage extraction from the log stream, and
+ * delegation, which also exists only in the session logs.
  */
 
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
@@ -20,19 +20,19 @@ import { deepseekPricing } from '../../src/pricing/vendors/deepseek.ts';
 import { listSessions, resolveSessionSelectors, runQuery, type UsageQuery } from '../../src/report.ts';
 
 const SID = {
-  /** Shard 25. Spans the 2026-09-10 price change and both tiers. */
+  /** Spans the 2026-09-10 price change and both tiers. */
   spanning: 'session-aaaaaaaa-0000-4000-8000-000000000001',
-  /** Shard 08. Only ever billed at the newer, cheaper rate. */
+  /** Only ever billed at the newer, cheaper rate. */
   current: 'session-bbbbbbbb-0000-4000-8000-000000000002',
-  /** Shard 19. A second project. */
+  /** A second project. */
   otherProject: 'session-cccccccc-0000-4000-8000-000000000003',
-  /** Shard 10. Known to the projection cache but absent from the ledger. */
+  /** Known to the projection cache but with no request in its log. */
   neverBilled: 'session-dddddddd-0000-4000-8000-000000000004',
-  /** Shard 04. A subagent spawned by {@link SID.spanning}. */
+  /** A subagent spawned by {@link SID.spanning}. */
   subA: 'session-ffffffff-0000-4000-8000-00000000000f',
-  /** Shard 17. A subagent spawned by {@link SID.spanning}. */
+  /** A subagent spawned by {@link SID.spanning}. */
   subB: 'session-99999999-0000-4000-8000-000000000009',
-  /** Shard 31. A subagent of {@link SID.subA} — depth 2. */
+  /** A subagent of {@link SID.subA} — depth 2. */
   subDeep: 'session-77777777-0000-4000-8000-000000000007',
 } as const;
 
@@ -53,95 +53,30 @@ const AT = {
   septemberOffPeak: Date.parse('2026-09-11T12:00:00Z'),
 } as const;
 
-/** Ledger shard index, mirroring the writer's FNV-1a hash. */
-function shardIndexOf(sessionId: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < sessionId.length; index += 1) {
-    hash ^= sessionId.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) % 32;
-}
-
-/** One ledger `usage[]` row. */
-function usageRow(
-  sessionId: string,
-  turn: number,
-  step: number,
-  time: number,
-  values: { input: number; output: number; cacheRead: number; cacheWrite?: number; reasoning?: number },
-): Record<string, unknown> {
-  return {
-    key: `${sessionId}:step:${turn}:${step}`,
-    seq: turn * 100 + step,
-    time,
-    workspaceId: null,
-    identity: {
-      identityKey: '["deepseek-official","deepseek-v4-flash","deepseek-v4-flash",null]',
-      provider: 'deepseek-official',
-      requestedModel: 'deepseek-v4-flash',
-      actualModel: 'deepseek-v4-flash',
-      label: 'deepseek-official / deepseek-v4-flash',
-      legacy: false,
-    },
-    modelId: 'deepseek-official / deepseek-v4-flash',
-    turn,
-    step,
-    values: {
-      input: values.input,
-      output: values.output,
-      cacheRead: values.cacheRead,
-      cacheWrite: values.cacheWrite ?? 0,
-      reasoning: values.reasoning ?? 0,
-    },
-    pricingAt: time,
-    cost: { pricingMode: 'official-model', status: 'unpriced', total: '0' },
-  };
-}
-
-/** One ledger session record. */
-function sessionRecord(
-  sessionId: string,
-  workspaceId: string,
-  sourceCwd: string,
-  usage: Record<string, unknown>[],
-): Record<string, unknown> {
-  return {
-    version: 3,
-    sessionId,
-    workspaceId,
-    sourceCwd,
-    lastSeq: 999,
-    source: 'flush',
-    updatedAt: 1_789_000_000_000,
-    usage,
-  };
-}
-
-/** Write one shard file holding one session record. */
-async function writeShard(home: string, sessionId: string, record: Record<string, unknown>): Promise<void> {
-  const name = `all_usage_ledger_${String(shardIndexOf(sessionId)).padStart(2, '0')}`;
-  await writeFile(
-    join(home, 'storages', `${name}.json`),
-    JSON.stringify({ unit: { name, version: 0 }, global: null, tables: { sessions: { [sessionId]: record } } }),
-  );
-}
-
-/** One per-step usage event to embed in a fixture session log. */
-interface LogUsage {
-  turn: number;
-  step: number;
-  time: number;
+/** Token buckets one fixture step billed. */
+interface StepBuckets {
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite?: number;
   reasoning?: number;
+}
+
+/** One per-step usage event to write into a fixture session log. */
+interface LogUsage extends StepBuckets {
+  turn: number;
+  step: number;
+  time: number;
   model?: string;
   provider?: string;
 }
 
-/** Write an uncompressed session log: header frame, optional title, optional usage. */
+/** One usage event in the compact form the fixtures use. */
+function step(turn: number, stepNumber: number, time: number, buckets: StepBuckets): LogUsage {
+  return { turn, step: stepNumber, time, ...buckets };
+}
+
+/** Write an uncompressed session log: header, optional title, optional usage. */
 async function writeSessionLog(
   home: string,
   sessionId: string,
@@ -223,117 +158,36 @@ async function buildHome(): Promise<string> {
       unit: { name: 'session_projcache', version: 3 },
       global: null,
       tables: {
-        sessions: Object.fromEntries(
-          Object.entries({
-            [SID.spanning]: { cwd: WPSEARCH, title: '跨价格调整的会话', createdAt: Date.parse('2026-08-20T01:00:00Z') },
-            [SID.current]: { cwd: WPSEARCH, title: '降价后的会话', createdAt: Date.parse('2026-09-11T01:00:00Z') },
-            [SID.otherProject]: { cwd: TOOLING, title: '另一个项目', createdAt: Date.parse('2026-09-11T11:00:00Z') },
-            [SID.neverBilled]: { cwd: TOOLING, title: '从未计费的会话', createdAt: Date.parse('2026-09-12T00:00:00Z') },
-          }).map(([id, meta]) => [
-            id,
-            {
-              identity: { createdAt: meta.createdAt, cwd: meta.cwd },
-              rows: { title: { ver: 1, seq: 9, val: meta.title } },
-            },
-          ]),
-        ),
-      },
-    }),
-  );
-
-  // Session 1: two requests before the price change (one peak, one off-peak) and
-  // two after it, so it must be billed under two periods and both tiers.
-  await writeShard(
-    home,
-    SID.spanning,
-    sessionRecord(SID.spanning, WORKSPACE_A, WPSEARCH, [
-      usageRow(SID.spanning, 1, 1, AT.augustPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, reasoning: 500_000 }),
-      usageRow(SID.spanning, 1, 2, AT.augustOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
-      usageRow(SID.spanning, 2, 1, AT.septemberPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
-      usageRow(SID.spanning, 2, 2, AT.septemberOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
-    ]),
-  );
-
-  await writeShard(
-    home,
-    SID.current,
-    sessionRecord(SID.current, WORKSPACE_A, WPSEARCH, [
-      usageRow(SID.current, 1, 1, AT.septemberOffPeak, { input: 500_000, output: 200_000, cacheRead: 100_000 }),
-    ]),
-  );
-
-  await writeShard(
-    home,
-    SID.otherProject,
-    sessionRecord(SID.otherProject, WORKSPACE_B, TOOLING, [
-      usageRow(SID.otherProject, 1, 1, AT.septemberOffPeak, { input: 2_000_000, output: 300_000, cacheRead: 0 }),
-    ]),
-  );
-
-  // Session logs carry the delegation tree. The ledger and the projection cache
-  // know nothing about who spawned whom, so these files are the only source.
-  await writeSessionLog(home, SID.spanning, WPSEARCH, { delegationDepth: 0, createdAt: Date.parse('2026-08-20T01:00:00Z') }, '跨价格调整的会话');
-  await writeSessionLog(home, SID.current, WPSEARCH, { delegationDepth: 0, createdAt: Date.parse('2026-09-11T01:00:00Z') }, '降价后的会话');
-  await writeSessionLog(home, SID.otherProject, TOOLING, { delegationDepth: 0, createdAt: Date.parse('2026-09-11T11:00:00Z') }, '另一个项目');
-  await writeSessionLog(home, SID.neverBilled, TOOLING, { delegationDepth: 0, createdAt: Date.parse('2026-09-12T00:00:00Z') }, '从未计费的会话');
-  await writeSessionLog(home, SID.subA, WPSEARCH, { parentSession: SID.spanning, delegationDepth: 1, createdAt: Date.parse('2026-08-20T02:00:00Z') }, '分类插件的子代理');
-  await writeSessionLog(home, SID.subB, WPSEARCH, { parentSession: SID.spanning, delegationDepth: 1, createdAt: Date.parse('2026-08-20T03:00:00Z') });
-  await writeSessionLog(home, SID.subDeep, WPSEARCH, { parentSession: SID.subA, delegationDepth: 2, createdAt: Date.parse('2026-08-20T04:00:00Z') });
-
-  // One off-peak request each, so every subagent contributes exactly 5.02 CNY.
-  for (const subagentId of [SID.subA, SID.subB, SID.subDeep]) {
-    await writeShard(
-      home,
-      subagentId,
-      sessionRecord(subagentId, WORKSPACE_A, WPSEARCH, [
-        usageRow(subagentId, 1, 1, AT.septemberOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
-      ]),
-    );
-  }
-
-  return home;
-}
-
-const LOG_ONLY = {
-  parent: 'session-11111111-0000-4000-8000-0000000000a1',
-  child: 'session-22222222-0000-4000-8000-0000000000a2',
-  idle: 'session-33333333-0000-4000-8000-0000000000a3',
-} as const;
-const LOGONLY_WORKSPACE = 'cccccccc-3333-4333-8333-333333333333';
-const LOGONLY_PATH = '/home/user/ws/logonly';
-
-/**
- * A stock DSH home: no `dsh-all-usage` ledger, only session logs.
- *
- * The harness itself already records each step's usage, so the adapter must
- * produce the same report as the ledger path does from these logs alone.
- */
-async function buildLogOnlyHome(): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), 'agent-usages-dsh-logs-'));
-  await mkdir(join(home, 'storages'), { recursive: true });
-
-  await writeFile(
-    join(home, 'storages', 'workspace.json'),
-    JSON.stringify({
-      unit: { name: 'workspace', version: 2 },
-      global: { initialized: true, workspaceIds: [LOGONLY_WORKSPACE], archivedSessionIds: [] },
-      tables: {
-        workspaces: {
-          [LOGONLY_WORKSPACE]: { path: LOGONLY_PATH, title: 'logonly', sessionIds: [], createdAt: 'x', updatedAt: 'x' },
-        },
-      },
-    }),
-  );
-
-  await writeFile(
-    join(home, 'storages', 'session_projcache.json'),
-    JSON.stringify({
-      unit: { name: 'session_projcache', version: 3 },
-      global: null,
-      tables: {
         sessions: {
-          [LOG_ONLY.idle]: {
-            identity: { createdAt: Date.parse('2026-09-12T00:00:00Z'), cwd: LOGONLY_PATH },
+          [SID.spanning]: {
+            identity: { createdAt: Date.parse('2026-08-20T01:00:00Z'), cwd: WPSEARCH },
+            rows: {
+              title: { ver: 1, seq: 9, val: '跨价格调整的会话' },
+              // The harness' own folded totals, used only as a cross-check.
+              tokenUsage: {
+                ver: 1,
+                seq: 9,
+                val: {
+                  totals: {
+                    uncachedInputTokens: 4_000_000,
+                    outputTokens: 4_000_000,
+                    cacheReadTokens: 4_000_000,
+                    cacheWriteTokens: 0,
+                  },
+                },
+              },
+            },
+          },
+          [SID.current]: {
+            identity: { createdAt: Date.parse('2026-09-11T01:00:00Z'), cwd: WPSEARCH },
+            rows: { title: { ver: 1, seq: 9, val: '降价后的会话' } },
+          },
+          [SID.otherProject]: {
+            identity: { createdAt: Date.parse('2026-09-11T11:00:00Z'), cwd: TOOLING },
+            rows: { title: { ver: 1, seq: 9, val: '另一个项目' } },
+          },
+          [SID.neverBilled]: {
+            identity: { createdAt: Date.parse('2026-09-12T00:00:00Z'), cwd: TOOLING },
             rows: { title: { ver: 1, seq: 9, val: '从未计费的会话' } },
           },
         },
@@ -341,48 +195,87 @@ async function buildLogOnlyHome(): Promise<string> {
     }),
   );
 
-  // Two off-peak requests on a top-level session and one on its subagent; the
-  // third session only exists in the projection cache.
+  // Session 1: two requests before the price change (one peak, one off-peak) and
+  // two after it, so it must be billed under two periods and both tiers.
   await writeSessionLog(
     home,
-    LOG_ONLY.parent,
-    LOGONLY_PATH,
-    { delegationDepth: 0, createdAt: Date.parse('2026-09-11T10:00:00Z') },
-    '只用日志的会话',
+    SID.spanning,
+    WPSEARCH,
+    { delegationDepth: 0, createdAt: Date.parse('2026-08-20T01:00:00Z') },
+    '跨价格调整的会话',
     [
-      { turn: 1, step: 1, time: AT.septemberOffPeak, input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, reasoning: 400_000 },
-      { turn: 1, step: 2, time: AT.septemberOffPeak + 1000, input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 },
+      step(1, 1, AT.augustPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, reasoning: 500_000 }),
+      step(1, 2, AT.augustOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
+      step(2, 1, AT.septemberPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
+      step(2, 2, AT.septemberOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
     ],
   );
+
   await writeSessionLog(
     home,
-    LOG_ONLY.child,
-    LOGONLY_PATH,
-    { parentSession: LOG_ONLY.parent, delegationDepth: 1, createdAt: Date.parse('2026-09-11T10:30:00Z') },
-    '日志里的子代理',
-    [{ turn: 1, step: 1, time: AT.septemberOffPeak + 2000, input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }],
+    SID.current,
+    WPSEARCH,
+    { delegationDepth: 0, createdAt: Date.parse('2026-09-11T01:00:00Z') },
+    '降价后的会话',
+    [step(1, 1, AT.septemberOffPeak, { input: 500_000, output: 200_000, cacheRead: 100_000 })],
   );
-  await writeSessionLog(home, LOG_ONLY.idle, LOGONLY_PATH, {
+
+  await writeSessionLog(
+    home,
+    SID.otherProject,
+    TOOLING,
+    { delegationDepth: 0, createdAt: Date.parse('2026-09-11T11:00:00Z') },
+    '另一个项目',
+    [step(1, 1, AT.septemberOffPeak, { input: 2_000_000, output: 300_000, cacheRead: 0 })],
+  );
+
+  await writeSessionLog(home, SID.neverBilled, TOOLING, {
     delegationDepth: 0,
     createdAt: Date.parse('2026-09-12T00:00:00Z'),
-  });
+  }, '从未计费的会话');
+
+  // Session logs carry the delegation tree. The registry and the projection
+  // cache know nothing about who spawned whom, so these headers are the only
+  // source. One off-peak request each, so every subagent contributes 5.02 CNY.
+  const subagentUsage = [step(1, 1, AT.septemberOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 })];
+  await writeSessionLog(
+    home,
+    SID.subA,
+    WPSEARCH,
+    { parentSession: SID.spanning, delegationDepth: 1, createdAt: Date.parse('2026-08-20T02:00:00Z') },
+    '分类插件的子代理',
+    subagentUsage,
+  );
+  await writeSessionLog(
+    home,
+    SID.subB,
+    WPSEARCH,
+    { parentSession: SID.spanning, delegationDepth: 1, createdAt: Date.parse('2026-08-20T03:00:00Z') },
+    undefined,
+    subagentUsage,
+  );
+  await writeSessionLog(
+    home,
+    SID.subDeep,
+    WPSEARCH,
+    { parentSession: SID.subA, delegationDepth: 2, createdAt: Date.parse('2026-08-20T04:00:00Z') },
+    undefined,
+    subagentUsage,
+  );
 
   return home;
 }
 
 let home: string;
-let logOnlyHome: string;
 const engine = createPricingEngine(deepseekPricing);
 const context = { engine, pricingProvider: engine.provider.id };
 
 beforeEach(async () => {
   home = await buildHome();
-  logOnlyHome = await buildLogOnlyHome();
 });
 
 afterEach(async () => {
   await rm(home, { recursive: true, force: true });
-  await rm(logOnlyHome, { recursive: true, force: true });
 });
 
 /** A query over the fixture, overridden per test. */
@@ -416,33 +309,23 @@ describe('adapter metadata', () => {
     expect(await dshAgent.hasData(join(home, 'nope'))).toBe(false);
   });
 
-  it('explains its data caveats', () => {
-    expect(dshAgent.notes().length).toBeGreaterThan(0);
-    expect(dshAgent.notes().join('\n')).toMatch(/dsh-all-usage/);
-  });
-});
-
-describe('shard placement', () => {
-  it('puts each fixture session in the shard the writer hash dictates', () => {
-    expect(shardIndexOf(SID.spanning)).toBe(25);
-    expect(shardIndexOf(SID.current)).toBe(8);
-    expect(shardIndexOf(SID.otherProject)).toBe(19);
-    expect(shardIndexOf(SID.neverBilled)).toBe(10);
-    expect(shardIndexOf(SID.subA)).toBe(4);
-    expect(shardIndexOf(SID.subB)).toBe(17);
-    expect(shardIndexOf(SID.subDeep)).toBe(31);
+  it('explains that the session log is the usage source', () => {
+    const notes = dshAgent.notes().join('\n');
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes).toMatch(/会话日志/);
+    expect(notes).not.toMatch(/安装.*插件才能/);
   });
 });
 
 describe('reading a DSH home', () => {
-  it('unions sessions across ledger shards', async () => {
+  it('reads every session log in the home', async () => {
     const data = await dshAgent.load({ home });
     expect(data.agent).toBe('dsh');
     expect(data.sessions).toHaveLength(7);
     // 4 in the spanning session, 1 in each of its 3 subagents, 1 each in the
-    // other two ledger sessions.
+    // other two sessions.
     expect(data.stats.records).toBe(9);
-    expect(data.stats.filesRead.length).toBe(6);
+    expect(data.stats.filesRead).toHaveLength(7);
   });
 
   it('attributes sessions to projects by cwd, not by the registry roster', async () => {
@@ -471,25 +354,34 @@ describe('reading a DSH home', () => {
     // The bare routed model is what a price list keys on.
     expect(spanning?.records[0]?.model).toBe('deepseek-v4-flash');
     expect(spanning?.records[0]?.modelLabel).toBe('deepseek-official / deepseek-v4-flash');
+    expect(spanning?.records.map((entry) => entry.id)).toEqual([
+      `${SID.spanning}:step:1:1`,
+      `${SID.spanning}:step:1:2`,
+      `${SID.spanning}:step:2:1`,
+      `${SID.spanning}:step:2:2`,
+    ]);
   });
 
-  it('carries the adapter’s own totals as extra metadata', async () => {
+  it('carries the harness’ own totals as extra metadata', async () => {
     const data = await dshAgent.load({ home });
+    const spanning = data.sessions.find((session) => session.id === SID.spanning);
+    expect(spanning?.extra).toEqual({
+      projectedTotals: { input: 4_000_000, output: 4_000_000, cacheRead: 4_000_000, cacheWrite: 0, reasoning: 0 },
+    });
+    // Only sessions the projection cache folded a total for carry the cross-check.
     const current = data.sessions.find((session) => session.id === SID.current);
     expect(current?.extra).toBeUndefined();
-    // Only sessions the projection cache knows about carry a cross-check.
-    const data2 = await dshAgent.load({ home });
-    expect(data2.sessions.every((session) => session.id.length > 0)).toBe(true);
   });
 
-  it('skips session logs when enrichment is off', async () => {
+  it('still counts usage but drops delegation when enrichment is off', async () => {
     const data = await dshAgent.load({ home, enrich: false });
     expect(data.sessions).toHaveLength(7);
+    expect(data.stats.records).toBe(9);
     expect(data.sessions.every((session) => !session.isSubagent)).toBe(true);
     expect(data.sessions.every((session) => session.parentId === null)).toBe(true);
   });
 
-  it('fails with an actionable message when there is neither a ledger nor a log', async () => {
+  it('fails with an actionable message when the home holds nothing', async () => {
     const empty = await mkdtemp(join(tmpdir(), 'agent-usages-empty-'));
     await mkdir(join(empty, 'storages'), { recursive: true });
     await expect(dshAgent.load({ home: empty })).rejects.toThrow(/没有找到 DSH 用量数据/);
@@ -500,6 +392,49 @@ describe('reading a DSH home', () => {
   it('rejects a relative home', async () => {
     await expect(dshAgent.load({ home: 'relative/path' })).rejects.toThrow(/绝对路径/);
   });
+
+  it('works with no storages files at all', async () => {
+    const bare = await mkdtemp(join(tmpdir(), 'agent-usages-logs-'));
+    const bareId = 'session-abcdefab-0000-4000-8000-0000000000ff';
+    await writeSessionLog(bare, bareId, '/home/user/ws/bare', { delegationDepth: 0, createdAt: 1 }, undefined, [
+      step(1, 1, AT.septemberOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
+    ]);
+    expect(await dshAgent.hasData(bare)).toBe(true);
+    const data = await dshAgent.load({ home: bare });
+    expect(data.sessions).toHaveLength(1);
+    // No registry: the project is synthesised from the session's own cwd.
+    expect(data.projects.map((project) => project.name)).toEqual(['bare']);
+    expect(data.stats.records).toBe(1);
+    await rm(bare, { recursive: true, force: true });
+  });
+
+  it('merges a projection-cache row that spells the id without the prefix', async () => {
+    const mixed = await mkdtemp(join(tmpdir(), 'agent-usages-prefix-'));
+    const mixedId = 'session-abcdefab-0000-4000-8000-0000000000fe';
+    await mkdir(join(mixed, 'storages'), { recursive: true });
+    await writeFile(
+      join(mixed, 'storages', 'session_projcache.json'),
+      JSON.stringify({
+        tables: {
+          sessions: {
+            [mixedId.replace(/^session-/, '')]: {
+              identity: { createdAt: 1, cwd: '/home/user/ws/mixed' },
+              rows: { title: { ver: 1, seq: 1, val: '裸 id 会话' } },
+            },
+          },
+        },
+      }),
+    );
+    await writeSessionLog(mixed, mixedId, '/home/user/ws/mixed', { delegationDepth: 0, createdAt: 1 }, undefined, [
+      step(1, 1, AT.septemberOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
+    ]);
+    const data = await dshAgent.load({ home: mixed });
+    expect(data.sessions).toHaveLength(1);
+    expect(data.sessions[0]?.id).toBe(mixedId);
+    expect(data.sessions[0]?.title).toBe('裸 id 会话');
+    expect(data.stats.records).toBe(1);
+    await rm(mixed, { recursive: true, force: true });
+  });
 });
 
 describe('session log reading', () => {
@@ -509,6 +444,28 @@ describe('session log reading', () => {
     expect(info.parentSessionId).toBe(SID.spanning);
     expect(info.delegationDepth).toBe(1);
     expect(info.title).toBe('分类插件的子代理');
+    // A header-only read stops at the leading frames.
+    expect(info.records).toEqual([]);
+  });
+
+  it('collects one record per billed step when asked', async () => {
+    const scan = await readSessionLog(
+      join(home, 'sessions', '--home-dev-ws-example-app--', SID.spanning, 'session.jsonl'),
+      { collectUsage: true },
+    );
+    expect(scan.records.map((record) => record.id)).toEqual([
+      `${SID.spanning}:step:1:1`,
+      `${SID.spanning}:step:1:2`,
+      `${SID.spanning}:step:2:1`,
+      `${SID.spanning}:step:2:2`,
+    ]);
+    expect(scan.records[0]?.tokens).toEqual({
+      input: 1_000_000,
+      output: 1_000_000,
+      cacheRead: 1_000_000,
+      cacheWrite: 0,
+      reasoning: 500_000,
+    });
   });
 
   it('reads a multi-frame zstd log from the real layout', async () => {
@@ -523,6 +480,46 @@ describe('session log reading', () => {
     const info = await readSessionLog(join(dir, 'session.jsonl.zstd'));
     expect(info.parentSessionId).toBe(SID.spanning);
     expect(info.title).toBe('压缩日志标题');
+  });
+
+  it('reads a mirrored v3 stream instead of the legacy seed file', async () => {
+    const dir = join(home, 'sessions', '--home-dev-ws-example-app--', SID.current);
+    await rm(join(dir, 'session.jsonl'), { force: true });
+    const { zstdCompressSync } = await import('node:zlib');
+    const header = JSON.stringify({
+      type: 'session',
+      version: 0,
+      id: SID.current,
+      createdAt: 1,
+      cwd: WPSEARCH,
+      delegationDepth: 0,
+    });
+    // The live release keeps a header-only seed at `session.jsonl.zstd` and
+    // appends the real stream to `session.v3.jsonl.zstd`; only the latter counts.
+    await writeFile(join(dir, 'session.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header}\n`)));
+    const event = JSON.stringify({
+      type: 'assistant/message',
+      seq: 2,
+      time: AT.septemberOffPeak,
+      data: {
+        turn: 1,
+        step: 1,
+        message: { source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheWriteTokens: 0, reasoningTokens: 5 },
+      },
+    });
+    await writeFile(join(dir, 'session.v3.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header}\n${event}\n`)));
+
+    const located = await locateSessionLogs(home);
+    expect(located.find((log) => log.directoryName === SID.current)?.path).toMatch(/session\.v3\.jsonl\.zstd$/);
+
+    const scan = await readSessionLog(join(dir, 'session.v3.jsonl.zstd'), { collectUsage: true });
+    expect(scan.records).toHaveLength(1);
+    expect(scan.records[0]).toMatchObject({
+      id: `${SID.current}:step:1:1`,
+      model: 'deepseek-v4-flash',
+      tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 0, reasoning: 5 },
+    });
   });
 });
 
@@ -555,7 +552,7 @@ describe('delegation', () => {
   });
 });
 
-describe('cost from real ledger data', () => {
+describe('cost from session logs', () => {
   it('bills each request at the rate in force at its own timestamp', async () => {
     const data = await dshAgent.load({ home });
     const result = runQuery(data, query({ sessions: [SID.spanning] }), context);
@@ -595,12 +592,13 @@ describe('cost from real ledger data', () => {
   });
 
   it('charges cache writes at the cache-miss rate', async () => {
-    await writeShard(
+    await writeSessionLog(
       home,
       SID.current,
-      sessionRecord(SID.current, WORKSPACE_A, WPSEARCH, [
-        usageRow(SID.current, 1, 1, AT.septemberOffPeak, { input: 0, output: 0, cacheRead: 0, cacheWrite: 1_000_000 }),
-      ]),
+      WPSEARCH,
+      { delegationDepth: 0, createdAt: Date.parse('2026-09-11T01:00:00Z') },
+      '降价后的会话',
+      [step(1, 1, AT.septemberOffPeak, { input: 0, output: 0, cacheRead: 0, cacheWrite: 1_000_000 })],
     );
     const data = await dshAgent.load({ home });
     const result = runQuery(data, query({ sessions: [SID.current] }), context);
@@ -717,85 +715,5 @@ describe('session inventory', () => {
     expect(topLevel.map((session) => session.id)).toEqual([SID.current, SID.spanning]);
     const parentIndex = exampleApp?.sessions.findIndex((session) => session.id === SID.spanning) ?? -1;
     expect(exampleApp?.sessions.slice(parentIndex + 1).every((session) => session.nested)).toBe(true);
-  });
-});
-
-describe('reading a DSH home without the usage ledger', () => {
-  it('detects a home that only has session logs', async () => {
-    expect(await dshAgent.hasData(logOnlyHome)).toBe(true);
-  });
-
-  it('builds records, projects, and the delegation tree from logs alone', async () => {
-    const data = await dshAgent.load({ home: logOnlyHome });
-    expect(data.sessions).toHaveLength(3);
-    expect(data.stats.records).toBe(3);
-    expect(data.stats.filesRead).toHaveLength(3);
-    expect(data.projects.map((project) => project.name)).toEqual(['logonly']);
-    expect(data.projects[0]?.sessions).toHaveLength(3);
-
-    const byId = new Map(data.sessions.map((session) => [session.id, session]));
-    expect(byId.get(LOG_ONLY.parent)?.isSubagent).toBe(false);
-    expect(byId.get(LOG_ONLY.child)?.parentId).toBe(LOG_ONLY.parent);
-    expect(byId.get(LOG_ONLY.child)?.depth).toBe(1);
-    expect(byId.get(LOG_ONLY.parent)?.childIds).toEqual([LOG_ONLY.child]);
-    expect(byId.get(LOG_ONLY.parent)?.title).toBe('只用日志的会话');
-    // A session the logs never mention still comes from the projection cache.
-    expect(byId.get(LOG_ONLY.idle)?.records).toHaveLength(0);
-
-    const first = byId.get(LOG_ONLY.parent)?.records[0];
-    expect(first?.id).toBe(`${LOG_ONLY.parent}:step:1:1`);
-    expect(first?.model).toBe('deepseek-v4-flash');
-    expect(first?.modelLabel).toBe('deepseek-official / deepseek-v4-flash');
-    expect(first?.tokens).toEqual({ input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 0, reasoning: 400_000 });
-  });
-
-  it('prices log-derived usage exactly like the ledger would', async () => {
-    const data = await dshAgent.load({ home: logOnlyHome });
-    const result = runQuery(data, query(), context);
-    expect(result.requests).toBe(3);
-    // Three off-peak post-change requests at 5.02 CNY each.
-    expect(result.cost.total).toBe('15.0600');
-    expect(result.tokens.reasoning).toBe(400_000);
-    expect(result.bands.every((band) => band.resolution === 'exact')).toBe(true);
-  });
-
-  it('reads a mirrored v3 stream instead of the legacy seed file', async () => {
-    const dir = join(home, 'sessions', '--home-dev-ws-example-app--', SID.current);
-    await rm(join(dir, 'session.jsonl'), { force: true });
-    const { zstdCompressSync } = await import('node:zlib');
-    const header = JSON.stringify({
-      type: 'session',
-      version: 0,
-      id: SID.current,
-      createdAt: 1,
-      cwd: WPSEARCH,
-      delegationDepth: 0,
-    });
-    // The live release keeps a header-only seed at `session.jsonl.zstd` and
-    // appends the real stream to `session.v3.jsonl.zstd`; only the latter counts.
-    await writeFile(join(dir, 'session.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header}\n`)));
-    const event = JSON.stringify({
-      type: 'assistant/message',
-      seq: 2,
-      time: AT.septemberOffPeak,
-      data: {
-        turn: 1,
-        step: 1,
-        message: { source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
-        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheWriteTokens: 0, reasoningTokens: 5 },
-      },
-    });
-    await writeFile(join(dir, 'session.v3.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header}\n${event}\n`)));
-
-    const located = await locateSessionLogs(home);
-    expect(located.find((log) => log.directoryName === SID.current)?.path).toMatch(/session\.v3\.jsonl\.zstd$/);
-
-    const scan = await readSessionLog(join(dir, 'session.v3.jsonl.zstd'), { collectUsage: true });
-    expect(scan.records).toHaveLength(1);
-    expect(scan.records[0]).toMatchObject({
-      id: `${SID.current}:step:1:1`,
-      model: 'deepseek-v4-flash',
-      tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 0, reasoning: 5 },
-    });
   });
 });

@@ -83,43 +83,33 @@ beforeAll(async () => {
     }),
   );
   // One request: 1M of each bucket at the off-peak current rates is 0.02 + 1 + 4.
+  // The harness records it in the session log, which is the adapter's only
+  // per-request source.
+  const projectKey = `--${CWD.replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+/, '')}--`;
+  await mkdir(join(home, '.dsh', 'sessions', projectKey, SESSION_ID), { recursive: true });
   await writeFile(
-    join(home, '.dsh', 'storages', 'all_usage_ledger_00.json'),
-    JSON.stringify({
-      unit: { name: 'all_usage_ledger_00', version: 0 },
-      global: null,
-      tables: {
-        sessions: {
-          [SESSION_ID]: {
-            version: 3,
-            sessionId: SESSION_ID,
-            workspaceId: WORKSPACE_ID,
-            sourceCwd: CWD,
-            lastSeq: 5,
-            source: 'flush',
-            updatedAt: OFF_PEAK,
-            usage: [
-              {
-                key: `${SESSION_ID}:step:1:1`,
-                seq: 5,
-                time: OFF_PEAK,
-                workspaceId: WORKSPACE_ID,
-                identity: {
-                  identityKey: '["deepseek-official","deepseek-v4-flash","deepseek-v4-flash",null]',
-                  requestedModel: 'deepseek-v4-flash',
-                  actualModel: 'deepseek-v4-flash',
-                  label: 'deepseek-official / deepseek-v4-flash',
-                },
-                modelId: 'deepseek-official / deepseek-v4-flash',
-                turn: 1,
-                step: 1,
-                values: { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 0, reasoning: 0 },
-              },
-            ],
+    join(home, '.dsh', 'sessions', projectKey, SESSION_ID, 'session.jsonl'),
+    `${[
+      JSON.stringify({ type: 'session', version: 0, id: SESSION_ID, createdAt: OFF_PEAK, cwd: CWD, delegationDepth: 0 }),
+      JSON.stringify({ type: 'session/title', seq: 2, time: OFF_PEAK, data: { title: '演示会话' } }),
+      JSON.stringify({
+        type: 'assistant/message',
+        seq: 5,
+        time: OFF_PEAK,
+        data: {
+          turn: 1,
+          step: 1,
+          message: { source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
+          usage: {
+            inputTokens: 1_000_000,
+            outputTokens: 1_000_000,
+            cacheReadTokens: 1_000_000,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
           },
         },
-      },
-    }),
+      }),
+    ].join('\n')}\n`,
   );
 });
 

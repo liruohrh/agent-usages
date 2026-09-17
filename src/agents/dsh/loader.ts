@@ -1,24 +1,21 @@
 /**
  * The DSH agent adapter.
  *
- * Reads DeepSeek Harness' on-disk usage stores and converts them into the
- * agent-neutral {@link UsageDataset}. Four file families under the DSH home
- * directory matter:
+ * Reads DeepSeek Harness' own on-disk state and converts it into the
+ * agent-neutral {@link UsageDataset}. Three file families under the DSH home
+ * directory matter, all written by the harness itself:
  *
- * - `storages/all_usage_ledger_*.json` — the durable per-request usage ledger,
- *   when the third-party `dsh-all-usage` plugin is installed. Each shard is an
- *   independent key/value unit and a session lives in exactly one shard, so
- *   sessions are unioned across shards; within a shard a session appears once.
- * - `sessions/<projectKey>/<id>/session.jsonl[.zstd]` — the session logs: the
- *   delegation tree, and the fallback per-request usage source. Every
- *   `assistant/message` event repeats the `usage` block for that step, which is
- *   exactly what the ledger records, so a stock home without the plugin is still
- *   fully reportable.
- * - `storages/workspace.json` — the workspace ("project") registry: title,
- *   path, and member session ids.
+ * - `sessions/<projectKey>/<id>/session.jsonl[.zstd]` — the session logs and the
+ *   only per-request usage source. Every `assistant/message` event repeats the
+ *   `usage` block the provider returned for that step, so the log alone answers
+ *   the token question; its leading frame also carries the delegation tree.
+ * - `storages/workspace.json` — the workspace ("project") registry: title and
+ *   path.
  * - `storages/session_projcache.json` — projection cache: session title, cwd,
  *   creation time, and the harness' own token totals, which are used only to
  *   cross-check the per-request records.
+ *
+ * No third-party plugin is needed, and none is read.
  *
  * Nothing here writes to the DSH home; the adapter is strictly read-only.
  */
@@ -26,7 +23,6 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
-import { emptyBuckets } from '../../core/buckets.ts';
 import type {
   DatasetStats,
   ProjectRecord,
@@ -58,51 +54,6 @@ function asNumber(value: unknown): number | undefined {
 /** Read a non-empty string, or `undefined`. */
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-/** Parse the token buckets the harness recorded for one request. */
-function parseBuckets(raw: unknown): TokenBuckets {
-  const values = asRecord(raw);
-  if (values === undefined) return emptyBuckets();
-  return {
-    input: asCount(values['input']),
-    output: asCount(values['output']),
-    cacheRead: asCount(values['cacheRead']),
-    cacheWrite: asCount(values['cacheWrite']),
-    reasoning: asCount(values['reasoning']),
-  };
-}
-
-/**
- * Parse one ledger `usage[]` element, or `undefined` when it is unusable.
- *
- * The ledger names the model twice — a provider-qualified label and the bare
- * routed model — and the bare one is what a price list keys on.
- */
-function parseRecord(raw: unknown): UsageRecord | undefined {
-  const record = asRecord(raw);
-  if (record === undefined) return undefined;
-  const id = asString(record['key']);
-  const time = asNumber(record['time']);
-  if (id === undefined || time === undefined) return undefined;
-  const identity = asRecord(record['identity']);
-  const modelLabel =
-    asString(record['modelId']) ??
-    asString(identity?.['label']) ??
-    asString(identity?.['actualModel']) ??
-    asString(identity?.['requestedModel']) ??
-    'unknown';
-  const model = asString(identity?.['actualModel']) ?? asString(identity?.['requestedModel']) ?? modelLabel;
-  return {
-    id,
-    seq: asCount(record['seq']),
-    time,
-    modelLabel,
-    model,
-    turn: asCount(record['turn']),
-    step: asCount(record['step']),
-    tokens: parseBuckets(record['values']),
-  };
 }
 
 /** Session facts recovered from `session_projcache.json`. */
@@ -193,114 +144,13 @@ async function readWorkspaces(home: string, warnings: string[]): Promise<Workspa
 }
 
 /**
- * Read every ledger shard, merging sessions and reporting duplicate keys.
- *
- * A missing ledger is not an error: the third-party `dsh-all-usage` plugin that
- * writes it may simply not be installed, in which case the caller falls back to
- * the harness' own session logs. `present` tells the two cases apart.
- *
- * @param home - DSH home directory.
- * @param warnings - collects non-fatal problems.
- * @returns the merged ledger, or an empty result with `present: false`.
- */
-async function readLedger(
-  home: string,
-  warnings: string[],
-): Promise<{
-  present: boolean;
-  records: Map<string, UsageRecord[]>;
-  workspaceIds: Map<string, string>;
-  sourceCwds: Map<string, string>;
-  shards: string[];
-}> {
-  const records = new Map<string, UsageRecord[]>();
-  const workspaceIds = new Map<string, string>();
-  const sourceCwds = new Map<string, string>();
-  const shards: string[] = [];
-  const storageDir = join(home, 'storages');
-  let names: string[];
-  try {
-    names = await readdir(storageDir);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return { present: false, records, workspaceIds, sourceCwds, shards };
-  }
-  const ledgerFiles = names.filter((name) => /^all_usage_ledger_\d+\.json$/.test(name)).sort();
-  if (ledgerFiles.length === 0) {
-    return { present: false, records, workspaceIds, sourceCwds, shards };
-  }
-
-  for (const name of ledgerFiles) {
-    const path = join(storageDir, name);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await readFile(path, 'utf8'));
-    } catch (error) {
-      warnings.push(`跳过无法解析的账本分片 ${name}: ${(error as Error).message}`);
-      continue;
-    }
-    shards.push(path);
-    const sessions = asRecord(asRecord(asRecord(parsed)?.['tables'])?.['sessions']);
-    if (sessions === undefined) continue;
-    for (const [sessionId, rawSession] of Object.entries(sessions)) {
-      if (sessionId.startsWith('__')) continue; // ledger bookkeeping row
-      const record = asRecord(rawSession);
-      if (record === undefined) continue;
-      const workspaceId = asString(record['workspaceId']);
-      if (workspaceId !== undefined) workspaceIds.set(sessionId, workspaceId);
-      const sourceCwd = asString(record['sourceCwd']);
-      if (sourceCwd !== undefined) sourceCwds.set(sessionId, sourceCwd);
-      const usage = Array.isArray(record['usage']) ? record['usage'] : [];
-      const parsedRecords: UsageRecord[] = [];
-      const seenKeys = new Set<string>();
-      for (const rawEntry of usage) {
-        const entry = parseRecord(rawEntry);
-        if (entry === undefined) continue;
-        if (seenKeys.has(entry.id)) {
-          warnings.push(`会话 ${sessionId} 的账本分片 ${name} 出现重复记录 ${entry.id}，已忽略后一条`);
-          continue;
-        }
-        seenKeys.add(entry.id);
-        parsedRecords.push(entry);
-      }
-      const existing = records.get(sessionId);
-      if (existing === undefined) {
-        records.set(sessionId, parsedRecords);
-      } else {
-        // Distinct shards own distinct sessions. A collision means the shard
-        // layout changed, so records are de-duplicated by key rather than
-        // summed outright — double-billing the user would be worse than a
-        // missing record, and the warning tells them to check.
-        const known = new Set(existing.map((entry) => entry.id));
-        let added = 0;
-        for (const entry of parsedRecords) {
-          if (known.has(entry.id)) continue;
-          known.add(entry.id);
-          existing.push(entry);
-          added += 1;
-        }
-        warnings.push(
-          `会话 ${sessionId} 同时出现在多个账本分片（${name}），已按记录键去重合并（新增 ${added} 条）`,
-        );
-      }
-    }
-  }
-  return { present: true, records, workspaceIds, sourceCwds, shards };
-}
-
-/**
- * Compare working directories the way the ledger writer does: separators
- * unified, case folded, trailing separators dropped.
+ * Normalise a filesystem path for comparison: separators unified, case folded,
+ * trailing separators dropped.
  * @param path - a filesystem path.
  * @returns a stable comparison key.
  */
 export function pathKey(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-}
-
-/** Whether a workspace id is a placeholder the ledger uses for gone projects. */
-function isPlaceholderWorkspaceId(workspaceId: string): boolean {
-  return workspaceId === 'retired:deleted' || workspaceId.startsWith('unregistered:');
 }
 
 /** Derive a project key for sessions the workspace registry does not list. */
@@ -315,57 +165,38 @@ function basenameOf(path: string): string {
 }
 
 /**
- * Attribute a session to a workspace.
+ * Attribute a session to a workspace by its working directory.
  *
- * Preference order: a workspace id the registry still knows, then the cwd path
- * index, then the session's own cwd as a synthetic project. A ledger id that
- * the registry no longer lists (a deleted project) is not silently dropped —
- * the path index gets a chance first, and the id is kept only as a last resort.
+ * `workspace.json`'s per-workspace `sessionIds` list is NOT an authoritative
+ * roster: it is populated by a one-time bootstrap plus later explicit
+ * attachments, so on a real home it names a fraction of the sessions. A
+ * workspace's *path* is reliable, and the session header's own cwd is the real
+ * authority for ownership, so attribution goes through a path index.
+ *
+ * @param cwd - the session's working directory, when known.
+ * @param workspaceByPath - workspace path index.
+ * @returns the matching workspace id, or `null` for a session that belongs to a
+ *   project the registry does not know (the caller then synthesises one).
  */
 function resolveProjectKey(
-  ledgerWorkspaceId: string | undefined,
   cwd: string | null,
-  workspaceOf: ReadonlyMap<string, WorkspaceMeta>,
   workspaceByPath: ReadonlyMap<string, WorkspaceMeta>,
-  warnings: string[],
 ): string | null {
-  if (ledgerWorkspaceId !== undefined && workspaceOf.has(ledgerWorkspaceId)) {
-    return ledgerWorkspaceId;
-  }
-  if (cwd !== null) {
-    const byPath = workspaceByPath.get(pathKey(cwd));
-    if (byPath !== undefined) {
-      if (ledgerWorkspaceId !== undefined && !isPlaceholderWorkspaceId(ledgerWorkspaceId)) {
-        warnings.push(
-          `会话归属不一致：账本记为项目 ${ledgerWorkspaceId}，工作目录 ${cwd} 属于项目 ${byPath.workspaceId}；已按工作目录归组`,
-        );
-      }
-      return byPath.workspaceId;
-    }
-  }
-  if (ledgerWorkspaceId === undefined || isPlaceholderWorkspaceId(ledgerWorkspaceId)) {
-    // Left as `null`: the session becomes its own project keyed by cwd.
-    return null;
-  }
-  warnings.push(`会话引用的项目 ${ledgerWorkspaceId} 已不在 workspace.json 中，且无法由工作目录还原`);
-  return null;
+  if (cwd === null) return null;
+  return workspaceByPath.get(pathKey(cwd))?.workspaceId ?? null;
 }
 
 /**
  * Read a DSH home directory into the agent-neutral dataset.
  *
- * Usage comes from the `dsh-all-usage` ledger when it exists — it is the
- * authoritative per-request record — and otherwise from the harness' own
- * session logs, which repeat each step's `usage` block. The two sources are
- * never mixed: a ledger is complete on its own, and merging a fallback into it
- * would double-count.
+ * Usage comes from the harness' own session logs, which record each step's
+ * `usage` block. The projection cache and workspace registry only add titles,
+ * ownership, and a cross-check; no third-party plugin is involved.
  *
- * @param options - resolved adapter options; `enrich: false` skips the
- *   per-session logs when the ledger already answers the token question, which
- *   is faster but loses titles for subagents and every delegation link. Without
- *   a ledger the logs are the only usage source and are read regardless.
+ * @param options - resolved adapter options; `enrich: false` keeps the per-request
+ *   usage but drops the log-derived titles and delegation links.
  * @returns the dataset, with each project's sessions ordered by first usage ascending.
- * @throws when the data root carries neither a usage ledger nor any session log.
+ * @throws when the data root carries neither a session log nor a projection cache.
  */
 async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const source = resolve(options.home ?? defaultSource(options.env ?? process.env) ?? '');
@@ -374,44 +205,25 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     throw new Error(`数据目录必须是绝对路径，收到 ${JSON.stringify(options.home)}`);
   }
 
-  const ledger = await readLedger(source, warnings);
-  // Without usable ledger records the session logs are the only per-request
-  // source, so they must be scanned in full even when no enrichment was asked
-  // for. A shard that parsed to nothing counts as unusable.
-  const useLogs = !ledger.present || ledger.records.size === 0;
   const enrich = options.enrich !== false;
   const [workspaces, meta, logIndex] = await Promise.all([
     readWorkspaces(source, warnings),
     readSessionMeta(source, warnings),
-    // A session log also answers the delegation question that neither the ledger
-    // nor the projection cache records. An unreadable log degrades attribution
-    // to "top-level session" rather than failing the whole report.
-    useLogs || enrich
-      ? readSessionLogIndex(source, { collectUsage: useLogs })
-      : Promise.resolve({
-          byId: new Map<string, SessionLogInfo>(),
-          records: new Map<string, UsageRecord[]>(),
-          files: [],
-          warnings: [],
-        }),
+    // The log answers two questions at once: per-request usage (every step), and
+    // delegation (the leading frame), which neither of the two caches records.
+    // An unreadable log degrades to a warning rather than failing the report.
+    readSessionLogIndex(source, { collectUsage: true }),
   ]);
   warnings.push(...logIndex.warnings);
 
-  if (useLogs && logIndex.files.length === 0) {
+  if (logIndex.files.length === 0 && meta.size === 0) {
     throw new Error(
-      `在 ${source} 下没有找到 DSH 用量数据：既没有 storages/all_usage_ledger_*.json，也没有 sessions/ 下的会话日志（可用 --home 指定，或设置 DSH_HOME）`,
+      `在 ${source} 下没有找到 DSH 用量数据：sessions/ 下没有会话日志，也没有 storages/session_projcache.json（可用 --home 指定，或设置 DSH_HOME）`,
     );
   }
 
   const workspaceOf = new Map<string, WorkspaceMeta>();
   for (const workspace of workspaces) workspaceOf.set(workspace.workspaceId, workspace);
-
-  // `workspace.json`'s per-workspace `sessionIds` list is NOT an authoritative
-  // roster: it is populated by a one-time bootstrap plus later explicit
-  // attachments, and on a real home it names a fraction of the ledger's
-  // sessions. The registry's *paths* are reliable, and the session's own cwd is
-  // the real authority for ownership, so attribution goes through a path index —
-  // exactly how the ledger writer itself attributes sessions.
   const workspaceByPath = new Map<string, WorkspaceMeta>();
   for (const workspace of workspaces) {
     if (workspace.path !== undefined && workspace.path.length > 0) {
@@ -419,28 +231,30 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     }
   }
 
-  // A ledger is authoritative when it has records; session logs are the fallback
-  // so a stock DSH home with no third-party plugin still reports usage.
-  const recordsOf = useLogs ? logIndex.records : ledger.records;
+  // The same session can be spelled with or without the `session-` prefix in
+  // different stores, and the log index knows both spellings; resolving every
+  // projection-cache key to the log's canonical id keeps one session one row.
+  const metaByCanonical = new Map<string, SessionMeta>();
+  for (const [id, sessionMeta] of meta) {
+    const canonical = logIndex.byId.get(id)?.sessionId ?? id;
+    if (!metaByCanonical.has(canonical)) metaByCanonical.set(canonical, sessionMeta);
+  }
 
-  // Every session any source knows about: billed sessions come from the ledger
-  // (or, without one, from the logs), while the projection cache supplies the
-  // ones that never billed a request.
-  const sessionIds = new Set<string>(recordsOf.keys());
-  for (const sessionId of meta.keys()) sessionIds.add(sessionId);
-  if (useLogs) for (const info of logIndex.byId.values()) sessionIds.add(info.sessionId);
+  // Every session any source knows about: the logs carry billed sessions, the
+  // projection cache the ones that never billed a request.
+  const sessionIds = new Set<string>();
+  for (const info of logIndex.byId.values()) sessionIds.add(info.sessionId);
+  for (const sessionId of metaByCanonical.keys()) sessionIds.add(sessionId);
 
   const sessions: SessionRecord[] = [];
   const projectOfSession = new Map<string, string>();
   for (const sessionId of sessionIds) {
-    const records = recordsOf.get(sessionId) ?? [];
+    const records = logIndex.records.get(sessionId) ?? [];
     records.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
-    const sessionMeta = meta.get(sessionId);
+    const sessionMeta = metaByCanonical.get(sessionId);
     const log = enrich ? logIndex.byId.get(sessionId) : undefined;
-    const cwd = sessionMeta?.cwd ?? log?.cwd ?? ledger.sourceCwds.get(sessionId) ?? null;
-    const projectKey =
-      resolveProjectKey(ledger.workspaceIds.get(sessionId), cwd, workspaceOf, workspaceByPath, warnings) ??
-      syntheticProjectKey(cwd ?? undefined);
+    const cwd = sessionMeta?.cwd ?? log?.cwd ?? null;
+    const projectKey = resolveProjectKey(cwd, workspaceByPath) ?? syntheticProjectKey(cwd ?? undefined);
     const session = buildSession(sessionId, records, {
       // Subagents are absent from the projection cache, so their log title is
       // the only human-readable label available.
@@ -450,7 +264,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       log,
       byId: logIndex.byId,
     });
-    if (sessionMeta?.projectedTotals !== undefined && sessionMeta.projectedTotals !== null) {
+    if (sessionMeta?.projectedTotals !== undefined) {
       session.extra = { projectedTotals: sessionMeta.projectedTotals };
     }
     sessions.push(session);
@@ -491,7 +305,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   projects.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 
   const stats: DatasetStats = {
-    filesRead: useLogs ? logIndex.files : ledger.shards,
+    filesRead: logIndex.files,
     sessions: sessions.length,
     records: sessions.reduce((total, session) => total + session.records.length, 0),
   };
@@ -530,10 +344,9 @@ function buildSession(
 /**
  * Resolve a session's parent id through the log index.
  *
- * The ledger keys a session by the bare UUID while the log header (and the
- * directories on disk) carry the `session-` prefix, so a parent id is run back
- * through the index — which holds both spellings — to land on the spelling the
- * ledger used.
+ * A parent id may be written with the `session-` prefix while the child's
+ * directory (or another log) spells it bare, so it is run back through the
+ * index — which holds both spellings — to land on the canonical id.
  */
 function resolveParentId(
   log: SessionLogInfo | undefined,
@@ -607,21 +420,22 @@ export const dshAgent: AgentAdapter = {
   defaultSource,
   hasData: async (source) => {
     try {
-      const names = await readdir(join(source, 'storages'));
-      if (names.some((name) => /^all_usage_ledger_\d+\.json$/.test(name))) return true;
+      if ((await locateSessionLogs(source)).length > 0) return true;
     } catch {
-      // No storages directory: the session logs below are still worth checking.
+      // Fall through: the projection cache can still describe sessions.
     }
     try {
-      return (await locateSessionLogs(source)).length > 0;
+      const names = await readdir(join(source, 'storages'));
+      return names.includes('session_projcache.json');
     } catch {
       return false;
     }
   },
   load,
   notes: () => [
-    '逐请求用量优先取自 DSH 插件 dsh-all-usage 写入的账本；未安装该插件时改用会话日志中每步的 usage 记录，两种来源不会混用。',
-    '账本中的 cost 字段不可用（其价格目录从未成功拉取，恒为 0），本工具只取其 token 数与时间戳并自行计价。',
-    '子代理关系只存在于会话日志首帧，需要在 sessions/ 下额外读取每个会话的日志。',
+    '逐请求用量来自 harness 自己写的会话日志：每个 assistant/message 事件都带该步的 usage，因此不需要安装任何插件。',
+    '会话日志是追加写的多帧 zstd；正在写入的会话最后几帧可能读不全，重跑即可补齐。',
+    '会话标题与创建时间优先取 storages/session_projcache.json，子代理关系只在会话日志首帧。',
+    '本工具不读取任何第三方插件的落盘数据。',
   ],
 };

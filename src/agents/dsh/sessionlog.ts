@@ -8,9 +8,8 @@
  *
  * The same stream also carries the harness' own per-request accounting: every
  * `assistant/message` event repeats the `usage` block the provider returned for
- * that step. That makes the log the fallback usage source when the third-party
- * `dsh-all-usage` ledger is not installed, and the numbers are the same ones the
- * harness folds into `session_projcache.json`.
+ * that step. That makes the log the sole usage source, and the numbers are the
+ * same ones the harness folds into `session_projcache.json`.
  *
  * The log is an append-only stream of **independent zstd frames** — one frame
  * carries the header, later frames carry events. `node:zlib`'s
@@ -151,9 +150,8 @@ interface PendingUsage {
 /**
  * Turn one `assistant/message` event into a usage record.
  *
- * The record is keyed by turn and step — the same key the ledger uses — so a
- * request means the same thing in both sources and re-reading a log cannot
- * double-bill a step.
+ * The record is keyed by turn and step, so a request means the same thing no
+ * matter how often the log is re-read: re-reading cannot double-bill a step.
  *
  * @param event - the parsed log event.
  * @returns the pending record, or `undefined` when the event carries no usable usage.
@@ -289,8 +287,8 @@ export async function readSessionLog(
     createdAt: asInteger(state.header['createdAt']) ?? null,
     cwd: asString(state.header['cwd']) ?? null,
     title: state.title ?? null,
-    // The header carries the id, so every record can now be keyed the way the
-    // ledger keys it: `<sessionId>:step:<turn>:<step>`.
+    // The header carries the id, so every record can now be keyed
+    // `<sessionId>:step:<turn>:<step>`.
     records: [...state.records.values()].map((pending) => ({
       id: `${sessionId}:step:${pending.key}`,
       ...pending.record,
@@ -414,8 +412,8 @@ export async function readSessionLogIndex(
     files.push(result.log.path);
     byId.set(scan.sessionId, scan);
     if (collectUsage) records.set(scan.sessionId, scan.records);
-    // The ledger occasionally keys a session by the bare UUID while the log's
-    // directory (and header) carry the `session-` prefix; index both spellings.
+    // A session may be referenced by its bare UUID in one place and by its
+    // `session-` prefixed id in another; index both spellings.
     const bare = scan.sessionId.replace(/^session-/, '');
     if (bare !== scan.sessionId) byId.set(bare, scan);
     const prefixed = `session-${bare}`;
