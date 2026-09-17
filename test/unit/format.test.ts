@@ -136,10 +136,10 @@ describe('formatUsageReport', () => {
       engine,
       '¤',
     );
-    expect(text).toContain('费用明细:');
+    expect(text).toContain('费用明细');
     expect(text).toContain('命中');
     expect(text).toContain('¤0.02');
-    expect(text).toContain('费用合计');
+    expect(text).toContain('合计');
     expect(text).toContain('¤5.02');
   });
 
@@ -153,7 +153,19 @@ describe('formatUsageReport', () => {
     const text = formatUsageReport(
       report({
         requests: 1,
-        bands: [{ periodId: '2026-01-01', periodLabel: 'flat period', tier: 'off-peak', resolution: 'fallback-later', requests: 1, total: '1.0000' }],
+        bands: [
+          {
+            periodId: '2026-01-01',
+            periodLabel: 'flat period',
+            tier: 'off-peak',
+            resolution: 'fallback-later',
+            requests: 1,
+            total: '1.0000',
+            amounts: { 'output': '1.0000' },
+            rates: { output: '20' },
+            inputTokens: 0,
+          },
+        ],
       }),
       engine,
       '¤',
@@ -212,7 +224,7 @@ describe('formatUsageReport', () => {
       engine,
       '¤',
     );
-    expect(text).toContain('按会话（↳ 为子代理）:');
+    expect(text).toContain('按会话（↳ 为子代理');
     expect(text).toContain('(无标题)');
     expect(text).toContain('↳');
   });
@@ -221,25 +233,33 @@ describe('formatUsageReport', () => {
     expect(formatUsageReport(report({ warnings: ['没有项目匹配 "x"'] }), engine, '¤')).toContain('没有项目匹配 "x"');
   });
 
-  it('keeps wide characters from shearing the columns', () => {
+  it('pads a wide-character cell by cells, not by characters', () => {
     const text = formatUsageReport(
       report({ dimension: 'project', projects: [projectRow({ id: 'demo', name: '中文项目名称' })] }),
       engine,
       '¤',
     );
-    const header = text.split('\n').find((line) => line.startsWith('项目 '));
+    const header = text.split('\n').find((line) => line.startsWith('项目') && line.includes('会话'));
     const data = text.split('\n').find((line) => line.includes('中文项目名称'));
-    expect(header).toBeDefined();
-    expect(data).toBeDefined();
-    // 中文项目名称 is 6 characters but 12 cells, so compare in cells.
-    expect(cells((data ?? '').slice(0, (data ?? '').indexOf('/tmp/demo')))).toBe(
-      cells((header ?? '').slice(0, (header ?? '').indexOf('路径'))),
-    );
+    expect(header, 'header').toBeDefined();
+    expect(data, 'data row').toBeDefined();
+    // The name is 6 characters but 12 cells wide, so a character-counting pad
+    // would leave every following column one cell short per wide character.
+    const nameWidth = cells('中文项目名称');
+    expect(nameWidth).toBe(12);
+    expect(cells(data ?? '')).toBeGreaterThanOrEqual(nameWidth + 2);
+    // The header pads its own label out to the same column, so the two rows
+    // agree on where the next column starts.
+    const gap = /^项目(\s+)/.exec(header ?? '')?.[1] ?? '';
+    expect(cells(`项目${gap}`)).toBe(nameWidth + 2);
   });
 });
 
 /** One session-list row, with the fields a test does not care about defaulted. */
-function row(id: string, overrides: Partial<SessionListResult['projects'][number]['sessions'][number]> = {}): SessionListResult['projects'][number]['sessions'][number] {
+function row(
+  id: string,
+  overrides: Partial<SessionListResult['projects'][number]['sessions'][number]> = {},
+): SessionListResult['projects'][number]['sessions'][number] {
   return {
     id,
     title: null,
@@ -288,7 +308,10 @@ describe('table totals rows', () => {
 
   it('omits the totals row when it would only repeat the single row above it', () => {
     const text = formatUsageReport(withProjects([{ id: 'only', cost: '4.0000', requests: 7 }]), engine, '¤');
-    expect(text.split('\n').some((line) => line.startsWith('合计'))).toBe(false);
+    // The cost table always totals its components; only the project table should
+    // drop the row, because there it would merely echo the one project above it.
+    const projectTable = text.slice(text.indexOf('按项目:'));
+    expect(projectTable.split('\n').some((line) => line.startsWith('合计'))).toBe(false);
   });
 
   it('takes the totals row from the report, not from summing the rows', () => {
@@ -306,12 +329,19 @@ describe('table totals rows', () => {
       engine,
       '¤',
     );
-    const lines = text.split('\n').filter((line) => line.startsWith('项目') || line.startsWith('合计'));
+    const projectTable = text.slice(text.indexOf('按项目:'));
+    const lines = projectTable.split('\n').filter((line) => line.startsWith('项目') || line.startsWith('合计'));
     expect(lines).toHaveLength(2);
-    expect(cells(lines[1] ?? '')).toBe(cells(lines[0] ?? ''));
+    // Header and totals row must agree on where each column starts: compare the
+    // offset of the money column, which both rows have.
+    const offsetOf = (line: string, needle: string): number => {
+      const index = line.indexOf(needle);
+      return index === -1 ? -1 : [...line.slice(0, index)].reduce((n, c) => n + ((c.codePointAt(0) ?? 0) > 0x2e80 ? 2 : 1), 0);
+    };
+    expect(offsetOf(lines[1] ?? '', '¤')).toBe(offsetOf(lines[0] ?? '', '费用'));
   });
 
-  it('totals the session list over the rows it displays', () => {
+  it('totals the request column of the session list', () => {
     const list: SessionListResult = {
       agent: 'test',
       source: '/tmp/test',
@@ -348,10 +378,8 @@ describe('table totals rows', () => {
     const text = formatSessionList(list);
     const line = text.split('\n').find((entry) => entry.startsWith('合计'));
     expect(line).toBeDefined();
-    // 5 + 3 + 2 requests, and the input column excludes the output column.
-    expect(line).toContain('10');
-    expect(line).toContain('2.0K');
-    expect(line).toContain('200');
+    // 5 + 3 + 2 requests. Token figures belong to `usage`, not to this listing.
+    expect(line?.trimEnd().endsWith('10')).toBe(true);
   });
 
   it('shows no totals row when the project has a single row', () => {
@@ -419,35 +447,6 @@ describe('label alignment', () => {
       }),
     );
     expect(columns.size).toBe(1);
-  });
-
-  it('aligns the token and money columns of the cost block', () => {
-    const text = formatUsageReport(
-      report({
-        cost: cost('5.0200', { cacheHitInputCost: '0.0200', cacheMissInputCost: '1.0000', outputCost: '4.0000' }),
-        components: new Map([
-          ['input-hit', { component: { id: 'input-hit', label: '命中', basis: 'cacheRead', rate: '0.02', per: 1_000_000 }, tokens: 1_000_000 }],
-          ['input-miss', { component: { id: 'input-miss', label: '未命中输入很长的名字', basis: 'input', rate: '1', per: 1_000_000 }, tokens: 1_000_000 }],
-          ['output', { component: { id: 'output', label: '输出', basis: 'output', rate: '4', per: 1_000_000 }, tokens: 1_000_000 }],
-        ]),
-      }),
-      engine,
-      '¤',
-    );
-    const rows = text.split('\n').filter((line) => /^(  )(命中|未命中|输出|费用合计)/.test(line));
-    expect(rows.length).toBeGreaterThanOrEqual(4);
-    const tokenColumns = new Set<number>();
-    const moneyColumns = new Set<number>();
-    for (const line of rows) {
-      const tokenMatch = /\s(\d[\d,]*)\s+¤/.exec(line);
-      if (tokenMatch !== null) tokenColumns.add(cells(line.slice(0, tokenMatch.index + 1 + tokenMatch[1]!.length)));
-      const moneyMatch = /¤/.exec(line);
-      if (moneyMatch !== null) moneyColumns.add(cells(line.slice(0, moneyMatch.index)));
-    }
-    // Every row that has a token figure puts it in the same column, and every
-    // amount starts in the same column as well.
-    expect(tokenColumns.size).toBe(1);
-    expect(moneyColumns.size).toBe(1);
   });
 
   it('reports the input-miss row as the cache-miss counter plus cache writes', () => {

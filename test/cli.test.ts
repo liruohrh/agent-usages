@@ -23,6 +23,11 @@ const CWD = '/home/user/ws/demo';
 /** 2026-09-11 20:00 CST (Friday) — off-peak in the current price period. */
 const OFF_PEAK = Date.parse('2026-09-11T12:00:00Z');
 
+/** Display width of a line, counting wide characters as two cells. */
+function cells(text: string): number {
+  return [...text].reduce((total, character) => total + ((character.codePointAt(0) ?? 0) > 0x2e80 ? 2 : 1), 0);
+}
+
 /** Result of one CLI invocation. */
 interface CliResult {
   code: number;
@@ -304,20 +309,45 @@ describe('text output alignment', () => {
     });
   }
 
-  it('lines every block up in one column, including labels with full-width parens', async () => {
+  it('lines every key/value block up in one column', async () => {
     const { stdout } = await cli(['usage', '--project', '--subagents']);
     const lines = stdout.split('\n');
-    for (const prefix of ['Agent', '数据目录', '维度', '时间范围', '计价来源']) {
-      const line = lines.find((row) => new RegExp(`^${prefix}\\s{2,}\\S`).test(row));
-      expect(line, prefix).toBeDefined();
-      expect(new Set(columnsOf([line as string])).size).toBe(1);
-      expect(columnsOf([line as string])[0]).toBe(columnsOf([lines.find((row) => /^数据目录\s{2,}\S/.test(row)) as string])[0]);
+    const valueColumn = (line: string): number => {
+      const match = /^(\S.*?)(\s{2,})(\S.*)$/.exec(line);
+      return match === null ? -1 : cells(`${match[1]}${match[2]}`);
+    };
+    // The header block: every field's value starts in the same column, even
+    // though one label mixes ASCII and full-width parentheses.
+    const header = lines.filter((line) => /^(Agent|数据目录|维度|时间范围|计价来源)\s{2,}\S/.test(line));
+    expect(header).toHaveLength(5);
+    expect(new Set(header.map(valueColumn)).size).toBe(1);
+    // The totals block, whose labels include `输入(缓存未命中)`. Scoped to its
+    // own section so the cost table's rows are not pulled in.
+    const totalsSection = stdout.slice(stdout.indexOf('总量:'), stdout.indexOf('按范围:'));
+    const totals = totalsSection
+      .split('\n')
+      .filter((line) => /^(请求数|输入|输出|Token 总计)\S*\s{2,}\S/.test(line));
+    expect(totals).toHaveLength(8);
+    expect(new Set(totals.map(valueColumn)).size).toBe(1);
+    // The two blocks need not share a column, but each must be internally even.
+    expect(new Set([...header, ...totals].map(valueColumn)).size).toBe(2);
+  });
+
+  it('reports the same token column set in every table', async () => {
+    const { stdout } = await cli(['usage', '--project', '--subagents']);
+    const columns = ['未命中输入', '缓存命中', '输入合计', '输出(思考)', '输出(非思考)', '输出合计', 'Token 总计'];
+    const modelTable = stdout.slice(stdout.indexOf('模型明细:'), stdout.indexOf('按项目:'));
+    const projectTable = stdout.slice(stdout.indexOf('按项目:'));
+    const scopeTable = stdout.slice(stdout.indexOf('按范围:'), stdout.indexOf('费用明细'));
+    for (const [name, block] of [
+      ['模型明细', modelTable],
+      ['按项目', projectTable],
+      ['按范围', scopeTable],
+    ] as const) {
+      const header = block.split('\n').find((line) => line.includes('未命中输入'));
+      expect(header, name).toBeDefined();
+      for (const column of columns) expect(header, `${name} / ${column}`).toContain(column);
     }
-    const tokenBlock = lines.filter((row) => /^(请求数|输入|输出|Token 总计)[^\s]*\s{2,}\S/.test(row));
-    expect(tokenBlock.length).toBeGreaterThan(5);
-    expect(new Set(columnsOf(tokenBlock)).size).toBe(1);
-    const costBlock = lines.filter((row) => /^  (缓存|输出|费用合计)/.test(row));
-    expect(costBlock.length).toBeGreaterThan(2);
   });
 });
 

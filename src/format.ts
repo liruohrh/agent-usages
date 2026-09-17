@@ -65,6 +65,15 @@ function clip(text: string, width: number): string {
 const LABEL_WIDTH = 18;
 
 /**
+ * Width the title column is clipped to.
+ *
+ * Titles are free-form and can be arbitrarily long, while the token columns
+ * behind them are fixed. Clipping keeps a long title from pushing the numbers
+ * off the screen.
+ */
+const TITLE_WIDTH = 32;
+
+/**
  * Pad a label to the shared column.
  *
  * Measured in terminal cells, not characters: the labels mix ASCII and
@@ -135,7 +144,12 @@ function share(part: string, whole: string): string {
 function money(amount: string, symbol: string): string {
   const [whole = '0', fraction = ''] = amount.split('.');
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${symbol}${grouped}.${fraction.padEnd(2, '0').replace(/0+$/, '').padEnd(2, '0')}`;
+  // Trailing zeros carry no information, so drop them — one at a time, and never
+  // below two decimals, so `8.8410` reads as `8.841` rather than as `8.84`
+  // (which would look like a different rounding).
+  let end = fraction.length;
+  while (end > 2 && fraction[end - 1] === '0') end -= 1;
+  return `${symbol}${grouped}.${fraction.slice(0, Math.max(end, 2))}`;
 }
 
 /** `YYYY-MM-DD` in local time, for dense columns. */
@@ -189,11 +203,16 @@ function tokenLines(requests: number, tokens: TokenTotals): string[] {
 }
 
 /**
- * Render one line per pricing component, as an aligned three-column block.
+ * Render the cost decomposition per pricing component.
  *
- * The component list is the provider's, not this tool's, so a vendor that bills
- * a bucket nobody else does still gets a labelled line. Tokens and money each
- * get their own column so the numbers can be compared down the block.
+ * The columns are deliberately not the token totals, and the block has no token
+ * total: a component's token count answers "how many tokens were charged for
+ * this item", which for some providers is a slice of a bucket and for others
+ * spans two (`inputAndCacheWrite`). Adding those counts up would double-count
+ * tokens, so only the money — which does add up — is totalled.
+ *
+ * Unit prices are not shown here either: a component billed across two tiers has
+ * no single price, so the rate card lives in the band table.
  */
 function costLines(
   cost: CostTotals,
@@ -202,25 +221,27 @@ function costLines(
   currency: string,
   currencyRate: number,
 ): string[] {
-  const lines: string[] = [];
+  const rows: string[][] = [];
   const seen = new Set<string>();
-  const row = (name: string, tokens: string, amount: string): string =>
-    `  ${pad(clip(name, LABEL_WIDTH), LABEL_WIDTH)}  ${pad(tokens, 14, 'right')}  ${amount}`;
   for (const [id, info] of components) {
     const amount = amountForComponent(id, cost);
     if (amount === undefined) continue;
     seen.add(id);
-    const tokens = id === 'input-miss' ? info.tokens + cost.cacheWriteTokens : info.tokens;
-    lines.push(row(basisLabelText(info.component), count(tokens), money(amount, symbol)));
+    rows.push([basisLabelText(info.component), count(info.tokens), money(amount, symbol)]);
   }
   for (const [id, amount] of componentAmounts(cost)) {
     if (seen.has(id)) continue;
-    lines.push(row(id, '', money(amount, symbol)));
+    rows.push([id, '—', money(amount, symbol)]);
   }
-  lines.push(row('费用合计', '', money(cost.total, symbol)));
-  if (currencyRate !== 1) {
-    lines.push(`　(按 1:${currencyRate} 折算为 ${currency}，原始计价货币见 price)`);
-  }
+  const lines = [
+    table(
+      ['计费项', '计费 token', '金额'],
+      rows,
+      ['left', 'right', 'right'],
+      ['费用合计', '', money(cost.total, symbol)],
+    ),
+  ];
+  if (currencyRate !== 1) lines.push(`(按 1:${currencyRate} 折算为 ${currency}，原始计价货币见 price)`);
   return lines;
 }
 
@@ -255,39 +276,122 @@ function componentAmounts(cost: CostTotals): [string, string][] {
   ];
 }
 
-/** Render the pricing-band breakdown. */
-function bandLines(result: UsageResult, engine: PricingEngine): string[] {
+/**
+ * Render the pricing bands as a table, one row per (period, tier).
+ *
+ * This is where unit prices belong. A report-wide "unit price" would be a
+ * fiction whenever usage spans two tiers — cache hits charged partly at the
+ * off-peak rate and partly at the peak rate have no single price — so the rate
+ * card is shown per band, beside the amount that band actually produced.
+ */
+function bandTable(result: UsageResult, engine: PricingEngine, symbol: string): string[] {
   if (result.bands.length === 0) return [];
-  const byId = new Map<string, { window: string }>();
+  const windows = new Map<string, string>();
   for (const price of engine.provider.models()) {
     for (const period of price.periods) {
-      if (!byId.has(period.id)) byId.set(period.id, { window: engine.describeWindow(period) });
+      if (!windows.has(period.id)) windows.set(period.id, engine.describeWindow(period));
     }
   }
-  const lines = ['计价区间:'];
+  const rows = result.bands.map((band) => {
+    const rates = Object.entries(band.rates)
+      .map(([id, rate]) => `${componentShortLabel(id)} ${rate}`)
+      .join(' / ');
+    return [
+      band.periodId,
+      TIER_LABELS[band.tier] ?? band.tier,
+      count(band.requests),
+      compact(band.inputTokens ?? 0),
+      rates.length > 0 ? `${rates} 元/M` : '—',
+      money(band.total, symbol),
+    ];
+  });
+  const lines = [
+    '计价区间:',
+    table(
+      ['区间', '时段', '请求', '输入', '单价', '金额'],
+      rows,
+      ['left', 'left', 'right', 'right', 'left', 'right'],
+    ),
+  ];
+  // One footnote per period, not per band: a period usually contributes both an
+  // off-peak and a peak row, and repeating its window twice reads as a bug.
+  const footnotes = new Map<string, { label: string; note: string; window?: string }>();
   for (const band of result.bands) {
-    const window = byId.get(band.periodId);
-    const where = window === undefined ? '' : `（${window.window}）`;
-    lines.push(
-      `  - ${band.periodLabel} / ${TIER_LABELS[band.tier] ?? band.tier}：${count(band.requests)} 次请求${where}${RESOLUTION_NOTES[band.resolution] ?? ''}`,
-    );
+    const note = RESOLUTION_NOTES[band.resolution] ?? '';
+    const window = windows.get(band.periodId);
+    if (note === '' && window === undefined) continue;
+    const existing = footnotes.get(band.periodId);
+    // A period has one provenance; a fallback note is preferred over silence.
+    if (existing !== undefined && (existing.note !== '' || note === '')) continue;
+    footnotes.set(band.periodId, { label: band.periodLabel, note, ...(window === undefined ? {} : { window }) });
+  }
+  for (const [periodId, footnote] of footnotes) {
+    const where = footnote.window === undefined ? '' : `（${footnote.window}）`;
+    lines.push(`  ${periodId}${where}：${footnote.label}${footnote.note}`);
   }
   return lines;
+}
+
+/** A short, stable name for a pricing component id, for dense tables. */
+function componentShortLabel(id: string): string {
+  switch (id) {
+    case 'input-hit':
+      return '命中';
+    case 'input-miss':
+      return '未命中';
+    case 'output':
+      return '输出';
+    case 'input-write':
+      return '写入';
+    default:
+      return id;
+  }
+}
+
+/**
+ * The token figures every table reports, in one order.
+ *
+ * Each table used to pick its own three columns, which made the tables
+ * incomparable: the `总量` block reports seven figures, so a reader could not
+ * check a project's input total or its reasoning against it. Every table now
+ * carries the same set.
+ */
+const TOKEN_HEADERS = ['未命中输入', '缓存命中', '输入合计', '输出(思考)', '输出(非思考)', '输出合计', 'Token 总计'] as const;
+
+/** Token figures in {@link TOKEN_HEADERS} order, comma-compacted for table width. */
+function tokenCells(tokens: TokenTotals): string[] {
+  const parts = tokenBreakdown(tokens);
+  return [
+    compact(parts.inputMiss),
+    compact(parts.inputHit),
+    compact(parts.inputTotal),
+    compact(parts.reasoning),
+    compact(parts.outputOnly),
+    compact(parts.outputTotal),
+    compact(parts.total),
+  ];
+}
+
+/** Right-alignment spec for a table that ends in the shared token columns. */
+function tokenAligns(leading: number, trailing: number): ('left' | 'right')[] {
+  return [
+    ...Array.from({ length: leading }, (): 'left' => 'left'),
+    ...TOKEN_HEADERS.map((): 'right' => 'right'),
+    ...Array.from({ length: trailing }, (): 'right' => 'right'),
+  ];
 }
 
 /** Render a per-model table. */
 function modelTable(result: UsageResult, symbol: string): string {
   return table(
-    ['模型', '请求', '未命中输入', '缓存命中', '输出', '费用'],
+    ['模型', '请求', ...TOKEN_HEADERS, '费用'],
     result.models.map((model) => [
       model.model,
       count(model.requests),
-      compact(model.tokens.input),
-      compact(model.tokens.cacheRead),
-      compact(model.tokens.output),
+      ...tokenCells(model.tokens),
       money(model.cost.total, symbol),
     ]),
-    ['left', 'right', 'right', 'right', 'right', 'right'],
+    tokenAligns(1, 1),
   );
 }
 
@@ -336,23 +440,26 @@ export function formatUsageReport(
       [
         '按范围:',
         table(
-          ['范围', '会话', '请求', '输入合计', '输出合计', '费用', '占比'],
+          ['范围', '会话', '请求', ...TOKEN_HEADERS, '费用', '占比'],
           [
-            ['主会话自身', count(own.sessions), count(own.requests), compact(tokenBreakdown(own.tokens).inputTotal), compact(tokenBreakdown(own.tokens).outputTotal), money(own.cost.total, symbol), share(own.cost.total, total.cost.total)],
-            ['全部子代理', count(subagents.sessions), count(subagents.requests), compact(tokenBreakdown(subagents.tokens).inputTotal), compact(tokenBreakdown(subagents.tokens).outputTotal), money(subagents.cost.total, symbol), share(subagents.cost.total, total.cost.total)],
-            ['总计', count(total.sessions), count(total.requests), compact(tokenBreakdown(total.tokens).inputTotal), compact(tokenBreakdown(total.tokens).outputTotal), money(total.cost.total, symbol), '100%'],
+            ['主会话自身', count(own.sessions), count(own.requests), ...tokenCells(own.tokens), money(own.cost.total, symbol), share(own.cost.total, total.cost.total)],
+            ['全部子代理', count(subagents.sessions), count(subagents.requests), ...tokenCells(subagents.tokens), money(subagents.cost.total, symbol), share(subagents.cost.total, total.cost.total)],
+            ['总计', count(total.sessions), count(total.requests), ...tokenCells(total.tokens), money(total.cost.total, symbol), '100%'],
           ],
-          ['left', 'right', 'right', 'right', 'right', 'right', 'right'],
+          tokenAligns(1, 2),
         ),
       ].join('\n'),
     );
   }
 
   sections.push(
-    ['费用明细:', ...costLines(result.cost, result.components, symbol, result.currency, result.currencyRate)].join('\n'),
+    [
+      '费用明细（单价见计价区间）:',
+      ...costLines(result.cost, result.components, symbol, result.currency, result.currencyRate),
+    ].join('\n'),
   );
 
-  const bands = bandLines(result, engine);
+  const bands = bandTable(result, engine, symbol);
   if (bands.length > 0) sections.push(bands.join('\n'));
 
   if (result.models.length > 0) sections.push(['模型明细:', modelTable(result, symbol)].join('\n'));
@@ -362,30 +469,22 @@ export function formatUsageReport(
       [
         '按项目:',
         table(
-          ['项目', '路径', '会话', '子代理', '请求', '未命中输入', '缓存命中', '输出', '费用'],
+          ['项目', '会话', '子代理', '请求', ...TOKEN_HEADERS, '费用'],
           result.projects.map((project) => [
             project.name,
-            project.path,
             count(project.activeSessions),
             project.subagentSessions > 0 ? count(project.subagentSessions) : '—',
             count(project.requests),
-            compact(project.tokens.input),
-            compact(project.tokens.cacheRead),
-            compact(project.tokens.output),
+            ...tokenCells(project.tokens),
             money(project.cost.total, symbol),
           ]),
-          ['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
-          // The total is the report's own grand total, so this row is also the
-          // check that the rows above add up to it.
+          tokenAligns(1, 1),
           [
             '合计',
-            '',
             count(result.projects.reduce((total, project) => total + project.activeSessions, 0)),
             result.subagents.sessions > 0 ? count(result.subagents.sessions) : '—',
             count(result.requests),
-            compact(result.tokens.input),
-            compact(result.tokens.cacheRead),
-            compact(result.tokens.output),
+            ...tokenCells(result.tokens),
             money(result.cost.total, symbol),
           ],
         ),
@@ -400,13 +499,10 @@ export function formatUsageReport(
         const sub = session.isSubagent;
         rows.push([
           `${sub ? '  ↳ ' : ''}${project.name}`,
-          `${sub ? '  ' : ''}${session.title ?? '(无标题)'}`,
-          session.id,
+          `${sub ? '  ' : ''}${clip(session.title ?? '(无标题)', TITLE_WIDTH)}`,
           sub ? '—' : session.subagentCount > 0 ? count(session.subagentCount) : '—',
           count(session.requests),
-          compact(session.tokens.input),
-          compact(session.tokens.cacheRead),
-          compact(session.tokens.output),
+          ...tokenCells(session.tokens),
           money(session.cost.total, symbol),
         ]);
       }
@@ -419,22 +515,14 @@ export function formatUsageReport(
         '合计',
         '',
         '',
-        '',
         count(result.requests),
-        compact(result.tokens.input),
-        compact(result.tokens.cacheRead),
-        compact(result.tokens.output),
+        ...tokenCells(result.tokens),
         money(result.cost.total, symbol),
       ];
       sections.push(
         [
-          '按会话（↳ 为子代理）:',
-          table(
-            ['项目', '标题', '会话 ID', '子代理', '请求', '未命中输入', '缓存命中', '输出', '费用'],
-            rows,
-            ['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right'],
-            totals,
-          ),
+          '按会话（↳ 为子代理；会话 ID 见 --json 或 session list）:',
+          table(['项目', '标题', '子代理', '请求', ...TOKEN_HEADERS, '费用'], rows, tokenAligns(2, 1), totals),
         ].join('\n'),
       );
     }
@@ -475,9 +563,12 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
         `  ${project.sessionCount === project.sessions.length ? `会话 ${count(project.sessions.length)}` : `会话 ${count(project.sessionCount)}（显示 ${count(project.sessions.length)} 行，子代理已并入父会话）`}　最近 ${dayLabel(project.lastUsage)}　最早 ${dayLabel(project.firstUsage)}`,
       ].join('\n'),
     );
+    // A directory listing, not a cost report: token figures live in `usage`,
+    // where they come with their own columns. Keeping them here as well only
+    // made this table too wide to read.
     sections.push(
       table(
-        ['会话 ID', '标题', '首次', '最近', '子代理', '请求', '输入', '输出'],
+        ['会话 ID', '标题', '首次', '最近', '子代理', '请求'],
         project.sessions.map((session) => [
           `${session.nested ? '  ↳ ' : ''}${session.id}`,
           `${session.nested ? '  ' : ''}${session.title ?? '(无标题)'}`,
@@ -485,10 +576,8 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
           dayLabel(session.lastUsage),
           session.subagentCount > 0 && !session.isSubagent ? count(session.subagentCount) : '—',
           count(session.requests),
-          compact(totalTokens(session.tokens) - session.tokens.output),
-          compact(session.tokens.output),
         ]),
-        ['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right'],
+        ['left', 'left', 'left', 'left', 'right', 'right'],
         // A folded row already contains its subagents, so summing the rows would
         // count them twice; the total therefore comes from the sessions in scope.
         [
@@ -498,8 +587,6 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
           dayLabel(project.lastUsage),
           '',
           count(project.sessions.reduce((total, session) => total + session.requests, 0)),
-          compact(project.sessions.reduce((total, session) => total + totalTokens(session.tokens) - session.tokens.output, 0)),
-          compact(project.sessions.reduce((total, session) => total + session.tokens.output, 0)),
         ],
       ),
     );
