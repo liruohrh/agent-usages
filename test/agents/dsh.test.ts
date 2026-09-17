@@ -36,8 +36,8 @@ const SID = {
   subDeep: 'session-77777777-0000-4000-8000-000000000007',
 } as const;
 
-const WPSEARCH = '/home/user/ws/exampleApp';
-const TOOLING = '/home/user/ws/exampleLib';
+const APP_DIR = '/home/user/ws/example-app';
+const LIB_DIR = '/home/user/ws/example-lib';
 const WORKSPACE_A = 'aaaaaaaa-1111-4111-8111-111111111111';
 const WORKSPACE_B = 'bbbbbbbb-2222-4222-8222-222222222222';
 
@@ -145,8 +145,8 @@ async function buildHome(): Promise<string> {
       global: { initialized: true, workspaceIds: [WORKSPACE_A, WORKSPACE_B], archivedSessionIds: [] },
       tables: {
         workspaces: {
-          [WORKSPACE_A]: { path: WPSEARCH, title: 'example-app', sessionIds: [SID.spanning], createdAt: 'x', updatedAt: 'x' },
-          [WORKSPACE_B]: { path: TOOLING, title: 'example-lib', sessionIds: [], createdAt: 'x', updatedAt: 'x' },
+          [WORKSPACE_A]: { path: APP_DIR, title: 'example-app', sessionIds: [SID.spanning], createdAt: 'x', updatedAt: 'x' },
+          [WORKSPACE_B]: { path: LIB_DIR, title: 'example-lib', sessionIds: [], createdAt: 'x', updatedAt: 'x' },
         },
       },
     }),
@@ -160,7 +160,7 @@ async function buildHome(): Promise<string> {
       tables: {
         sessions: {
           [SID.spanning]: {
-            identity: { createdAt: Date.parse('2026-08-20T01:00:00Z'), cwd: WPSEARCH },
+            identity: { createdAt: Date.parse('2026-08-20T01:00:00Z'), cwd: APP_DIR },
             rows: {
               title: { ver: 1, seq: 9, val: '跨价格调整的会话' },
               // The harness' own folded totals, used only as a cross-check.
@@ -179,15 +179,15 @@ async function buildHome(): Promise<string> {
             },
           },
           [SID.current]: {
-            identity: { createdAt: Date.parse('2026-09-11T01:00:00Z'), cwd: WPSEARCH },
+            identity: { createdAt: Date.parse('2026-09-11T01:00:00Z'), cwd: APP_DIR },
             rows: { title: { ver: 1, seq: 9, val: '降价后的会话' } },
           },
           [SID.otherProject]: {
-            identity: { createdAt: Date.parse('2026-09-11T11:00:00Z'), cwd: TOOLING },
+            identity: { createdAt: Date.parse('2026-09-11T11:00:00Z'), cwd: LIB_DIR },
             rows: { title: { ver: 1, seq: 9, val: '另一个项目' } },
           },
           [SID.neverBilled]: {
-            identity: { createdAt: Date.parse('2026-09-12T00:00:00Z'), cwd: TOOLING },
+            identity: { createdAt: Date.parse('2026-09-12T00:00:00Z'), cwd: LIB_DIR },
             rows: { title: { ver: 1, seq: 9, val: '从未计费的会话' } },
           },
         },
@@ -200,7 +200,7 @@ async function buildHome(): Promise<string> {
   await writeSessionLog(
     home,
     SID.spanning,
-    WPSEARCH,
+    APP_DIR,
     { delegationDepth: 0, createdAt: Date.parse('2026-08-20T01:00:00Z') },
     '跨价格调整的会话',
     [
@@ -214,7 +214,7 @@ async function buildHome(): Promise<string> {
   await writeSessionLog(
     home,
     SID.current,
-    WPSEARCH,
+    APP_DIR,
     { delegationDepth: 0, createdAt: Date.parse('2026-09-11T01:00:00Z') },
     '降价后的会话',
     [step(1, 1, AT.septemberOffPeak, { input: 500_000, output: 200_000, cacheRead: 100_000 })],
@@ -223,13 +223,13 @@ async function buildHome(): Promise<string> {
   await writeSessionLog(
     home,
     SID.otherProject,
-    TOOLING,
+    LIB_DIR,
     { delegationDepth: 0, createdAt: Date.parse('2026-09-11T11:00:00Z') },
     '另一个项目',
     [step(1, 1, AT.septemberOffPeak, { input: 2_000_000, output: 300_000, cacheRead: 0 })],
   );
 
-  await writeSessionLog(home, SID.neverBilled, TOOLING, {
+  await writeSessionLog(home, SID.neverBilled, LIB_DIR, {
     delegationDepth: 0,
     createdAt: Date.parse('2026-09-12T00:00:00Z'),
   }, '从未计费的会话');
@@ -241,7 +241,7 @@ async function buildHome(): Promise<string> {
   await writeSessionLog(
     home,
     SID.subA,
-    WPSEARCH,
+    APP_DIR,
     { parentSession: SID.spanning, delegationDepth: 1, createdAt: Date.parse('2026-08-20T02:00:00Z') },
     '分类插件的子代理',
     subagentUsage,
@@ -249,7 +249,7 @@ async function buildHome(): Promise<string> {
   await writeSessionLog(
     home,
     SID.subB,
-    WPSEARCH,
+    APP_DIR,
     { parentSession: SID.spanning, delegationDepth: 1, createdAt: Date.parse('2026-08-20T03:00:00Z') },
     undefined,
     subagentUsage,
@@ -257,7 +257,7 @@ async function buildHome(): Promise<string> {
   await writeSessionLog(
     home,
     SID.subDeep,
-    WPSEARCH,
+    APP_DIR,
     { parentSession: SID.subA, delegationDepth: 2, createdAt: Date.parse('2026-08-20T04:00:00Z') },
     undefined,
     subagentUsage,
@@ -439,7 +439,7 @@ describe('reading a DSH home', () => {
 
 describe('session log reading', () => {
   it('reads a plain JSONL header', async () => {
-    const info = await readSessionLog(join(home, 'sessions', '--home-dev-ws-example-app--', SID.subA, 'session.jsonl'));
+    const info = await readSessionLog(join(home, 'sessions', '--home-user-ws-example-app--', SID.subA, 'session.jsonl'));
     expect(info.sessionId).toBe(SID.subA);
     expect(info.parentSessionId).toBe(SID.spanning);
     expect(info.delegationDepth).toBe(1);
@@ -450,7 +450,7 @@ describe('session log reading', () => {
 
   it('collects one record per billed step when asked', async () => {
     const scan = await readSessionLog(
-      join(home, 'sessions', '--home-dev-ws-example-app--', SID.spanning, 'session.jsonl'),
+      join(home, 'sessions', '--home-user-ws-example-app--', SID.spanning, 'session.jsonl'),
       { collectUsage: true },
     );
     expect(scan.records.map((record) => record.id)).toEqual([
@@ -471,10 +471,10 @@ describe('session log reading', () => {
   it('reads a multi-frame zstd log from the real layout', async () => {
     // Real DSH logs are a chain of independent zstd frames; the reader steps
     // through them because node:zlib stops at the first one.
-    const dir = join(home, 'sessions', '--home-dev-ws-example-app--', SID.subB);
+    const dir = join(home, 'sessions', '--home-user-ws-example-app--', SID.subB);
     await rm(join(dir, 'session.jsonl'), { force: true });
     const { zstdCompressSync } = await import('node:zlib');
-    const header = JSON.stringify({ type: 'session', version: 0, id: SID.subB, createdAt: 1, cwd: WPSEARCH, delegationDepth: 1, parentSession: SID.spanning });
+    const header = JSON.stringify({ type: 'session', version: 0, id: SID.subB, createdAt: 1, cwd: APP_DIR, delegationDepth: 1, parentSession: SID.spanning });
     const title = JSON.stringify({ type: 'session/title', seq: 2, data: { title: '压缩日志标题' } });
     await writeFile(join(dir, 'session.jsonl.zstd'), Buffer.concat([zstdCompressSync(Buffer.from(`${header}\n`)), zstdCompressSync(Buffer.from(`${title}\n`))]));
     const info = await readSessionLog(join(dir, 'session.jsonl.zstd'));
@@ -483,7 +483,7 @@ describe('session log reading', () => {
   });
 
   it('reads a mirrored v3 stream instead of the legacy seed file', async () => {
-    const dir = join(home, 'sessions', '--home-dev-ws-example-app--', SID.current);
+    const dir = join(home, 'sessions', '--home-user-ws-example-app--', SID.current);
     await rm(join(dir, 'session.jsonl'), { force: true });
     const { zstdCompressSync } = await import('node:zlib');
     const header = JSON.stringify({
@@ -491,7 +491,7 @@ describe('session log reading', () => {
       version: 0,
       id: SID.current,
       createdAt: 1,
-      cwd: WPSEARCH,
+      cwd: APP_DIR,
       delegationDepth: 0,
     });
     // The live release keeps a header-only seed at `session.jsonl.zstd` and
@@ -595,7 +595,7 @@ describe('cost from session logs', () => {
     await writeSessionLog(
       home,
       SID.current,
-      WPSEARCH,
+      APP_DIR,
       { delegationDepth: 0, createdAt: Date.parse('2026-09-11T01:00:00Z') },
       '降价后的会话',
       [step(1, 1, AT.septemberOffPeak, { input: 0, output: 0, cacheRead: 0, cacheWrite: 1_000_000 })],

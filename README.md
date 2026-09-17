@@ -133,10 +133,10 @@ pnpm cli price
 node src/cli.ts usage --year --json
 ```
 
-或全局链接后使用 `dsh-usage`：
+或全局链接后使用 `agent-usages`：
 
 ```bash
-pnpm link --global   # 之后可直接执行 dsh-usage usage --month
+pnpm link --global   # 之后可直接执行 agent-usages usage --month
 ```
 
 要求 Node ≥ 22.6（类型擦除），开发时使用 Node 24。
@@ -223,7 +223,7 @@ DSH 的每一次子代理调用都是一个**独立会话**，因此每笔子代
 
 `parentSession` 指明派生它的会话，`delegationDepth` 为嵌套深度（0 = 人启动的会话）。
 
-会话日志是**追加写入的一串独立 zstd 帧**（首帧是会话头，后续帧是事件）。Node 的 `zstdDecompressSync` 只解第一帧，流式解码器在第二帧会以 `ZSTD_error_prefix_unknown` 报错，因此读取时按 zstd 魔数逐帧定位解码。取标题与委派关系时会在拿到字段后立即停止；统计用量时需要读完整个文件（本机 16 个会话、约 24MB，约 1 秒）。未压缩的 `session.jsonl` 同样支持。
+会话日志是**追加写入的一串独立 zstd 帧**（首帧是会话头，后续帧是事件）。Node 的 `zstdDecompressSync` 只解第一帧，流式解码器在第二帧会以 `ZSTD_error_prefix_unknown` 报错，因此读取时按 zstd 魔数逐帧定位解码。取标题与委派关系时会在拿到字段后立即停止；统计用量时需要读完整个文件（每个会话一个日志，逐帧解码）。未压缩的 `session.jsonl` 同样支持。
 
 ### 三个档位
 
@@ -267,11 +267,11 @@ $ agent-usages usage --subagent -p example-c
 | **标题** | **完全一致，且忽略前后空格**（大小写不敏感） |
 
 ```bash
-agent-usages usage -s a1b2c3d4                              # id 前缀
-agent-usages usage -s "分析示例项目数据"              # 标题
-agent-usages usage -s "  为示例页面添加刷新按钮  "            # 前后空格会被忽略
-agent-usages usage -s "分析示例*"                       # 通配（也可匹配标题）
-```
+agent-usages usage -s a1b2c3d4                      # id 前缀
+agent-usages usage -s "分析示例项目数据"            # 标题
+agent-usages usage -s "  为示例页面添加刷新按钮  "  # 前后空格会被忽略
+agent-usages usage -s "分析示例*"                   # 通配（也可匹配标题）
+``````
 
 几条刻意选择的语义：
 
@@ -292,16 +292,16 @@ agent-usages usage -s "分析示例*"                       # 通配（也可匹
 
 ```bash
 # 会话总量（含子代理）
-dsh-usage usage --session -p example-c
+agent-usages usage --session -p example-c
 
 # 拆开看：会话自身 / 每个子代理
-dsh-usage usage --session --subagents -p example-c
+agent-usages usage --session --subagents -p example-c
 
 # 某个会话及其全部子代理
-dsh-usage usage -s b2c3d4e5
+agent-usages usage -s b2c3d4e5
 
 # 会话清单同样支持
-dsh-usage session list --subagents -p example-c
+agent-usages session list --subagents -p example-c
 ```
 
 ### CLI 输出示例
@@ -311,11 +311,11 @@ dsh-usage session list --subagents -p example-c
 会话口径  含子代理（2 个子代理会话已并入其父会话，另计 ¥1.399）
 
 按会话（↳ 为子代理）:
-项目       标题              会话 ID                                       子代理  请求  …
-─────────  ────────────────  ────────────────────────────────────────────  ──────  ────
-example-a  统计 CLI 用量  session-11111111-1111-4111-8111-111111111111       2   337
-  ↳ example-a  调研任务…  22222222-2222-4222-8222-222222222222          —    26
-  ↳ example-a  示例子代理…  33333333-3333-4333-8333-333333333333          —    79
+项目       标题            会话 ID                                       子代理  请求  …
+─────────  ──────────────  ────────────────────────────────────────────  ──────  ────
+example-a  统计 CLI 用量   session-11111111-1111-4111-8111-111111111111       2   337
+  ↳ example-a  调研任务…       22222222-2222-4222-8222-222222222222               —    26
+  ↳ example-a  示例子代理…     33333333-3333-4333-8333-333333333333               —    79
 ```
 
 JSON 里对应 `subagents` 区块与每行的 `isSubagent` / `subagentCount` / `parentSessionId` 字段（见下）。
@@ -325,12 +325,12 @@ JSON 里对应 `subagents` 区块与每行的 `isSubagent` / `subagentCount` / `
 四选一，不能同时使用：
 
 ```bash
-dsh-usage usage --today          # 今日
-dsh-usage usage --month          # 本月
-dsh-usage usage --year           # 今年
-dsh-usage usage today            # 位置参数：today / month / year，支持偏移 month-1、today-7
-dsh-usage usage 2026-09-01..2026-09-10
-dsh-usage usage --from 2026-08-01 --to 2026-09-01
+agent-usages usage --today          # 今日
+agent-usages usage --month          # 本月
+agent-usages usage --year           # 今年
+agent-usages usage today            # 位置参数：today / month / year，支持偏移 month-1、today-7
+agent-usages usage 2026-09-01..2026-09-10
+agent-usages usage --from 2026-08-01 --to 2026-09-01
 ```
 
 - **没有时区的日期时间按本机本地时区解释**：`2026-09-01` 即本地当日 00:00。
@@ -484,13 +484,13 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 
 ```
 按项目:
-项目       路径                         会话  子代理   请求  未命中输入  缓存命中   输出      费用
-─────────  ───────────────────────────  ────  ──────  ─────  ──────────  ────────  ─────  ────────
-example-a  /home/user/wsme/example-a      1       2    530        439K    123.6M   397K   ¥7.3491
-example-b    /home/user/ws2/…/example-b       2       —    184        131K     25.6M   199K   ¥2.4305
-example-c   /home/user/ws2/…/example-c      2      42  1,447       1.83M    109.3M  1.66M  ¥14.8963
-─────────  ───────────────────────────  ────  ──────  ─────  ──────────  ────────  ─────  ────────
-合计                                       6      44  2,161       2.39M    258.5M  2.26M  ¥24.6759
+项目       路径                     会话  子代理   请求  未命中输入  缓存命中   输出      费用
+─────────  ───────────────────────  ────  ──────  ─────  ──────────  ────────  ─────  ────────
+example-a  /home/user/ws/example-a     1       2    530        439K    123.6M   397K   ¥7.3491
+example-b  /home/user/ws/example-b     2       —    184        131K     25.6M   199K   ¥2.4305
+example-c  /home/user/ws/example-c     2      42  1,447       1.83M    109.3M  1.66M  ¥14.8963
+─────────  ───────────────────────  ────  ──────  ─────  ──────────  ────────  ─────  ────────
+合计                                   6      44  2,161       2.39M    258.5M  2.26M  ¥24.6759
 ```
 
 ## JSON 输出
@@ -581,7 +581,7 @@ example-c   /home/user/ws2/…/example-c      2      42  1,447       1.83M    10
 
 几处容易踩坑的地方，本工具已分别处理：
 
-1. **用量就在会话日志里**：每个 `assistant/message` 事件带该步的 `usage`（`inputTokens` / `outputTokens` / `cacheReadTokens` / `cacheWriteTokens` / `reasoningTokens`），带模型与时间戳，与 `session_projcache.json` 的 `tokenUsage` 口径一致（本机逐会话求和完全一致）。
+1. **用量就在会话日志里**：每个 `assistant/message` 事件带该步的 `usage`（`inputTokens` / `outputTokens` / `cacheReadTokens` / `cacheWriteTokens` / `reasoningTokens`），带模型与时间戳，与 `session_projcache.json` 的 `tokenUsage` 口径一致（逐会话求和相同）。
 2. **按 `turn:step` 去重**：一次请求记为 `` `${sid}:step:${turn}:${step}` ``，同一键后写入者胜出，重读日志不会重复计费。
 3. **日志可能是镜像文件**：当前版本把实时流写在 `session.v3.jsonl.zstd`，同时留一个只含头部的 `session.jsonl.zstd` 种子文件。工具每个会话只读一个文件，且优先 `session.v3`，因此种子文件不会被当成空会话。
 4. **`workspace.json` 的 `sessionIds` 不是完整名册**：它由一次性 bootstrap 加后续显式挂载填充，实测只记录少数会话。工具改用**工作目录路径索引**归组，因此会话都能正确落到所属项目；路径不在注册表里的会话按 cwd 合成一个项目。
@@ -611,7 +611,7 @@ pnpm typecheck   # tsc --noEmit
 
 `test/support/` 提供合成数据集与**合成价格表**（`stub-pricing.ts`），因此机制类测试不依赖任何真实厂商或 agent 的文件格式。
 
-代码不引入构建步骤：`bin/dsh-usage.js` 直接用 Node 的类型擦除执行 `src/cli.ts`，因此源码即产物，不存在构建产物与源码不一致的问题。
+代码不引入构建步骤：`bin/agent-usages.js` 直接用 Node 的类型擦除执行 `src/cli.ts`，因此源码即产物，不存在构建产物与源码不一致的问题。
 
 ### 目录
 
