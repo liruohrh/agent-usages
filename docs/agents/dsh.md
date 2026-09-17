@@ -32,6 +32,42 @@
 
 按 `turn:step` 去重：一次请求记为 `` `${sid}:step:${turn}:${step}` ``，同一键后写入者胜出，因此重读日志不会重复计费。
 
+### 思考 token 为什么可能是 0
+
+这是 **DSH 版本之间的差异**，不是本工具的 bug，也不是模型没产生思考。
+
+DeepSeek adapter 支持两套 wire protocol，用量字段完全不同：
+
+| protocol | 端点 | usage 里的字段 |
+| --- | --- | --- |
+| `chat-completions`（旧版唯一） | `/chat/completions` | `prompt_tokens` / `completion_tokens` / `prompt_tokens_details.cached_tokens` / **`completion_tokens_details.reasoning_tokens`** |
+| `messages`（0.1.6 新增，且是默认） | `/anthropic/v1/messages` | `input_tokens` / `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens` —— **结构上没有 reasoning 字段** |
+
+`@deepseek-ai/dsh-llm-deepseek` 的 `protocol` 在 0.1.6-alpha.2 里是
+`z.union(["chat-completions","messages"]).default("messages")`；0.1.0-rc.6 与
+v0.1.1-rc.2 根本没有 `messages` 实现。于是：
+
+| DSH 版本 | 本机对应会话 | 写进 `assistant/message` 的 usage | 思考 |
+| --- | --- | --- | --- |
+| 0.1.0-rc.6 / v0.1.1-rc.2（8 月） | `deepseek-v4-*` 的旧会话 | `inputTokens` / `outputTokens` / `cacheReadTokens` / **`reasoningTokens`** | 有值 |
+| 0.1.6-alpha.2（9-17 升级） | 之后新建的会话 | `inputTokens` / `outputTokens` / `cacheReadTokens` / `cacheWriteTokens` / `totalTokens` | 结构上就没有 |
+
+本机正是这样：`deepseek-v4-flash-vision-exp` 与 `deepseek-v4-pro` 的 2380 条请求条条带
+`reasoningTokens`，而 0.1.6 下新建会话（模型名 `deepseek-flash`）的 321 条一条都没有。
+字段缺失时本工具无从得知，`O/R`（思考）一律计 0，**不会去估算**；`O` 与 `O/T` 仍然是真实
+的 completion 数。
+
+想让新版把思考也写下来，把 provider 切回 chat-completions 即可（这是 DSH 侧配置，不是
+本工具的开关）：
+
+```yaml
+# ~/.dsh/settings.yaml
+llm-deepseek:
+  protocol: chat-completions
+```
+
+代价是换成 OpenAI 兼容端点，文件/图片等能力按该协议走；是否值得由你决定。
+
 ## 日志格式
 
 会话日志是**追加写入的一串独立 zstd 帧**：首帧是会话头，后续帧是事件。Node 的 `zstdDecompressSync` 只解第一帧，流式解码器在第二帧会以 `ZSTD_error_prefix_unknown` 报错，因此读取时按 zstd 魔数逐帧定位、逐帧解码。

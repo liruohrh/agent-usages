@@ -434,6 +434,7 @@ export const dshAgent: AgentAdapter = {
   load,
   notes: () => [
     '逐请求用量来自 harness 自己写的会话日志：每个 assistant/message 事件都带该步的 usage，因此不需要安装任何插件。',
+    'reasoningTokens 是可选字段：新版 DSH 默认的 messages 协议不带它，此时思考 token 计 0，工具不会估算。',
     '会话日志是追加写的多帧 zstd；正在写入的会话最后几帧可能读不全，重跑即可补齐。',
     '会话标题与创建时间优先取 storages/session_projcache.json，子代理关系只在会话日志首帧。',
     '本工具不读取任何第三方插件的落盘数据。',

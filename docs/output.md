@@ -49,7 +49,7 @@
 
 **思考 token 是输出的一部分，不是额外部分**：供应商把它报在 completion 计数里面，所以「输出合计」等于供应商自己的 completion 数，思考在其中只计一次。把它单独列出是为了看清推理占比，而不是为了再加一遍。`usage --json` 的 `totals.tokenBreakdown` 给出同一组数字。
 
-**`O/R` 可能是 0**：推理 token 由 provider 上报，harness 没拿到时就不会写进日志（见 [DSH 适配器](agents/dsh.md)），此时思考计 0，但 `O` 与 `O/T` 仍是真实的 completion 数。工具不会去估算。
+**`O/R` 可能是 0**：推理 token 由 provider 上报，新版 DSH 默认的 `messages` 协议不带这个字段（见 [DSH 适配器](agents/dsh.md)），此时思考计 0，但 `O` 与 `O/T` 仍是真实的 completion 数。工具不会去估算。
 
 各桶如何换算成钱，见 [DeepSeek 价格表](pricing/deepseek.md)。
 
