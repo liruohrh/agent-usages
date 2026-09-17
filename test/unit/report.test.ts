@@ -248,7 +248,7 @@ describe('dimensions', () => {
   });
 });
 
-describe('subagent folding', () => {
+describe('subagent presentation modes', () => {
   it('folds descendants into the session that spawned them by default', () => {
     const result = runQuery(fixture(), query({ dimension: 'session' }), context);
     const parent = result.projects[0]?.sessionReports?.[0];
@@ -256,15 +256,45 @@ describe('subagent folding', () => {
     expect(parent?.isSubagent).toBe(false);
     expect(parent?.requests).toBe(4);
     expect(parent?.cost.total).toBe('144.0000');
-    expect(result.subagents.split).toBe(false);
-    expect(result.subagents.rows).toBe(3);
-    expect(result.subagents.cost.total).toBe('108.0000');
+    expect(result.subagentMode).toBe('total');
+    expect(result.subagents.sessions).toBe(3);
     // 4 x 36 for alpha's tree, 9 for beta.
     expect(result.projects.find((entry) => entry.name === 'beta')?.cost.total).toBe('9.0000');
   });
 
-  it('splits subagents into their own rows on request', () => {
-    const result = runQuery(fixture(), query({ dimension: 'session', includeSubagents: false }), context);
+  it('adds the by-scope breakdown without changing any row', () => {
+    const plain = runQuery(fixture(), query({ dimension: 'session' }), context);
+    const scoped = runQuery(fixture(), query({ dimension: 'session', subagentMode: 'subagents' }), context);
+    expect(plain.scopeBreakdown).toBeUndefined();
+    const breakdown = scoped.scopeBreakdown;
+    expect(breakdown).toBeDefined();
+    // alpha's own session (36), beta's (9), and the three subagents (36 each).
+    expect(breakdown?.own.cost.total).toBe('45.0000');
+    expect(breakdown?.subagents.cost.total).toBe('108.0000');
+    expect(breakdown?.total.cost.total).toBe('153.0000');
+    expect(breakdown?.own.sessions).toBe(2);
+    expect(breakdown?.subagents.sessions).toBe(3);
+    expect(breakdown?.total.sessions).toBe(5);
+    // The rows themselves are untouched.
+    expect(scoped.projects[0]?.sessionReports).toHaveLength(1);
+  });
+
+  it('makes own plus subagents equal the total, in every figure', () => {
+    const result = runQuery(fixture(), query({ subagentMode: 'detail' }), context);
+    const { own, subagents, total } = result.scopeBreakdown ?? { own: undefined, subagents: undefined, total: undefined };
+    expect(own).toBeDefined();
+    expect(subagents).toBeDefined();
+    expect(total).toBeDefined();
+    expect(own!.sessions + subagents!.sessions).toBe(total!.sessions);
+    expect(own!.requests + subagents!.requests).toBe(total!.requests);
+    expect(Number(own!.cost.total) + Number(subagents!.cost.total)).toBeCloseTo(Number(total!.cost.total), 6);
+    for (const counter of ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'] as const) {
+      expect(own!.tokens[counter] + subagents!.tokens[counter]).toBe(total!.tokens[counter]);
+    }
+  });
+
+  it('lists every subagent on its own row in detail mode', () => {
+    const result = runQuery(fixture(), query({ dimension: 'session', subagentMode: 'detail' }), context);
     const alpha = result.projects.find((entry) => entry.name === 'alpha');
     const rows = alpha?.sessionReports ?? [];
     expect(rows).toHaveLength(4);
@@ -275,23 +305,35 @@ describe('subagent folding', () => {
     expect(alpha?.sessions).toBe(4);
   });
 
-  it('covers exactly the same usage in both modes', () => {
-    const folded = runQuery(fixture(), query({ dimension: 'session' }), context);
-    const split = runQuery(fixture(), query({ dimension: 'session', includeSubagents: false }), context);
-    expect(split.cost.total).toBe(folded.cost.total);
-    expect(split.requests).toBe(folded.requests);
-    expect(split.subagents.cost.total).toBe(folded.subagents.cost.total);
+  it('keeps the grand total identical across all three modes', () => {
+    // Only the presentation changes; the same usage is being reported.
+    const totals = (['total', 'subagents', 'detail'] as const).map(
+      (subagentMode) => runQuery(fixture(), query({ dimension: 'session', subagentMode }), context),
+    );
+    for (const result of totals) {
+      expect(result.cost.total).toBe('153.0000');
+      expect(result.requests).toBe(5);
+      expect(result.tokens.output).toBe(5_000_000);
+    }
   });
 
-  it('keeps a named session subtree in scope in either mode', () => {
-    for (const includeSubagents of [true, false]) {
-      const result = runQuery(fixture(), query({ sessions: [SID.parent], includeSubagents }), context);
+  it('keeps a named session subtree in scope in every mode', () => {
+    for (const subagentMode of ['total', 'subagents', 'detail'] as const) {
+      const result = runQuery(fixture(), query({ sessions: [SID.parent], subagentMode }), context);
       expect(result.requests).toBe(4);
-      expect(result.subagents.rows).toBe(3);
+      expect(result.subagents.sessions).toBe(3);
+      if (subagentMode === 'total') {
+        // Ask for the breakdown and you get it; ask for nothing and it is absent.
+        expect(result.scopeBreakdown).toBeUndefined();
+      } else {
+        expect(result.scopeBreakdown?.subagents.requests).toBe(3);
+        expect(result.scopeBreakdown?.own.sessions).toBe(1);
+      }
     }
-    const child = runQuery(fixture(), query({ sessions: [SID.childA] }), context);
+    const child = runQuery(fixture(), query({ sessions: [SID.childA], subagentMode: 'subagents' }), context);
     expect(child.requests).toBe(2);
-    expect(child.subagents.rows).toBe(2);
+    expect(child.subagents.sessions).toBe(2);
+    expect(child.scopeBreakdown?.subagents.sessions).toBe(2);
   });
 });
 

@@ -94,6 +94,19 @@ function compact(value: number): string {
   return `${(value / 1_000_000_000).toFixed(2)}B`;
 }
 
+/**
+ * A scope's share of a total, as a rounded percentage.
+ *
+ * Computed from the exact decimal strings rather than from floats, so a share of
+ * a very small total does not come out as `NaN` or a negative zero.
+ */
+function share(part: string, whole: string): string {
+  const numerator = Number(part);
+  const denominator = Number(whole);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) return '—';
+  return `${((numerator / denominator) * 100).toFixed(1)}%`;
+}
+
 /** Render an exact decimal amount with a currency symbol. */
 function money(amount: string, symbol: string): string {
   const [whole = '0', fraction = ''] = amount.split('.');
@@ -275,16 +288,36 @@ export function formatUsageReport(
   );
 
   const scope: string[] = [];
-  if (result.subagents.split) {
-    scope.push(`会话口径  不含子代理（${count(result.subagents.rows)} 个子代理会话单独列出，父会话为其自身用量）`);
-  } else {
+  if (result.subagentMode === 'detail') {
+    scope.push(`会话口径  每个子代理单独一行（${count(result.subagents.sessions)} 个子代理会话；父会话行为其自身用量）`);
+  } else if (result.subagents.sessions > 0) {
     scope.push(
-      result.subagents.rows > 0
-        ? `会话口径  含子代理（${count(result.subagents.rows)} 个子代理会话已并入其父会话，另计 ${money(result.subagents.cost.total, symbol)}）`
-        : '会话口径  含子代理',
+      `会话口径  含子代理（${count(result.subagents.sessions)} 个子代理会话已并入其父会话，由 ${count(result.subagents.parents)} 个会话派生）`,
     );
+  } else {
+    scope.push('会话口径  含子代理');
   }
   sections.push(['总量:', ...scope, ...tokenLines(result.requests, result.tokens)].join('\n'));
+
+  // The three scopes answer the question the single total cannot: how much of it
+  // came from subagents at all.
+  if (result.scopeBreakdown !== undefined) {
+    const { own, subagents, total } = result.scopeBreakdown;
+    sections.push(
+      [
+        '按范围:',
+        table(
+          ['范围', '会话', '请求', '输入合计', '输出合计', '费用', '占比'],
+          [
+            ['主会话自身', count(own.sessions), count(own.requests), compact(tokenBreakdown(own.tokens).inputTotal), compact(tokenBreakdown(own.tokens).outputTotal), money(own.cost.total, symbol), share(own.cost.total, total.cost.total)],
+            ['全部子代理', count(subagents.sessions), count(subagents.requests), compact(tokenBreakdown(subagents.tokens).inputTotal), compact(tokenBreakdown(subagents.tokens).outputTotal), money(subagents.cost.total, symbol), share(subagents.cost.total, total.cost.total)],
+            ['总计', count(total.sessions), count(total.requests), compact(tokenBreakdown(total.tokens).inputTotal), compact(tokenBreakdown(total.tokens).outputTotal), money(total.cost.total, symbol), '100%'],
+          ],
+          ['left', 'right', 'right', 'right', 'right', 'right', 'right'],
+        ),
+      ].join('\n'),
+    );
+  }
 
   sections.push(
     ['费用明细:', ...costLines(result.cost, result.components, symbol, result.currency, result.currencyRate)].join('\n'),
@@ -319,7 +352,7 @@ export function formatUsageReport(
             '合计',
             '',
             count(result.projects.reduce((total, project) => total + project.activeSessions, 0)),
-            count(result.subagents.rows),
+            result.subagents.sessions > 0 ? count(result.subagents.sessions) : '—',
             count(result.requests),
             compact(result.tokens.input),
             compact(result.tokens.cacheRead),
@@ -468,14 +501,20 @@ export function usageToJson(result: UsageResult, engine: PricingEngine): unknown
     },
     currency: result.currency,
     currencyRate: result.currencyRate,
+    subagentMode: result.subagentMode,
     subagents: {
-      split: result.subagents.split,
-      rows: result.subagents.rows,
+      sessions: result.subagents.sessions,
       parents: result.subagents.parents,
-      requests: result.subagents.requests,
-      tokens: result.subagents.tokens,
-      cost: result.subagents.cost,
     },
+    ...(result.scopeBreakdown === undefined
+      ? {}
+      : {
+          scopeBreakdown: {
+            own: scopeToJson(result.scopeBreakdown.own),
+            subagents: scopeToJson(result.scopeBreakdown.subagents),
+            total: scopeToJson(result.scopeBreakdown.total),
+          },
+        }),
     totals: {
       requests: result.requests,
       unpriced: result.unpriced,
@@ -540,6 +579,17 @@ export function usageToJson(result: UsageResult, engine: PricingEngine): unknown
           }),
     })),
     warnings: result.warnings,
+  };
+}
+
+/** One scope row as JSON, with the token roll-up included. */
+function scopeToJson(scope: import('./report.ts').ScopeTotals): Record<string, unknown> {
+  return {
+    sessions: scope.sessions,
+    requests: scope.requests,
+    tokens: scope.tokens,
+    tokenBreakdown: tokenBreakdown(scope.tokens),
+    cost: scope.cost,
   };
 }
 

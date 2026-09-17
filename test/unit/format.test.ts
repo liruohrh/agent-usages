@@ -62,14 +62,8 @@ function report(overrides: Partial<UsageResult> = {}): UsageResult {
     currency: TEST_CURRENCY.code,
     currencyRate: 1,
     pricingProvider: 'stub',
-    subagents: {
-      split: false,
-      rows: 0,
-      parents: 0,
-      requests: 0,
-      tokens: emptyBuckets(),
-      cost: cost('0.0000'),
-    },
+    subagentMode: 'total',
+    subagents: { sessions: 0, parents: 0 },
     requests: 0,
     unpriced: 0,
     tokens: emptyBuckets(),
@@ -382,6 +376,69 @@ describe('table totals rows', () => {
   });
 });
 
+describe('the by-scope table', () => {
+  /** A result carrying a scope breakdown. */
+  function scoped(own: [string, number], subagents: [string, number]): UsageResult {
+    const total = (Number(own[0]) + Number(subagents[0])).toFixed(4);
+    return report({
+      subagentMode: 'subagents',
+      subagents: { sessions: subagents[1], parents: 1 },
+      cost: cost(total),
+      scopeBreakdown: {
+        own: { sessions: 1, requests: own[1], tokens: { ...emptyBuckets(), input: 1_000, output: 100 }, cost: cost(own[0]) },
+        subagents: {
+          sessions: subagents[1],
+          requests: subagents[1],
+          tokens: { ...emptyBuckets(), input: 2_000, output: 200 },
+          cost: cost(subagents[0]),
+        },
+        total: {
+          sessions: 1 + subagents[1],
+          requests: own[1] + subagents[1],
+          tokens: { ...emptyBuckets(), input: 3_000, output: 300 },
+          cost: cost(total),
+        },
+      },
+    });
+  }
+
+  it('shows the three scopes with their share of the total', () => {
+    const text = formatUsageReport(scoped(['75.0000', 3], ['25.0000', 2]), engine, '¤');
+    expect(text).toContain('按范围:');
+    expect(text).toContain('主会话自身');
+    expect(text).toContain('全部子代理');
+    expect(text).toContain('总计');
+    expect(text).toContain('¤75.00');
+    expect(text).toContain('¤25.00');
+    expect(text).toContain('¤100.00');
+    // Shares are computed from the exact amounts, not from the rounded cells.
+    expect(text).toContain('75.0%');
+    expect(text).toContain('25.0%');
+    expect(text).toContain('100%');
+  });
+
+  it('is absent unless the query asked for it', () => {
+    expect(formatUsageReport(report(), engine, '¤')).not.toContain('按范围:');
+  });
+
+  it('renders a dash instead of a share when the total is zero', () => {
+    const text = formatUsageReport(scoped(['0.0000', 0], ['0.0000', 0]), engine, '¤');
+    expect(text).toContain('按范围:');
+    // A 0/0 share must not print NaN.
+    expect(text).not.toContain('NaN');
+    expect(text).toContain('—');
+  });
+
+  it('describes the mode in the scope line', () => {
+    expect(formatUsageReport(report({ subagentMode: 'detail', subagents: { sessions: 2, parents: 1 } }), engine, '¤')).toContain(
+      '每个子代理单独一行',
+    );
+    expect(formatUsageReport(report({ subagents: { sessions: 2, parents: 1 } }), engine, '¤')).toContain(
+      '2 个子代理会话已并入其父会话',
+    );
+  });
+});
+
 describe('usageToJson', () => {
   it('carries agent, source, and pricing provider for provenance', () => {
     const json = usageToJson(report(), engine) as Record<string, unknown>;
@@ -406,6 +463,34 @@ describe('usageToJson', () => {
       outputTotal: 30,
       total: 60,
     });
+  });
+
+  it('carries the scope breakdown with each scope token roll-up', () => {
+    const result = report({
+      subagentMode: 'detail',
+      subagents: { sessions: 3, parents: 1 },
+      scopeBreakdown: {
+        own: { sessions: 1, requests: 2, tokens: { ...emptyBuckets(), input: 10, output: 4, reasoning: 1 }, cost: cost('1.0000') },
+        subagents: { sessions: 3, requests: 5, tokens: { ...emptyBuckets(), input: 20, output: 8 }, cost: cost('2.0000') },
+        total: { sessions: 4, requests: 7, tokens: { ...emptyBuckets(), input: 30, output: 12, reasoning: 1 }, cost: cost('3.0000') },
+      },
+    });
+    const json = usageToJson(result, engine) as {
+      subagentMode: string;
+      subagents: { sessions: number; parents: number };
+      scopeBreakdown: Record<string, { requests: number; tokenBreakdown: Record<string, number> }>;
+    };
+    expect(json.subagentMode).toBe('detail');
+    expect(json.subagents.sessions).toBe(3);
+    expect(json.scopeBreakdown['own']?.requests).toBe(2);
+    expect(json.scopeBreakdown['subagents']?.tokenBreakdown['inputTotal']).toBe(20);
+    expect(json.scopeBreakdown['total']?.tokenBreakdown['outputTotal']).toBe(12);
+  });
+
+  it('omits the scope breakdown unless it was computed', () => {
+    const json = usageToJson(report(), engine) as Record<string, unknown>;
+    expect(json).not.toHaveProperty('scopeBreakdown');
+    expect(json['subagentMode']).toBe('total');
   });
 
   it('emits ISO timestamps beside the epoch values', () => {

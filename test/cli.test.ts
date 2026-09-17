@@ -245,11 +245,47 @@ describe('usage', () => {
     expect(stdout).toContain('费用明细');
   });
 
-  it('accepts --subagents in either mode', async () => {
-    for (const [args, split] of [[['usage', '--session', '--json'], false], [['usage', '--session', '--subagents', '--json'], true]] as const) {
-      const parsed = JSON.parse((await cli([...args])).stdout) as { subagents: { split: boolean } };
-      expect(parsed.subagents.split).toBe(split);
+  it('distinguishes the three subagent modes', async () => {
+    const cases = [
+      [['usage', '--session', '--json'], 'total', false],
+      [['usage', '--session', '--subagent', '--json'], 'subagents', true],
+      [['usage', '--session', '--subagents', '--json'], 'detail', true],
+    ] as const;
+    for (const [args, mode, hasBreakdown] of cases) {
+      const parsed = JSON.parse((await cli([...args])).stdout) as {
+        subagentMode: string;
+        scopeBreakdown?: { own: { requests: number }; subagents: { requests: number }; total: { requests: number } };
+      };
+      expect(parsed.subagentMode).toBe(mode);
+      expect(parsed.scopeBreakdown !== undefined).toBe(hasBreakdown);
+      if (hasBreakdown) {
+        // own + subagents must equal total.
+        expect(parsed.scopeBreakdown!.own.requests + parsed.scopeBreakdown!.subagents.requests).toBe(
+          parsed.scopeBreakdown!.total.requests,
+        );
+      }
     }
+  });
+
+  it('lists every subagent row only in detail mode', async () => {
+    const rows = async (args: string[]): Promise<number> => {
+      const parsed = JSON.parse((await cli(args)).stdout) as {
+        projects: { sessionReports?: { isSubagent: boolean }[] }[];
+      };
+      return (parsed.projects[0]?.sessionReports ?? []).filter((row) => row.isSubagent).length;
+    };
+    expect(await rows(['usage', '--session', '--json'])).toBe(0);
+    expect(await rows(['usage', '--session', '--subagent', '--json'])).toBe(0);
+    expect(await rows(['usage', '--session', '--subagents', '--json'])).toBe(0);
+  });
+
+  it('renders the by-scope table when asked for it', async () => {
+    const text = (await cli(['usage', '--subagent'])).stdout;
+    expect(text).toContain('按范围:');
+    expect(text).toContain('主会话自身');
+    expect(text).toContain('全部子代理');
+    const plain = (await cli(['usage'])).stdout;
+    expect(plain).not.toContain('按范围:');
   });
 
   it('exits 2 when the filter matches no usage', async () => {

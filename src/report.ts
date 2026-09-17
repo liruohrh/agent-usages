@@ -18,18 +18,28 @@ import { inRange, type TimeRange } from './timerange.ts';
 /** Which aggregation the user asked for. */
 export type UsageDimension = 'all' | 'project' | 'session';
 
+/**
+ * How subagent sessions are presented.
+ *
+ * The three values are cumulative: `subagents` adds the by-scope breakdown,
+ * `detail` additionally splits every subagent into its own row.
+ */
+export type SubagentMode = 'total' | 'subagents' | 'detail';
+
 /** Filters applied before aggregation. */
 export interface UsageQuery {
   /** Selected dimension. */
   dimension: UsageDimension;
   /**
-   * Whether a session's total includes the usage of the sessions it spawned.
+   * How to treat the sessions another session spawned.
    *
-   * `true` (the default) answers "what did this session cost me", folding every
-   * subagent record into the session that spawned it. `false` reports the
-   * session's own records and each subagent as separate rows.
+   * - `total` (the default) — one number per session, subagents folded in. This
+   *   answers "what did this session cost me".
+   * - `subagents` — also break the result down by scope: the sessions a human
+   *   started, all subagents together, and the two combined.
+   * - `detail` — additionally give every subagent its own row.
    */
-  includeSubagents?: boolean | undefined;
+  subagentMode?: SubagentMode | undefined;
   /** Project selectors: project id, name, path, or a `*` glob. */
   projects?: readonly string[] | undefined;
   /** Session selectors: session id, or any unambiguous id prefix. */
@@ -140,20 +150,29 @@ export interface ProjectReport {
   sessionReports?: SessionReport[] | undefined;
 }
 
-/** How subagent sessions were treated, and what they contributed on their own. */
-export interface SubagentScope {
-  /** `true` when subagents are listed separately, `false` when folded in. */
-  split: boolean;
-  /** Subagent sessions in scope. */
-  rows: number;
-  /** Sessions in scope that spawned at least one subagent. */
-  parents: number;
-  /** Requests made by subagent sessions. */
+/** One or more sessions plus everything they spawned, aggregated. */
+export interface ScopeTotals {
+  /** Sessions counted. */
+  sessions: number;
+  /** Requests billed. */
   requests: number;
-  /** Token totals of subagent sessions. */
+  /** Token totals. */
   tokens: TokenTotals;
-  /** Cost of subagent sessions. */
+  /** Cost totals. */
   cost: CostTotals;
+}
+
+/**
+ * The same usage seen three ways: sessions a human started, every subagent
+ * together, and the two combined. `own` + `subagents` === `total`.
+ */
+export interface ScopeBreakdown {
+  /** Sessions that no other session spawned. */
+  own: ScopeTotals;
+  /** Every subagent session, whether or not its parent is in scope. */
+  subagents: ScopeTotals;
+  /** Everything in scope. */
+  total: ScopeTotals;
 }
 
 /** The complete answer to a {@link UsageQuery}. */
@@ -173,7 +192,14 @@ export interface UsageResult {
   /** Pricing provider that supplied the rates. */
   pricingProvider: string;
   /** How subagents were treated. */
-  subagents: SubagentScope;
+  subagentMode: SubagentMode;
+  /** How many subagent sessions were in scope, and how many sessions spawned them. */
+  subagents: { sessions: number; parents: number };
+  /**
+   * Usage split by scope. Present when the query asked for it
+   * ({@link UsageQuery.subagentMode} is `subagents` or `detail`).
+   */
+  scopeBreakdown?: ScopeBreakdown | undefined;
   /** Requests billed. */
   requests: number;
   /** Records nothing could price. */
@@ -436,6 +462,22 @@ function sessionReport(
   return row;
 }
 
+/** Aggregate a set of in-scope sessions into one scope row. */
+function scopeTotals(
+  entries: readonly ScopedSession[],
+  engine: PricingEngine,
+  currencyRate: number,
+): ScopeTotals {
+  const records = entries.flatMap((entry) => entry.records);
+  const summary = costOf(records, engine, currencyRate);
+  return {
+    sessions: entries.length,
+    requests: summary.priced + summary.unpriced,
+    tokens: sumOf(records),
+    cost: summary.totals,
+  };
+}
+
 /** Smallest non-null value produced by `pick`, or `null`. */
 function minOf<T>(items: readonly T[], pick: (item: T) => number | null): number | null {
   let best: number | null = null;
@@ -491,7 +533,13 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   for (const error of projectSelection?.errors ?? []) warnings.push(error);
   for (const error of sessionSelection?.errors ?? []) warnings.push(error);
 
-  const includeSubagents = query.includeSubagents ?? true;
+  const mode = query.subagentMode ?? 'total';
+  // `detail` implies the by-scope breakdown: it is the same question asked with
+  // more rows, so the summary above it would otherwise contradict itself.
+  const wantsBreakdown = mode !== 'total';
+  // `detail` shows every subagent on its own; `total` and `subagents` report one
+  // row per session a human started, with subagents folded into it.
+  const splitRows = mode === 'detail';
   const selectedProjects = dataset.projects.filter(
     (project) => projectSelection === undefined || projectSelection.keys.has(project.id),
   );
@@ -525,7 +573,7 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
     const ownById = new Map(own.map((row) => [row.session.id, row]));
     const rows: ScopedSession[] = [];
     for (const row of own) {
-      if (includeSubagents) {
+      if (!splitRows) {
         // Folded: only the top of each subtree gets a row, and it carries the
         // whole subtree.
         const parentInScope = row.session.parentId !== null && ownById.has(row.session.parentId);
@@ -539,7 +587,7 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
         rows.push({ session: row.session, records });
         continue;
       }
-      // Split: every session stands alone, so a subagent's records are not also
+      // Detail: every session stands alone, so a subagent's records are not also
       // merged into an ancestor's row — that keeps both modes' totals identical.
       rows.push({ session: row.session, records: [...row.records] });
     }
@@ -559,8 +607,10 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
       id: project.id,
       name: project.name,
       path: project.path,
-      sessions: includeSubagents ? ownRows.length : projectScope.length,
-      activeSessions: includeSubagents ? activeRows.length : projectScope.filter((entry) => entry.records.length > 0).length,
+      sessions: splitRows ? projectScope.length : ownRows.length,
+      activeSessions: splitRows
+        ? projectScope.filter((entry) => entry.records.length > 0).length
+        : activeRows.length,
       subagentSessions: projectScope.filter((entry) => entry.session.isSubagent).length,
       requests: summary.priced + summary.unpriced,
       firstUsage: minOf(activeRows, (entry) => entry.records[0]?.time ?? null),
@@ -582,7 +632,7 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
             project,
             engine,
             query.currencyRate,
-            includeSubagents ? collectDescendantIds(dataset, session.id).size : 0,
+            splitRows ? 0 : collectDescendantIds(dataset, session.id).size,
             warning,
           ),
         );
@@ -604,14 +654,22 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   allRecords.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
   const mergedAll = costOf(allRecords, engine, query.currencyRate);
 
-  // Subagent totals always describe the subagent sessions themselves, whether or
-  // not their usage was folded into an ancestor's reported row.
+  // The by-scope breakdown always describes the records themselves — the sessions
+  // a human started, every subagent, and the two together — so it stays true
+  // whether or not those records were folded into a parent's reported row.
+  const ownSessions = inScope.filter((entry) => !entry.session.isSubagent);
   const subagentSessions = inScope.filter((entry) => entry.session.isSubagent);
-  const subagentSummary = costOfGrouped(subagentSessions.map((entry) => entry.records), engine, query.currencyRate);
   const parents = new Set<string>();
   for (const { session } of inScope) {
     if (session.parentId !== null) parents.add(session.parentId);
   }
+  const scopeBreakdown = wantsBreakdown
+    ? {
+        own: scopeTotals(ownSessions, engine, query.currencyRate),
+        subagents: scopeTotals(subagentSessions, engine, query.currencyRate),
+        total: scopeTotals(inScope, engine, query.currencyRate),
+      }
+    : undefined;
 
   const result: UsageResult = {
     agent: dataset.agent,
@@ -621,14 +679,9 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
     currency: query.currency,
     currencyRate: query.currencyRate,
     pricingProvider: context.pricingProvider,
-    subagents: {
-      split: !includeSubagents,
-      rows: subagentSessions.length,
-      parents: parents.size,
-      requests: subagentSummary.priced + subagentSummary.unpriced,
-      tokens: sumOf(subagentSessions.flatMap((entry) => entry.records)),
-      cost: subagentSummary.totals,
-    },
+    subagentMode: mode,
+    subagents: { sessions: subagentSessions.length, parents: parents.size },
+    ...(scopeBreakdown === undefined ? {} : { scopeBreakdown }),
     requests: mergedAll.priced + mergedAll.unpriced,
     unpriced: mergedAll.unpriced,
     tokens: sumOf(allRecords),

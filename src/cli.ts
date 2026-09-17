@@ -45,6 +45,7 @@ interface UsageOptions extends GlobalOptions {
   all?: boolean;
   project?: boolean;
   session?: boolean;
+  subagent?: boolean;
   subagents?: boolean;
   projectFilter?: string[];
   sessionFilter?: string[];
@@ -177,7 +178,10 @@ async function runUsage(spec: string | undefined, options: UsageOptions): Promis
     // The provider's own currency unless the user renamed it; `--currency-rate`
     // is what actually converts, so a mismatched label is warned about below.
     currency: (options.currency ?? currency).toUpperCase(),
-    includeSubagents: options.subagents !== true,
+    // `--subagents` implies the by-scope breakdown, because splitting every
+    // subagent into its own row without saying what they add up to would be
+    // strictly less informative than the default.
+    subagentMode: options.subagents === true ? 'detail' : options.subagent === true ? 'subagents' : 'total',
     ...(options.projectFilter === undefined ? {} : { projects: options.projectFilter }),
     ...(options.sessionFilter === undefined ? {} : { sessions: options.sessionFilter }),
   };
@@ -198,6 +202,7 @@ async function runUsage(spec: string | undefined, options: UsageOptions): Promis
 
 /** Options accepted by `session list`. */
 interface SessionListOptions extends GlobalOptions {
+  subagent?: boolean;
   subagents?: boolean;
   projectFilter?: string[];
   sessionFilter?: string[];
@@ -336,7 +341,8 @@ export function buildProgram(): Command {
       .option('--all', '只输出全部维度的汇总（默认）')
       .option('--project', '按项目维度汇总')
       .option('--session', '按会话维度汇总（含每个项目下的会话明细）')
-      .option('--subagents', '将子代理单独列出（默认并入其父会话）')
+      .option('--subagent', '额外按范围汇总：主会话自身 / 全部子代理 / 总计（默认全部并入总量）')
+      .option('--subagents', '在按范围汇总之外，把每个子代理也单独列成一行')
       .option('-p, --project-filter <selector>', '只统计指定项目：id、名称或路径（支持 * 通配；可重复）', collect)
       .option('-s, --session-filter <selector>', '只统计指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；支持 * 通配；可重复）', collect)
       .option('--today', '时间范围：今天')

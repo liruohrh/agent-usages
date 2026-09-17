@@ -503,13 +503,39 @@ describe('cost from real ledger data', () => {
   it('folds subagents by default and splits them on request, with equal totals', async () => {
     const data = await dshAgent.load({ home });
     const folded = runQuery(data, query({ dimension: 'session', projects: ['example-app'] }), context);
-    const split = runQuery(data, query({ dimension: 'session', projects: ['example-app'], includeSubagents: false }), context);
+    const split = runQuery(
+      data,
+      query({ dimension: 'session', projects: ['example-app'], subagentMode: 'detail' }),
+      context,
+    );
     expect(Number(folded.cost.total)).toBe(Number(split.cost.total));
     const foldedRows = folded.projects.find((project) => project.name === 'example-app')?.sessionReports ?? [];
     const splitRows = split.projects.find((project) => project.name === 'example-app')?.sessionReports ?? [];
     expect(foldedRows.every((row) => !row.isSubagent)).toBe(true);
     expect(splitRows.filter((row) => row.isSubagent)).toHaveLength(3);
     expect(splitRows.find((row) => row.id === SID.spanning)?.cost.total).toBe('33.2100');
+  });
+
+  it('breaks the real numbers down by scope', async () => {
+    const data = await dshAgent.load({ home });
+    const result = runQuery(data, query({ projects: ['example-app'], subagentMode: 'subagents' }), context);
+    const breakdown = result.scopeBreakdown;
+    expect(breakdown).toBeDefined();
+    // Two sessions a human started (`spanning` and `current`), three subagents.
+    // `spanning`'s own four requests cost 33.21; `current`'s single request costs
+    // 0.002 + 0.5 + 0.8 = 1.302; each subagent's off-peak request costs 5.02.
+    expect(breakdown?.own.sessions).toBe(2);
+    expect(breakdown?.subagents.sessions).toBe(3);
+    expect(breakdown?.own.requests).toBe(5);
+    expect(breakdown?.subagents.requests).toBe(3);
+    expect(breakdown?.own.cost.total).toBe('34.5120');
+    expect(breakdown?.subagents.cost.total).toBe('15.0600');
+    expect(breakdown?.total.cost.total).toBe('49.5720');
+    // The breakdown must not disagree with the project it describes.
+    expect(Number(breakdown?.own.cost.total) + Number(breakdown?.subagents.cost.total)).toBeCloseTo(
+      Number(breakdown?.total.cost.total),
+      6,
+    );
   });
 });
 
