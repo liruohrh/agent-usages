@@ -1,0 +1,27 @@
+{
+  "name": "dsh-usage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "计算 DeepSeek Harness (DSH) 会话的 token 消耗与费用：按全部 / 项目 / 会话维度统计，支持时间范围与 DeepSeek 分时段(峰谷)定价",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "bin": {
+    "dsh-usage": "./bin/dsh-usage.js"
+  },
+  "scripts": {
+    "cli": "node src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
