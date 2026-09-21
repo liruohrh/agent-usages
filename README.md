@@ -72,7 +72,7 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 
 ## 命令
 
-### `usage [range]`
+### `usage`
 
 计算 token 消耗与费用。
 
@@ -90,6 +90,7 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 | `--currency <code>` | 显示货币；默认按系统语言（中文 CNY、英文 USD…），可指定任意币种（用内置汇率表折算） |
 | `--currency-rate <rate>` | 1 单位计价货币 = <rate> 单位显示货币；只给汇率不给币种时照常折算但不显示货币 |
 | `--agent` / `--home` / `--provider` / `--json` | 见上 |
+| `--no-update` | 本次不检查价格表/汇率更新 |
 
 ### `session list`
 
@@ -102,6 +103,15 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 打印内置价格表：每个生效区间的峰谷时段、单价、来源链接与说明。**不会**读取任何数据，也不需要 `--home`。加 `--all` 列出全部计价来源。价格明细与来源见 [DeepSeek 价格表](docs/pricing/deepseek.md)。
 
 ### `agents`
+
+### `update`
+
+更新价格表与汇率：`agent-usages update [all|prices|rates] [--force] [--write-config]`，默认 `all`。
+细节见 [配置与更新](#配置与更新)。
+
+### `check-config`
+
+校验 `config/pricing.json` 与 `config/rates.json`，提交前跑一次；`--json` 输出结构化结果。
 
 列出支持的 agent 与计价来源：各自的 id、默认数据目录、认哪些环境变量，以及读取该 agent 数据时需要注意的事项。支持 `--json`。
 
@@ -216,6 +226,58 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 - 只有一个会话的项目、只有一个子代理的会话会省掉重复的聚合行。
 - 指标字段：`I/M` 未命中输入、`I/C` 缓存命中（后跟 `/ 缓存命中比`）、`I/W` 缓存写入（仅在不为 0 时出现）、`I/T` 输入合计、`O` 输出（非思考）、`R` 思考（后跟 `/ 思考占比`）、`O/T` 输出合计、`T` Token 总计、`Q` 请求数、行尾是费用总额。
 - 每一项都带自己的费用：`I/M`、`I/C`、`I/W` 是三个独立计费项，`O` 与 `R` 是输出账单的拆分（在单价已知的那一段里按 token 占比分），`I/T`、`O/T` 是组成部分之和——所以 `I/T + O/T` 永远等于行尾总额，而且上下各行相加也永远相等。
+
+---
+
+## 配置与更新
+
+价格表、汇率表都是**仓库里的数据文件**，不是代码：改价格只要提交 `config/pricing.json`，不用发版。
+
+| 文件 | 内容 |
+| --- | --- |
+| `config/pricing.json` | 各厂商价格表（区间、峰谷、单价、来源 URL、说明）；一个区间只写币种代码，符号内置 |
+| `config/rates.json` | 汇率表（基准币种 + 33 个币种）与在线汇率源清单 |
+
+**用户自己的覆盖**放在 `~/.config/agent-usages/config.json`（Windows 用 `%APPDATA%`，也可以由 `XDG_CONFIG_HOME` 指定），全部可省略：
+
+```jsonc
+{
+  "version": 1,
+  "currency": "USD",              // 固定显示货币，命令行 --currency 仍然优先
+  "rateSource": "er-api",         // 优先用哪个在线汇率源
+  "updates": { "pricing": true, "rates": false },   // 默认值
+  "pricing": {                    // 覆盖厂商的某些价格区间，其余仍用默认表
+    "version": 1, "updatedAt": "2026-09-21",
+    "providers": [{ "id": "deepseek", "label": "DeepSeek 官方", "defaultModel": "deepseek-flash",
+      "models": [{ "model": "deepseek-flash", "aliases": ["deepseek-flash"],
+        "periods": [{ "id": "my-price", "label": "我的价", "from": "2026-09-10T12:00:00+08:00", "to": null,
+                      "timezone": "Asia/Shanghai", "currency": "CNY",
+                      "offPeak": [{ "id": "input-miss", "label": "缓存未命中输入",
+                                    "basis": "inputAndCacheWrite", "rate": "0.5", "per": 1000000 }],
+                      "peak": null, "peakWindows": [],
+                      "source": "https://example.com/me", "note": "自用" }] }] }]
+  }
+}
+```
+
+优先级：**命令行 > 用户配置 > 仓库默认**。价格表按**时间**合并：用户区间覆盖它自己那段时间，厂商的其他区间原样保留（被用户区间切开的部分会拆成片段，并在说明里标明）。用户配置写坏了只会出现在报告的「提示」里，不会让命令失败。
+
+### 更新
+
+```bash
+agent-usages update                  # 价格表 + 汇率（默认两个都更新）
+agent-usages update prices           # 只更新价格表
+agent-usages update rates            # 只更新汇率
+agent-usages update --force          # 忽略"今天已经检查过"
+agent-usages update rates --write-config   # 把拉到的汇率写回 config/rates.json，review 后提交
+agent-usages usage --no-update       # 本次完全不联网
+agent-usages check-config            # 改完配置提交前跑一次
+```
+
+- **日常运行时自动更新**：价格表默认开、汇率默认关，各自**每天最多检查一次**（检查过就不重复请求，失败也算检查过），失败静默用本地数据——命令宁可显示略旧的价格，也不会因为网络挂掉。
+- 价格表从本仓库 raw 地址按 ETag 条件请求：文件没变就是一个 304。
+- 汇率按 `config/rates.json` 里的源**顺序尝试、每个源重试两次**，第一个成功即止；写回时会保留源未报价的币种（并告知数量）。
+- `check-config` 校验两份文件（区间连续、峰谷规则、来源 URL、币种代码等），也可以 `--json`。
 
 ---
 

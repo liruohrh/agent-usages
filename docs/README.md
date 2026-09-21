@@ -8,3 +8,4 @@
 | [DSH 适配器](agents/dsh.md) | 用量从哪些文件来、会话日志格式与去重、项目归组、委派识别 |
 | [DeepSeek 价格表](pricing/deepseek.md) | 生效区间、峰谷时段、选取规则、计费口径与来源链接 |
 | [输出与格式](output.md) | 各表的列、token 统计口径、对齐规则、合计行 |
+| [配置与更新](config.md) | config/ 两份文件、用户覆盖、每日懒更新与 update/check-config 的实现 |

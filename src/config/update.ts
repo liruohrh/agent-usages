@@ -127,7 +127,9 @@ export async function updatePricing(options: UpdateOptions = {}): Promise<Update
   state.checkedAt.pricing = now.getTime();
   const cached = readJson<CacheEntry>(cachePath('pricing', env)).value;
   const headers: Record<string, string> = {};
-  if (options.force !== true && cached?.etag !== undefined) headers['If-None-Match'] = cached.etag;
+  // `--force` means "check now", not "download again": a 304 is still the
+  // cheapest way to check, so the validator is sent whenever it is known.
+  if (cached?.etag !== undefined) headers['If-None-Match'] = cached.etag;
   const response = await request(PRICING_URL, { headers }, fetchImpl);
   if (response === undefined) {
     writeJsonQuietly(statePath(env), state);

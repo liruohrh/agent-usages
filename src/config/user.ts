@@ -133,20 +133,29 @@ export function mergePeriods(base: readonly PricePeriod[], override: readonly Pr
   const covers = (list: readonly PricePeriod[], at: number): PricePeriod | undefined =>
     list.find((period) => period.from <= at && (period.to === null || at < period.to));
   const merged: PricePeriod[] = [];
-  const last = points[points.length - 1];
-  for (let index = 0; index < points.length - 1; index += 1) {
+  for (let index = 0; index < points.length; index += 1) {
     const from = points[index] as number;
-    const to = points[index + 1] as number;
-    if (to <= from) continue;
+    const next: number | undefined = points[index + 1];
     const chosen = covers(override, from) ?? covers(base, from);
     if (chosen === undefined) continue;
-    const whole = chosen.from === from && chosen.to === to;
-    // An open-ended period stays open-ended at the end of the timeline.
-    const open = chosen.to === null && to === last;
+    if (next === undefined) {
+      // Nothing else bounds the timeline here: a period that runs to the end
+      // keeps running — whole if it started here, a fragment otherwise — and a
+      // bounded one simply stops where it stops.
+      if (chosen.to !== null) continue;
+      merged.push(
+        chosen.from === from
+          ? { ...chosen }
+          : { ...chosen, id: `${chosen.id}#${from}`, from, to: null, note: `${chosen.note}（与用户配置合并出的片段）` },
+      );
+      continue;
+    }
+    if (next <= from) continue;
+    const whole = chosen.from === from && chosen.to === next;
     merged.push(
-      whole || open
-        ? { ...chosen, ...(open ? { to: null } : {}) }
-        : { ...chosen, id: `${chosen.id}#${from}`, from, to, note: `${chosen.note}（与用户配置合并出的片段）` },
+      whole
+        ? { ...chosen }
+        : { ...chosen, id: `${chosen.id}#${from}`, from, to: next, note: `${chosen.note}（与用户配置合并出的片段）` },
     );
   }
   return merged;

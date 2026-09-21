@@ -547,3 +547,40 @@ describe('help', () => {
     expect(stdout).toContain('--provider');
   });
 });
+
+describe('configuration commands', () => {
+  it('checks the shipped configuration', async () => {
+    const { code, stdout } = await cli(['check-config']);
+    expect(code).toBe(0);
+    expect(stdout).toContain('config/pricing.json  通过');
+    expect(stdout).toContain('config/rates.json  通过');
+  });
+
+  it('checks it as JSON too', async () => {
+    const parsed = JSON.parse((await cli(['check-config', '--json'])).stdout) as {
+      results: { file: string; ok: boolean }[];
+    };
+    expect(parsed.results.map((result) => result.file)).toEqual(['config/pricing.json', 'config/rates.json']);
+    expect(parsed.results.every((result) => result.ok)).toBe(true);
+  });
+
+  it('rejects an update target it does not know', async () => {
+    const { code, stderr } = await cli(['update', 'everything']);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/未知的更新目标/);
+  });
+
+  it('documents the update targets in its help', async () => {
+    const { stdout } = await cli(['update', '--help']);
+    expect(stdout).toContain('all（默认）/ prices / rates');
+    expect(stdout).toContain('--write-config');
+  });
+
+  it('skips the network entirely with --no-update', async () => {
+    // The fixture's own config directory has no cache, so this also proves the
+    // shipped files are enough to run.
+    const { code, stdout } = await cli(['usage', '--json', '--no-update']);
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({ agent: 'dsh' });
+  });
+});

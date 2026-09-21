@@ -523,8 +523,8 @@ export function buildProgram(): Command {
     .command('check-config')
     .description('校验 config/ 下的价格表与汇率表（改完提交前跑一次）')
     .option('--json', '以 JSON 输出')
-    .action((options: { json?: boolean }) => {
-      runCheckConfig(options.json === true);
+    .action((options: { json?: boolean }, command: Command) => {
+      runCheckConfig(withGlobals(command, options).json === true);
     });
 
   const sessionCommand = commonOptions(program.command('session').description('会话相关操作'));
