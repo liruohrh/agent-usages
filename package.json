@@ -4,6 +4,32 @@
   "packageManager": "pnpm@11.3.0",
   "private": true,
   "description": "统计 coding agent 的 token 消耗与费用：agent 与模型价格两个维度均可扩展，支持项目/会话/子代理维度、时间范围与分时段峰谷定价",
+  "keywords": [
+    "token",
+    "usage",
+    "cost",
+    "llm",
+    "agent",
+    "deepseek",
+    "dsh",
+    "cli"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liruohrh/agent-usages.git"
+  },
+  "homepage": "https://github.com/liruohrh/agent-usages#readme",
+  "bugs": {
+    "url": "https://github.com/liruohrh/agent-usages/issues"
+  },
+  "files": [
+    "bin",
+    "src",
+    "config",
+    "docs",
+    "README.md"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.6"
@@ -20,7 +46,8 @@
     "cli": "node src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pack:check": "npm pack --dry-run"
   },
   "dependencies": {
     "commander": "^14.0.0",

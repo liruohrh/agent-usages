@@ -229,6 +229,27 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 
 ---
 
+## 安装与发布
+
+本仓库直接用 Node 运行 TypeScript（Node 22.6+ 原生类型剥离，无构建步骤）：
+
+```bash
+git clone https://github.com/liruohrh/agent-usages && cd agent-usages
+pnpm install
+pnpm cli usage            # 等价于 node src/cli.ts usage
+# 或者装到 PATH
+pnpm link --global && agent-usages usage
+```
+
+包已按可发布整理（`files` 含 `bin/`、`src/`、`config/`、`docs/`，`npm pack --dry-run` 有测试守着，
+保证随包的默认价格表/汇率表不会漏）。真要发布还差两步，由维护者决定：
+
+1. `private` 改成 `false`，并把包名 `@agent/usages` 换成你拥有的名字（当前是 scoped 名，需要对应 npm 组织）；
+2. `npm publish`（`prepublishOnly` 没有额外步骤，发布的就是源码 + `config/`）。
+
+
+---
+
 ## 配置与更新
 
 价格表、汇率表都是**仓库里的数据文件**，不是代码：改价格只要提交 `config/pricing.json`，不用发版。
