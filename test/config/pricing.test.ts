@@ -159,8 +159,8 @@ describe('rates configuration', () => {
     expect(table.base).toBe(config.base);
     expect(table.provenance.date).toBe(config.updatedAt);
     expect(table.provenance.source).toContain(config.source);
-    // 1 USD = 6.70471 CNY, so 1 CNY = 1/6.70471 USD.
-    expect(Number(rateFrom(table, 'CNY', 'USD'))).toBeCloseTo(1 / 6.70471, 8);
+    // Derived, not written down: the scheduled job refreshes this file.
+    expect(Number(rateFrom(table, 'CNY', 'USD'))).toBeCloseTo(1 / Number(config.table['CNY']), 8);
   });
 
   it('rejects a table without its own base', () => {

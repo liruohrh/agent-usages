@@ -1,0 +1,58 @@
+# 刷新汇率表。
+#
+# 只自动更新汇率：价格表是人工从厂商页面抄录的（HTML 无法可靠解析），改价格仍然
+# 走人工提交 + `check-config`。汇率有现成 API，所以让它自己跑。
+#
+# 时间定在欧洲央行发布参考汇率（约 16:00 CET = 15:00 UTC）之后，每天一次。
+# 也可以在 Actions 页面手动触发。
+name: 刷新汇率表
+
+on:
+  schedule:
+    - cron: '30 15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-rates
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # 拉最新汇率并写回仓库里的配置文件；任一源都失败时命令返回非零，任务失败。
+      - name: 更新 config/rates.json
+        run: node src/cli.ts update rates --force --write-config
+
+      # 写回的必须是合法配置，测试也必须仍然通过，否则不提交。
+      - name: 校验配置
+        run: node src/cli.ts check-config
+
+      - name: 跑测试
+        run: CI=true pnpm test
+
+      - name: 有变化才提交
+        run: |
+          if git diff --quiet -- config/rates.json; then
+            echo "汇率没有变化，无需提交"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add config/rates.json
+          git commit -m "chore: 刷新汇率表（$(date -u +%F)）"
+          git push

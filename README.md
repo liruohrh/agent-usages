@@ -280,6 +280,7 @@ agent-usages check-config            # 改完配置提交前跑一次
 - 价格表从本仓库 raw 地址按 ETag 条件请求：文件没变就是一个 304。
 - 汇率按 `config/rates.json` 里的源**顺序尝试、每个源重试两次**，第一个成功即止；写回时会保留源未报价的币种（并告知数量）。
 - `check-config` 校验两份文件（区间连续、峰谷规则、来源 URL、币种代码等），也可以 `--json`。
+- 仓库里带了 [定时任务](.github/workflows/refresh-rates.yml)：每天在欧洲央行发布参考汇率之后跑一次 `update rates --write-config`，校验 + 测试通过才提交 `config/rates.json`。价格表仍然人工维护（厂商页面是 HTML，无法可靠解析），但同一条定时任务也会每天校验一次配置。
 
 ---
 

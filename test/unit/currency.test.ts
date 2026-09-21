@@ -55,9 +55,12 @@ describe('rateFrom', () => {
   });
 
   it('crosses through the table base', () => {
-    // 1 USD = 6.70471 CNY and 1 USD = 156.919 JPY, so 1 CNY = 156.919/6.70471 JPY.
-    expect(Number(rateFrom(table, 'CNY', 'JPY'))).toBeCloseTo(156.919 / 6.70471, 6);
-    expect(Number(rateFrom(table, 'CNY', 'USD'))).toBeCloseTo(1 / 6.70471, 8);
+    // Derived from the table rather than written down: the shipped rates are
+    // refreshed by a scheduled job, so a literal would rot.
+    const cny = Number(table.rates['CNY']);
+    const jpy = Number(table.rates['JPY']);
+    expect(Number(rateFrom(table, 'CNY', 'JPY'))).toBeCloseTo(jpy / cny, 6);
+    expect(Number(rateFrom(table, 'CNY', 'USD'))).toBeCloseTo(1 / cny, 8);
   });
 
   it('refuses a currency the table does not quote', () => {
@@ -131,7 +134,7 @@ describe('rateFor', () => {
 
   it('crosses through the table otherwise', () => {
     const { rate, provenance } = rateFor({ base: 'USD', target: 'EUR' });
-    expect(Number(rate)).toBeCloseTo(0.871295, 6);
+    expect(Number(rate)).toBeCloseTo(Number(seedTable().rates['EUR']), 6);
     expect(provenance.date).toBe(seedDate());
   });
 

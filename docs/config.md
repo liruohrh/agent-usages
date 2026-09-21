@@ -38,3 +38,18 @@ update [all|prices|rates] [--force] [--write-config]
 | `agent-usages update rates --write-config` | 把缓存里的汇率写回 `config/rates.json`，供 review 后提交 |
 | `agent-usages check-config [--json]` | 校验两份配置（含用户配置文件） |
 | `agent-usages usage --no-update` | 本次完全不联网 |
+
+## 定时任务
+
+`.github/workflows/refresh-rates.yml` 每天 15:30 UTC（欧洲央行约 15:00 UTC 发布参考汇率之后）
+跑一次：`update rates --force --write-config` → `check-config` → 测试 → 有变化才提交
+`config/rates.json`（提交人是 `github-actions[bot]`）。也能在 Actions 页面手动触发
+（workflow_dispatch）。
+
+- **价格表不自动改**：厂商价格页是 HTML，无法可靠解析，改价仍然人工提交 + `check-config`；
+  但定时任务每天会用 `check-config` 验一遍，坏掉的配置不会溜过去。
+- 任一汇率源都失败时命令返回非零，任务失败并留下日志，不会提交半截数据。
+- 用 `GITHUB_TOKEN` 推送到默认分支，不会触发新的工作流（不会自激）。
+
+因此测试里不写死汇率数值：`test/unit/currency.test.ts`、`test/config/pricing.test.ts`
+的期望值都从 `config/rates.json` 现算，定时任务刷新数据后测试仍然成立。
