@@ -43,13 +43,26 @@ export interface AgentAdapter {
 
 ## 新增一个计价来源
 
-实现 `PricingProvider`（`src/pricing/contract.ts`），放进 `src/pricing/vendors/`，注册到 `src/pricing/registry.ts`：
+加厂商就是往仓库的 `config/pricing.json` 里加一条（`src/pricing/registry.ts` 启动时读它，
+`src/config/pricing.ts` 负责解析与校验）：
+
+```jsonc
+{ "id": "deepseek", "label": "DeepSeek 官方", "defaultModel": "deepseek-flash",
+  "models": [{ "model": "deepseek-flash", "aliases": ["deepseek-chat", "..."],
+               "periods": [{ "id": "2026-09-10", "from": "2026-09-10T12:00:00+08:00", "to": null,
+                             "timezone": "Asia/Shanghai", "currency": "CNY",   // 只要代码，符号内置
+                             "offPeak": [{ "id": "input-miss", "basis": "inputAndCacheWrite",
+                                           "rate": "1", "per": 1000000, "label": "缓存未命中输入" }],
+                             "peak": [ /* … */ ], "peakWindows": [ /* … */ ],
+                             "source": "https://…", "note": "…" }] }] }
+```
+
+运行时代码里的形状仍是：
 
 ```ts
 export interface PricingProvider {
   id: string;                    // --provider 的值
   label: string;
-  currency: { code: string; symbol: string };
   defaultModel: string | null;   // 未知模型时借用谁的价格；null 表示不计价
   models(): readonly ModelPrice[];
   find(model): ModelPrice | undefined;
@@ -112,8 +125,14 @@ src/
 ├── pricing/               维度二：怎么算钱
 │   ├── contract.ts        PricingProvider / PricePeriod / RateComponent
 │   ├── engine.ts          与厂商无关的区间选取、峰谷判定、按组件计费
-│   ├── registry.ts        注册表
-│   └── vendors/deepseek.ts  DeepSeek 官方价格表（唯一随官方调价更新的文件）
+│   ├── currency.ts        显示货币、汇率表、把发布价折算到显示币种
+│   └── registry.ts        启动时读 config/pricing.json 建出各厂商
+├── config/                仓库里的配置（价格表、汇率表）+ 用户覆盖 + 每日更新的缓存
+│   ├── pricing.ts         解析/校验 config/pricing.json（也是 check-config 的引擎）
+│   ├── rates.ts           解析/校验 config/rates.json（含在线源清单）
+│   ├── user.ts            ~/.config/agent-usages/config.json，按时间合并到默认表之上
+│   ├── update.ts          ETag 条件请求、每天最多一次、多源重试、失败即回退
+│   └── resolve.ts         三层数据合成一次运行实际使用的配置
 ├── accounting.ts          逐条计费、按「模型×区间×峰谷」精确累加并取整、聚合只是相加
 ├── report.ts              筛选、每个会话计价一次、向上全部相加、会话清单
 ├── timerange.ts           时间范围解析

@@ -154,7 +154,7 @@ describe('selectCurrency', () => {
     const { provider: picked, currencies } = selectCurrency(provider, 'XTS');
     expect(currencies).toEqual(['XTS']);
     for (const price of picked.models()) {
-      for (const period of price.periods) expect(period.currency.code).toBe('XTS');
+      for (const period of price.periods) expect(period.currency).toBe('XTS');
     }
   });
 
@@ -172,7 +172,7 @@ describe('convertProvider', () => {
     const converted = convertProvider(provider, target, '0.5');
     const original = provider.find('flat-model')?.periods[0]?.offPeak.find((entry) => entry.id === 'input-miss');
     const rewritten = converted.find('flat-model')?.periods[0]?.offPeak.find((entry) => entry.id === 'input-miss');
-    expect(converted.find('flat-model')?.periods[0]?.currency).toEqual({ code: 'USD', symbol: '$' });
+    expect(converted.find('flat-model')?.periods[0]?.currency).toBe('USD');
     expect(original?.rate).toBe('10');
     expect(rewritten?.rate).toBe('5');
   });

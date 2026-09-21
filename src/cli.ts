@@ -25,6 +25,15 @@ import {
 } from './pricing/index.ts';
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+import { resolveConfig, type ResolvedConfig } from './config/resolve.ts';
+import { cachedConfigText, runUpdates, type UpdateKind } from './config/update.ts';
+import { parsePricingConfig, shippedPricingText } from './config/pricing.ts';
+import { parseRatesConfig, shippedRatesText } from './config/rates.ts';
+import { readUserConfig } from './config/user.ts';
+import { userConfigPath } from './config/paths.ts';
 import {
   chooseDisplay,
   convertProvider,
@@ -47,6 +56,7 @@ interface GlobalOptions {
   home?: string;
   provider?: string;
   json?: boolean;
+  noUpdate?: boolean;
 }
 
 /** Options accepted by `usage`. */
@@ -72,6 +82,8 @@ interface Loaded {
   display: DisplayResolution;
   /** Symbol to print, empty when the user named no currency. */
   symbol: string;
+  /** Anything the configuration layer wants the user to know. */
+  warnings: string[];
 }
 
 /**
@@ -123,24 +135,29 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
   if (options.home !== undefined) merged.home = options.home;
   if (options.provider !== undefined) merged.provider = options.provider;
   if (options.json !== undefined) merged.json = options.json;
+  if (options.noUpdate !== undefined) merged.noUpdate = options.noUpdate;
   return { ...options, ...merged };
 }
 
 /** Resolve the agent, read its data, and build a pricing engine for it. */
-async function loadOrExit(options: GlobalOptions & Pick<UsageOptions, 'currency' | 'currencyRate'>): Promise<Loaded | undefined> {
+async function loadOrExit(
+  options: GlobalOptions & Pick<UsageOptions, 'currency' | 'currencyRate'>,
+  config: ResolvedConfig,
+): Promise<Loaded | undefined> {
   try {
     const adapter = await resolveAgent(options.agent, options.home);
     const dataset = await adapter.load({
       ...(options.home === undefined ? {} : { home: options.home }),
       enrich: true,
     });
-    const provider = resolvePricingProvider(options.provider, adapter.id);
+    const provider = resolvePricingProvider(options.provider, adapter.id, config.providers);
     // The vendor's rates are rewritten into the display currency here, once, so
     // every amount and every unit price downstream is already in it.
     const published = providerCurrencies(provider);
     const choice = chooseDisplay({
       published,
-      ...(options.currency === undefined ? {} : { currencyFlag: options.currency }),
+      // The user's own file is the middle layer: a flag still wins over it.
+      ...(options.currency !== undefined ? { currencyFlag: options.currency } : config.currency !== undefined ? { currencyFlag: config.currency } : {}),
       ...(options.currencyRate === undefined ? {} : { rateFlag: options.currencyRate }),
       ...(systemLocale() === undefined ? {} : { locale: systemLocale() }),
     });
@@ -154,6 +171,7 @@ async function loadOrExit(options: GlobalOptions & Pick<UsageOptions, 'currency'
       base,
       target: choice.currency?.code ?? null,
       manualRate: choice.manualRate,
+      table: config.rateTable,
     });
     const display: DisplayResolution = { currency: choice.currency, base, rate, provenance, reason: choice.reason };
     const engine = createPricingEngine(convertProvider(selected.provider, choice.currency ?? { code: '', symbol: '', name: '' }, rate));
@@ -163,6 +181,7 @@ async function loadOrExit(options: GlobalOptions & Pick<UsageOptions, 'currency'
       engine,
       display,
       symbol: display.currency?.symbol ?? '',
+      warnings: config.warnings,
     };
   } catch (error) {
     process.stderr.write(`agent-usages: ${(error as Error).message}\n`);
@@ -180,7 +199,8 @@ function emit(payload: unknown, text: string, json: boolean, requests: number): 
 
 /** The `usage` command implementation. */
 async function runUsage(options: UsageOptions): Promise<void> {
-  const loaded = await loadOrExit(options);
+  const config = await resolveConfig(options.noUpdate === true ? { noUpdate: true } : {});
+  const loaded = await loadOrExit(options, config);
   if (loaded === undefined) return;
   const { dataset, engine, display, symbol } = loaded;
 
@@ -219,6 +239,8 @@ async function runUsage(options: UsageOptions): Promise<void> {
       ...(options.sessionFilter === undefined ? {} : { sessions: options.sessionFilter }),
     };
     const result = runQuery(dataset, query, { engine, pricingProvider: engine.provider.id });
+    // Configuration problems belong where the other warnings are shown.
+    result.warnings.push(...loaded.warnings);
     sections.push({ label, range, result });
     requests += result.requests;
   }
@@ -248,7 +270,8 @@ interface SessionListOptions extends GlobalOptions {
 
 /** The `session list` command implementation. */
 async function runSessionList(options: SessionListOptions): Promise<void> {
-  const loaded = await loadOrExit(options);
+  const config = await resolveConfig(options.noUpdate === true ? { noUpdate: true } : {});
+  const loaded = await loadOrExit(options, config);
   if (loaded === undefined) return;
   const filters: SessionListFilters = {
     includeSubagents: options.subagents === true,
@@ -270,10 +293,10 @@ interface PriceOptions extends GlobalOptions {
 }
 
 /** The `price` command implementation. */
-function runPrice(options: PriceOptions): void {
+function runPrice(options: PriceOptions, config: ResolvedConfig): void {
   const providers = options.all === true
-    ? PRICING_PROVIDERS
-    : [resolvePricingProvider(options.provider)];
+    ? config.providers
+    : [resolvePricingProvider(options.provider, undefined, config.providers)];
   const lines: string[] = [];
   for (const provider of providers) {
     const engine = createPricingEngine(provider);
@@ -286,11 +309,11 @@ function runPrice(options: PriceOptions): void {
         lines.push(`    别名: ${price.aliases.filter((alias) => alias !== price.model).join('、')}`);
       }
       for (const period of price.periods) {
-        lines.push(`    [${period.id}] ${period.label}（${period.currency.code}）`);
+        lines.push(`    [${period.id}] ${period.label}（${period.currency}）`);
         lines.push(`      生效: ${engine.describeWindow(period)}`);
         lines.push(`      峰谷: ${engine.describeTiers(period)}`);
         const render = (components: readonly { label: string; rate: string; per: number }[]): string =>
-          components.map((component) => `${component.label} ${component.rate}`).join(' / ') + ` ${period.currency.symbol}`;
+          components.map((component) => `${component.label} ${component.rate}`).join(' / ') + ` ${currencyOf(period.currency).symbol}`;
         lines.push(`      空闲: ${render(period.offPeak)}`);
         if (period.peak !== null) lines.push(`      高峰: ${render(period.peak)}`);
         lines.push(`      来源: ${period.source}`);
@@ -301,6 +324,100 @@ function runPrice(options: PriceOptions): void {
   }
   lines.push('说明: 价格单位为「单价 / 百万 tokens」，币种见每个区间的括号；推理 token 已计入输出，不另行计费。');
   process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+/** Which kinds an `update` argument selects. */
+function updateKinds(target: string): UpdateKind[] {
+  const wanted = target.trim().toLowerCase();
+  if (wanted === 'all' || wanted === '') return ['pricing', 'rates'];
+  if (wanted === 'prices' || wanted === 'pricing' || wanted === '价格' || wanted === '价格表') return ['pricing'];
+  if (wanted === 'rates' || wanted === 'rate' || wanted === '汇率') return ['rates'];
+  throw new Error(`未知的更新目标 "${target}"；可用：all、prices、rates`);
+}
+
+/**
+ * The `update` command implementation.
+ *
+ * Unlike the silent refresh a report does, this one reports what happened — it
+ * is the command a user runs when they want to know.
+ */
+async function runUpdate(target: string, options: { force?: boolean; writeConfig?: boolean }): Promise<void> {
+  let kinds: UpdateKind[];
+  try {
+    kinds = updateKinds(target);
+  } catch (error) {
+    process.stderr.write(`agent-usages: ${(error as Error).message}\n`);
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+  const outcomes = await runUpdates({ pricing: true, rates: true }, {
+    kinds,
+    ...(options.force === true ? { force: true } : {}),
+  });
+  for (const outcome of outcomes) {
+    process.stdout.write(`${outcome.kind === 'pricing' ? '价格表' : '汇率  '}  ${outcome.detail}\n`);
+  }
+  if (options.writeConfig === true && kinds.includes('rates')) {
+    process.stdout.write(`${writeRatesToRepo()}\n`);
+  }
+  if (outcomes.every((outcome) => outcome.status === 'failed')) process.exitCode = EXIT_ERROR;
+}
+
+/**
+ * Write the cached rate table back into the repository's configuration.
+ *
+ * The point is review: the fetched table lands in `config/rates.json` with the
+ * sources and note the file already carries, and a human decides whether to
+ * commit it.
+ * @returns a line describing what was written.
+ */
+function writeRatesToRepo(): string {
+  const cached = cachedConfigText('rates');
+  if (cached === undefined) return '没有可写回的汇率（先运行一次 update rates）';
+  const current = JSON.parse(readFileSync(new URL('../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+  const fetched = JSON.parse(cached) as Record<string, unknown>;
+  const before = (current['table'] ?? {}) as Record<string, string>;
+  const after = (fetched['table'] ?? {}) as Record<string, string>;
+  // A source may quote fewer currencies than the file already knows; keeping the
+  // ones it omits is better than dropping them, and the count is reported so it
+  // is never silent.
+  const table: Record<string, string> = { ...before, ...after };
+  const kept = Object.keys(table).filter((code) => after[code] === undefined).length;
+  const document = {
+    ...current,
+    updatedAt: fetched['updatedAt'],
+    base: fetched['base'],
+    source: fetched['source'],
+    table,
+  };
+  const path = fileURLToPath(new URL('../config/rates.json', import.meta.url));
+  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+  const held = kept === 0 ? '' : `，另有 ${kept} 个源未报价的币种沿用原值`;
+  return `已写回 ${path}（${Object.keys(after).length} 个币种，汇率日期 ${String(fetched['updatedAt'])}${held}）；check-config 通过后提交即可`;
+}
+
+/** The `check-config` command implementation. */
+function runCheckConfig(json: boolean): void {
+  const results: { file: string; ok: boolean; detail: string }[] = [];
+  for (const [file, parse] of [
+    ['config/pricing.json', (): unknown => parsePricingConfig(shippedPricingText())],
+    ['config/rates.json', (): unknown => parseRatesConfig(shippedRatesText())],
+  ] as const) {
+    try {
+      parse();
+      results.push({ file, ok: true, detail: '通过' });
+    } catch (error) {
+      results.push({ file, ok: false, detail: (error as Error).message });
+    }
+  }
+  const user = readUserConfig();
+  for (const warning of user.warnings) results.push({ file: userConfigPath(), ok: false, detail: warning });
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ results }, null, 2)}\n`);
+  } else {
+    for (const result of results) process.stdout.write(`${result.ok ? '✓' : '✗'} ${result.file}  ${result.detail}\n`);
+  }
+  if (results.some((result) => !result.ok)) process.exitCode = EXIT_ERROR;
 }
 
 /** The `agents` command implementation. */
@@ -358,7 +475,8 @@ function commonOptions(command: Command): Command {
     .option('--agent <id>', 'agent 类型（默认自动探测；见 `agents`）')
     .option('--home <dir>', 'agent 的数据目录（默认用该 agent 的环境变量或标准位置）')
     .option('--provider <id>', '计价来源（默认按 agent 选择；见 `agents`）')
-    .option('--json', '以 JSON 输出');
+    .option('--json', '以 JSON 输出')
+    .option('--no-update', '本次不检查价格表/汇率更新，直接用本地缓存');
 }
 
 /** Build the commander program. */
@@ -391,6 +509,24 @@ export function buildProgram(): Command {
       await runUsage(withGlobals(command, options));
     });
 
+  program
+    .command('update')
+    .description('更新价格表与汇率（默认两者都更新）')
+    .argument('[target]', '要更新的内容：all（默认）/ prices / rates', 'all')
+    .option('--force', '忽略"今天已经检查过"，立即检查')
+    .option('--write-config', '把拉到的汇率写回仓库的 config/rates.json，供 review 后提交')
+    .action(async (target: string, options: { force?: boolean; writeConfig?: boolean }) => {
+      await runUpdate(target, options);
+    });
+
+  program
+    .command('check-config')
+    .description('校验 config/ 下的价格表与汇率表（改完提交前跑一次）')
+    .option('--json', '以 JSON 输出')
+    .action((options: { json?: boolean }) => {
+      runCheckConfig(options.json === true);
+    });
+
   const sessionCommand = commonOptions(program.command('session').description('会话相关操作'));
   commonOptions(
     sessionCommand
@@ -408,8 +544,8 @@ export function buildProgram(): Command {
       .command('price')
       .description('显示内置价格表与生效区间（不读取任何数据）')
       .option('--all', '列出全部计价来源'),
-  ).action((options: PriceOptions, command: Command) => {
-    runPrice(withGlobals(command, options));
+  ).action(async (options: PriceOptions, command: Command) => {
+    runPrice(withGlobals(command, options), await resolveConfig({ noUpdate: true }));
   });
 
   commonOptions(program.command('agents').description('列出支持的 agent 与计价来源')).action(

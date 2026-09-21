@@ -131,10 +131,9 @@ function peakWindow(value: unknown, path: string): PeakWindow {
 /** One price period. */
 function period(value: unknown, path: string): PricePeriod {
   const node = object(value, path);
-  const currency = object(node['currency'], `${path}.currency`);
-  const code = text(currency['code'], `${path}.currency.code`);
-  if (!/^[A-Z]{3}$/.test(code)) {
-    throw new ConfigError(`${path}.currency.code`, `应为三位大写 ISO 代码，收到 ${JSON.stringify(code)}`);
+  const currency = text(node['currency'], `${path}.currency`);
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new ConfigError(`${path}.currency`, `应为三位大写 ISO 代码，收到 ${JSON.stringify(currency)}`);
   }
   const peak = node['peak'] === null || node['peak'] === undefined ? null : array(node['peak'], `${path}.peak`).map((entry, index) => component(entry, `${path}.peak[${index}]`));
   const peakWindows = array(node['peakWindows'] ?? [], `${path}.peakWindows`).map((entry, index) => peakWindow(entry, `${path}.peakWindows[${index}]`));
@@ -156,7 +155,7 @@ function period(value: unknown, path: string): PricePeriod {
     peak,
     peakWindows,
     timezone: text(node['timezone'], `${path}.timezone`),
-    currency: { code, symbol: text(currency['symbol'], `${path}.currency.symbol`) },
+    currency,
     source,
     note: text(node['note'], `${path}.note`),
   };
@@ -173,13 +172,13 @@ function modelPrice(value: unknown, path: string): ModelPrice {
   // name the same windows with the same ids, and only one list is ever priced.
   const ids = new Set<string>();
   for (const entry of periods) {
-    const key = `${entry.currency.code}/${entry.id}`;
+    const key = `${entry.currency}/${entry.id}`;
     if (ids.has(key)) throw new ConfigError(`${path}.periods`, `区间 id 重复：${key}`);
     ids.add(key);
   }
   // Each currency is its own history, so contiguity is checked per currency.
-  for (const code of new Set(periods.map((entry) => entry.currency.code))) {
-    const history = periods.filter((entry) => entry.currency.code === code);
+  for (const code of new Set(periods.map((entry) => entry.currency))) {
+    const history = periods.filter((entry) => entry.currency === code);
     for (let index = 1; index < history.length; index += 1) {
       const previous = history[index - 1] as PricePeriod;
       const current = history[index] as PricePeriod;

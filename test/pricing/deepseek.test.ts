@@ -71,9 +71,9 @@ describe('schedule integrity', () => {
     for (const price of DEEPSEEK_PRICES) {
       // A model carries one history per published currency; each is contiguous
       // on its own, which is what period lookup relies on.
-      const currencies = [...new Set(price.periods.map((period) => period.currency.code))];
+      const currencies = [...new Set(price.periods.map((period) => period.currency))];
       for (const code of currencies) {
-        const history = price.periods.filter((period) => period.currency.code === code);
+        const history = price.periods.filter((period) => period.currency === code);
         for (let index = 1; index < history.length; index += 1) {
           const previous = history[index - 1] as PricePeriod;
           const current = history[index] as PricePeriod;
@@ -91,7 +91,7 @@ describe('schedule integrity', () => {
     const flash = deepseekPricing.models().find((price) => price.model === 'deepseek-flash');
     const current = (code: string): string | undefined =>
       flash?.periods
-        .filter((period) => period.currency.code === code)
+        .filter((period) => period.currency === code)
         .find((period) => period.to === null)
         ?.offPeak.find((component) => component.id === 'output')?.rate;
     expect(current('CNY')).toBe('4');
@@ -243,11 +243,11 @@ describe('provider metadata', () => {
   it('publishes its list in both yuan and dollars', () => {
     // DeepSeek quotes the Chinese site in CNY and the international one in USD;
     // the two are separate published numbers, so both are kept.
-    const currencies = new Set(deepseekPricing.models().flatMap((price) => price.periods.map((period) => period.currency.code)));
+    const currencies = new Set(deepseekPricing.models().flatMap((price) => price.periods.map((period) => period.currency)));
     expect([...currencies].sort()).toEqual(['CNY', 'USD']);
     for (const price of deepseekPricing.models()) {
-      const cny = price.periods.filter((period) => period.currency.code === 'CNY');
-      const usd = price.periods.filter((period) => period.currency.code === 'USD');
+      const cny = price.periods.filter((period) => period.currency === 'CNY');
+      const usd = price.periods.filter((period) => period.currency === 'USD');
       // Every yuan period has a dollar counterpart covering the same window.
       expect(usd).toHaveLength(cny.length);
       for (const period of cny) {

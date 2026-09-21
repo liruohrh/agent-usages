@@ -31,7 +31,7 @@ describe('model resolution', () => {
   it('quotes every period in the stub currency', () => {
     const periods = engine.provider.models().flatMap((price) => price.periods);
     expect(periods.length).toBeGreaterThan(0);
-    for (const period of periods) expect(period.currency).toEqual(TEST_CURRENCY);
+    for (const period of periods) expect(period.currency).toBe(TEST_CURRENCY.code);
   });
 });
 
@@ -66,7 +66,7 @@ describe('period selection', () => {
               peak: null,
               peakWindows: [],
               timezone: 'UTC',
-              currency: TEST_CURRENCY,
+              currency: TEST_CURRENCY.code,
               source: 'test',
               note: '',
             },

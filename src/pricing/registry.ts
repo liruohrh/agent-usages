@@ -21,9 +21,9 @@ export const DEFAULT_PRICING_PROVIDER = PRICING_PROVIDERS[0]?.id ?? 'deepseek';
  * @param id - provider id, matched case-insensitively.
  * @returns the provider, or `undefined` when this build has no such vendor.
  */
-export function findPricingProvider(id: string): PricingProvider | undefined {
+export function findPricingProvider(id: string, providers: readonly PricingProvider[] = PRICING_PROVIDERS): PricingProvider | undefined {
   const wanted = id.trim().toLowerCase();
-  return PRICING_PROVIDERS.find((provider) => provider.id.toLowerCase() === wanted);
+  return providers.find((provider) => provider.id.toLowerCase() === wanted);
 }
 
 /**
@@ -32,10 +32,10 @@ export function findPricingProvider(id: string): PricingProvider | undefined {
  * @returns the provider.
  * @throws when the id is unknown, listing what is available.
  */
-export function requirePricingProvider(id: string): PricingProvider {
-  const provider = findPricingProvider(id);
+export function requirePricingProvider(id: string, providers: readonly PricingProvider[] = PRICING_PROVIDERS): PricingProvider {
+  const provider = findPricingProvider(id, providers);
   if (provider === undefined) {
-    const known = PRICING_PROVIDERS.map((candidate) => candidate.id).join('、');
+    const known = providers.map((candidate) => candidate.id).join('、');
     throw new Error(`未知的计价来源 "${id}"；当前支持：${known}`);
   }
   return provider;
@@ -52,8 +52,12 @@ export function requirePricingProvider(id: string): PricingProvider {
  * @param agent - the agent id the dataset came from, when known.
  * @returns the provider to price with.
  */
-export function resolvePricingProvider(requested: string | undefined, agent?: string): PricingProvider {
-  if (requested !== undefined) return requirePricingProvider(requested);
+export function resolvePricingProvider(
+  requested: string | undefined,
+  agent?: string,
+  providers: readonly PricingProvider[] = PRICING_PROVIDERS,
+): PricingProvider {
+  if (requested !== undefined) return requirePricingProvider(requested, providers);
   void agent;
-  return requirePricingProvider(DEFAULT_PRICING_PROVIDER);
+  return requirePricingProvider(providers[0]?.id ?? DEFAULT_PRICING_PROVIDER, providers);
 }

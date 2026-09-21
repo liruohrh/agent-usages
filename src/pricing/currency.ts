@@ -175,10 +175,18 @@ export function seedTable(): RateTable {
   };
 }
 
-/** Currency metadata, falling back to the code itself as its symbol. */
+/**
+ * Currency metadata.
+ *
+ * The symbol is the tool's own business, not the price file's: known currencies
+ * get the symbol people expect, and an unknown one is marked `!$` so a missing
+ * entry is visible in the output rather than silently plausible.
+ * @param code - ISO code.
+ * @returns the currency, with a symbol to print.
+ */
 export function currencyOf(code: string): CurrencyInfo {
   const upper = code.trim().toUpperCase();
-  return KNOWN[upper] ?? { code: upper, symbol: `${upper} `, name: upper };
+  return KNOWN[upper] ?? { code: upper, symbol: '!$', name: upper };
 }
 
 /**
@@ -343,7 +351,7 @@ export function providerCurrencies(provider: PricingProvider): string[] {
   const seen: string[] = [];
   for (const model of provider.models()) {
     for (const period of model.periods) {
-      if (!seen.includes(period.currency.code)) seen.push(period.currency.code);
+      if (!seen.includes(period.currency)) seen.push(period.currency);
     }
   }
   return seen;
@@ -366,10 +374,10 @@ export function selectCurrency(
 ): { provider: PricingProvider; currencies: string[] } {
   const picked = new Map<string, string>();
   const models = provider.models().map((price) => {
-    const published = [...new Set(price.periods.map((period) => period.currency.code))];
+    const published = [...new Set(price.periods.map((period) => period.currency))];
     const chosen = published.includes(wanted) ? wanted : published.includes('USD') ? 'USD' : (published[0] ?? wanted);
     picked.set(price.model, chosen);
-    return { ...price, periods: price.periods.filter((period) => period.currency.code === chosen) };
+    return { ...price, periods: price.periods.filter((period) => period.currency === chosen) };
   });
   return {
     provider: {
@@ -402,7 +410,7 @@ export function convertProvider(provider: PricingProvider, target: CurrencyInfo,
     ...price,
     periods: price.periods.map((period) => ({
       ...period,
-      currency: { code: target.code, symbol: target.symbol },
+      currency: target.code,
       offPeak: period.offPeak.map(convert),
       peak: period.peak === null ? null : period.peak.map(convert),
     })),

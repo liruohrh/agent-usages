@@ -39,8 +39,8 @@ describe('parsePricingConfig', () => {
   it('keeps both published currencies, window for window', () => {
     const config = parsePricingConfig(shipped());
     for (const model of config.providers[0]!.models) {
-      const cny = model.periods.filter((period) => period.currency.code === 'CNY');
-      const usd = model.periods.filter((period) => period.currency.code === 'USD');
+      const cny = model.periods.filter((period) => period.currency === 'CNY');
+      const usd = model.periods.filter((period) => period.currency === 'USD');
       expect(cny.length).toBeGreaterThan(1);
       expect(usd.map((period) => period.id)).toEqual(cny.map((period) => period.id));
     }
@@ -89,7 +89,7 @@ describe('parsePricingConfig', () => {
     const document = shipped();
     const periods = (document['providers'] as { models: { periods: Record<string, unknown>[] }[] }[])[0]!.models[0]!.periods;
     // Move the yuan list's second period a day later, leaving a hole.
-    const second = periods.filter((period) => (period['currency'] as { code: string }).code === 'CNY')[1]!;
+    const second = periods.filter((period) => period['currency'] === 'CNY')[1]!;
     second['from'] = '2026-04-25T00:00:00+08:00';
     expect(() => parsePricingConfig(document)).toThrow(/区间不连续/);
   });
@@ -97,7 +97,7 @@ describe('parsePricingConfig', () => {
   it('rejects a history that never ends', () => {
     const document = shipped();
     const periods = (document['providers'] as { models: { periods: Record<string, unknown>[] }[] }[])[0]!.models[0]!.periods;
-    const yuan = periods.filter((period) => (period['currency'] as { code: string }).code === 'CNY');
+    const yuan = periods.filter((period) => period['currency'] === 'CNY');
     yuan[yuan.length - 1]!['to'] = '2026-10-01T00:00:00+08:00';
     expect(() => parsePricingConfig(document)).toThrow(/没有结束时间/);
   });
@@ -132,7 +132,7 @@ describe('providerFromConfig', () => {
       tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
     });
     expect(resolved?.period.id).toBe('2026-09-10');
-    expect(resolved?.period.currency.code).toBe('CNY');
+    expect(resolved?.period.currency).toBe('CNY');
   });
 
   it('finds models by alias, case-insensitively', () => {

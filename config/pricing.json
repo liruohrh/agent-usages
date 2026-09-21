@@ -24,10 +24,7 @@
               "from": "2026-01-01T00:00:00+08:00",
               "to": "2026-04-24T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -62,10 +59,7 @@
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -100,10 +94,7 @@
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -138,10 +129,7 @@
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -209,10 +197,7 @@
               "from": "2026-08-23T00:00:00+08:00",
               "to": "2026-09-10T12:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -292,10 +277,7 @@
               "from": "2026-09-10T12:00:00+08:00",
               "to": null,
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -375,10 +357,7 @@
               "from": "2026-01-01T00:00:00+08:00",
               "to": "2026-04-24T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -413,10 +392,7 @@
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -451,10 +427,7 @@
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -489,10 +462,7 @@
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -560,10 +530,7 @@
               "from": "2026-08-23T00:00:00+08:00",
               "to": "2026-09-10T12:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -643,10 +610,7 @@
               "from": "2026-09-10T12:00:00+08:00",
               "to": null,
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -734,10 +698,7 @@
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -772,10 +733,7 @@
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-06-01T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -810,10 +768,7 @@
               "from": "2026-06-01T00:00:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -848,10 +803,7 @@
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -919,10 +871,7 @@
               "from": "2026-08-23T00:00:00+08:00",
               "to": null,
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "CNY",
-                "symbol": "¥"
-              },
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -1002,10 +951,7 @@
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -1040,10 +986,7 @@
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-06-01T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -1078,10 +1021,7 @@
               "from": "2026-06-01T00:00:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -1116,10 +1056,7 @@
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
@@ -1187,10 +1124,7 @@
               "from": "2026-08-23T00:00:00+08:00",
               "to": null,
               "timezone": "Asia/Shanghai",
-              "currency": {
-                "code": "USD",
-                "symbol": "$"
-              },
+              "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",

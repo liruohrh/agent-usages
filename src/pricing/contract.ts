@@ -97,15 +97,18 @@ export interface PricePeriod {
   /** IANA zone the peak window hours are expressed in. */
   timezone: string;
   /**
-   * Currency these rates are quoted in.
+   * ISO code of the currency these rates are quoted in.
    *
    * Per period, not per provider: a vendor publishes its price list once per
    * currency (DeepSeek writes CNY for the Chinese site and USD for the
    * international one), and the two lists are separate published numbers rather
    * than a conversion of each other. A model may therefore carry parallel
    * periods, one per currency, covering the same windows.
+   *
+   * Only the code is data: its symbol comes from the tool's own currency table,
+   * so a new period never has to spell out how to print the money.
    */
-  currency: PricingCurrency;
+  currency: string;
   /** Where these rates were published. */
   source: string;
   /** Provenance note shown by `price`. */
@@ -172,14 +175,6 @@ export interface CostBreakdown {
   reasoningCost: string;
   /** Sum of {@link CostBreakdown.amounts}. */
   total: string;
-}
-
-/** Currency a provider's rates are quoted in. */
-export interface PricingCurrency {
-  /** ISO code, e.g. `CNY`. */
-  code: string;
-  /** Symbol for display. */
-  symbol: string;
 }
 
 /**
