@@ -147,6 +147,13 @@ export interface CostTotals {
   outputCost: string;
   /** Amount charged for cache-write tokens. */
   cacheWriteInputCost: string;
+  /**
+   * Part of {@link CostTotals.outputCost} attributable to reasoning tokens.
+   *
+   * Allocated where the output rate was known — per model, period and tier — and
+   * never billed beside the output: it is a slice of it.
+   */
+  reasoningCost: string;
   /** Sum of every component above. */
   total: string;
 }

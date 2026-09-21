@@ -15,7 +15,8 @@
  *   the rows displayed beside it, so the number a reader checks always matches.
  */
 
-import { emptyBuckets } from './core/buckets.ts';
+import { emptyBuckets, tokenBreakdown } from './core/buckets.ts';
+import { formatDecimal, parseDecimal } from './core/money.ts';
 import type { CostTotals, TokenBuckets, TokenTotals, UsageRecord } from './core/types.ts';
 import { counterForBasis, type CostBreakdown, type PricingEngine, type RateComponent, type RecordCost } from './pricing/index.ts';
 
@@ -59,6 +60,15 @@ export interface CostGroup {
   amounts: Map<string, bigint>;
   /** Tokens attributed to each report counter. */
   counters: Record<ReportCounter, number>;
+  /**
+   * Reasoning tokens billed in this group.
+   *
+   * Kept per group because the split of the output bill between `O` and `R` is
+   * only meaningful where the output rate is constant: one model's thinking can
+   * be billed at four times another's, and a token-weighted split of the
+   * combined bill would move money between them.
+   */
+  reasoningTokens: number;
 }
 
 /** One component's contribution, for the token/rate detail table. */
@@ -179,10 +189,12 @@ export function priceRecords(records: readonly UsageRecord[], engine: PricingEng
         requests: 0,
         amounts: new Map(),
         counters: { cacheHitInputTokens: 0, cacheMissInputTokens: 0, outputTokens: 0, cacheWriteTokens: 0 },
+        reasoningTokens: 0,
       };
       groups.set(groupKey, group);
     }
     group.requests += 1;
+    group.reasoningTokens += Math.min(record.tokens.reasoning, record.tokens.output);
     for (const [id, amount] of cost.amounts) {
       group.amounts.set(id, (group.amounts.get(id) ?? 0n) + amount);
       exact.byComponent.set(id, (exact.byComponent.get(id) ?? 0n) + amount);
@@ -254,10 +266,37 @@ export function mergeCosts(costs: readonly UsageCost[]): UsageCost {
       for (const counter of Object.keys(existing.counters) as ReportCounter[]) {
         existing.counters[counter] += group.counters[counter];
       }
+      existing.reasoningTokens += group.reasoningTokens;
     }
   }
 
   return { tokens, exact, components, priced, unpriced, groups: [...groups.values()] };
+}
+
+/**
+ * Split each group's output bill between its reasoning and its plain completion.
+ *
+ * Done per group, where one output rate applies, and summed afterwards: thinking
+ * billed at a higher rate than another model's must not have its money diluted
+ * by a token-weighted average of the two. The parts are rounded group by group,
+ * matching how the components themselves are rounded.
+ * @param cost - the priced sets.
+ * @param convert - turns a scaled amount into the target currency.
+ * @returns the reasoning share, at the arithmetic scale.
+ */
+function reasoningShare(cost: UsageCost, convert: (value: bigint) => bigint): bigint {
+  let share = 0n;
+  for (const group of cost.groups) share += groupReasoningShare(group, convert);
+  return share;
+}
+
+/** The reasoning slice of one group's output bill. */
+function groupReasoningShare(group: CostGroup, convert: (value: bigint) => bigint): bigint {
+  const output = group.amounts.get('output') ?? 0n;
+  const completion = group.counters.outputTokens;
+  if (output === 0n || completion <= 0 || group.reasoningTokens <= 0) return 0n;
+  const reasoning = Math.min(group.reasoningTokens, completion);
+  return round((convert(output) * BigInt(reasoning)) / BigInt(completion));
 }
 
 /**
@@ -287,6 +326,7 @@ export function summarize(cost: UsageCost, convert: (value: bigint) => bigint = 
     cacheMissInputCost: renderRounded(rounded.get('input-miss') ?? 0n),
     outputCost: renderRounded(rounded.get('output') ?? 0n),
     cacheWriteInputCost: renderRounded(rounded.get('input-write') ?? 0n),
+    reasoningCost: renderRounded(reasoningShare(cost, convert)),
     total: renderRounded(total),
   };
   for (const group of cost.groups) {
@@ -312,6 +352,7 @@ export function summarize(cost: UsageCost, convert: (value: bigint) => bigint = 
       resolution: group.resolution,
       requests: group.requests,
       amounts,
+      reasoningCost: renderRounded(groupReasoningShare(group, convert)),
       total: renderRounded(groupTotal),
     };
   });
@@ -364,6 +405,116 @@ export function costOfGrouped(
   currencyRate = 1,
 ): CostSummary {
   return summarize(mergeCosts(sets.map((records) => priceRecords(records, engine))), converter(currencyRate));
+}
+
+/** Money per reader-facing token figure, at display precision. */
+export interface MoneyBreakdown {
+  /** Cache-miss prompt tokens' share of the bill. */
+  inputMiss: string;
+  /** Cache-hit prompt tokens' share of the bill. */
+  inputHit: string;
+  /** Cache-write prompt tokens' share of the bill. */
+  inputWrite: string;
+  /** Every prompt token: `inputMiss + inputHit + inputWrite`. */
+  inputTotal: string;
+  /** Completion tokens excluding reasoning. */
+  outputOnly: string;
+  /** Reasoning tokens, split out of the completion bill by token share. */
+  reasoning: string;
+  /** The whole completion bill: `outputOnly + reasoning`. */
+  outputTotal: string;
+  /** Everything: `inputTotal + outputTotal`. */
+  total: string;
+}
+
+/**
+ * Break a bill down the same way {@link tokenBreakdown} breaks the tokens down.
+ *
+ * Three prompt buckets are billed one by one, so their money is exact. The
+ * completion is billed as a whole, so `O` and `R` are a split of it by token
+ * share — they add up to the completion bill, never beyond it. And
+ * `inputTotal + outputTotal` is the report's total: nothing is counted twice.
+ *
+ * `cost.total` stays the authority: when the components do not quite add up to
+ * it (a caller passing a total of its own), the difference — at most a display
+ * unit — moves onto the largest component rather than being printed as a line
+ * that does not reconcile with the report.
+ * @param cost - the money as charged, per billed component.
+ * @param tokens - the tokens the same records counted.
+ * @returns one amount per reader-facing figure.
+ */
+export function moneyBreakdown(cost: CostTotals, tokens: TokenBuckets): MoneyBreakdown {
+  const miss = parseDecimal(cost.cacheMissInputCost);
+  const hit = parseDecimal(cost.cacheHitInputCost);
+  const write = parseDecimal(cost.cacheWriteInputCost);
+  const output = parseDecimal(cost.outputCost);
+  const stats = tokenBreakdown(tokens);
+  const billed = [miss, hit, write, output];
+  const whole = parseDecimal(cost.total);
+  const bedded = billed.reduce((sum, value) => sum + value, 0n);
+  if (bedded !== whole) {
+    let largest = 0;
+    for (let index = 1; index < billed.length; index += 1) {
+      if (billed[index]! > billed[largest]!) largest = index;
+    }
+    billed[largest] = billed[largest]! + (whole - bedded);
+  }
+  const [missPart, hitPart, writePart, outputPart] = billed as [bigint, bigint, bigint, bigint];
+  const inputTotal = missPart + hitPart + writePart;
+  const render = (value: bigint): string => formatDecimal(value, COST_DIGITS);
+  // The two halves are rounded against the rounded whole rather than on their
+  // own, so `outputOnly + reasoning` is exactly the completion bill.
+  const wholeOutput = parseDecimal(render(outputPart));
+  // The reasoning share was split where the output rate was known — in the
+  // pricing pass — so all this has to do is subtract it from the output bill.
+  const reasoningRaw = parseDecimal(cost.reasoningCost);
+  const outputOnly = wholeOutput - parseDecimal(render(reasoningRaw));
+  return {
+    inputMiss: render(missPart),
+    inputHit: render(hitPart),
+    inputWrite: render(writePart),
+    inputTotal: render(inputTotal),
+    outputOnly: render(outputOnly),
+    reasoning: render(wholeOutput - outputOnly),
+    outputTotal: render(outputPart),
+    total: render(inputTotal + outputPart),
+  };
+}
+
+/**
+ * Make a set of parts add up to their whole, on display.
+ *
+ * Every amount here is already correctly rounded for its own scope, so a parent
+ * and its parts can disagree by one display unit: two parts that each round up
+ * carry a hundredth of a thousandth each into the sum. The whole is the number a
+ * reader checks against its parts, so the difference is moved onto the largest
+ * part — the one least changed by it — and the parts then add up exactly.
+ * @param parent - the whole, as displayed.
+ * @param children - the parts, as displayed.
+ * @returns the parts, adjusted so their sum equals the whole.
+ */
+export function alignMoney(parent: MoneyBreakdown, children: readonly MoneyBreakdown[]): MoneyBreakdown[] {
+  if (children.length === 0) return [];
+  const fields = Object.keys(parent) as (keyof MoneyBreakdown)[];
+  const aligned = children.map((child) => ({ ...child }));
+  for (const field of fields) {
+    const values = children.map((child) => parseDecimal(child[field]));
+    const diff = parseDecimal(parent[field]) - values.reduce((sum, value) => sum + value, 0n);
+    if (diff === 0n) continue;
+    let target = 0;
+    for (let index = 1; index < values.length; index += 1) {
+      if (values[index]! > values[target]!) target = index;
+    }
+    // A negative correction must not push a part below zero; then the largest
+    // part that can absorb it takes it instead.
+    if (diff < 0n) {
+      const able = values.map((value, index) => ({ value, index })).filter((entry) => entry.value >= -diff);
+      if (able.length === 0) continue;
+      target = able.reduce((best, entry) => (entry.value > best.value ? entry : best)).index;
+    }
+    aligned[target]![field] = formatDecimal(values[target]! + diff, COST_DIGITS);
+  }
+  return aligned;
 }
 
 /**

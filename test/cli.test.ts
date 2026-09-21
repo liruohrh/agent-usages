@@ -128,16 +128,22 @@ describe('usage', () => {
       pricingProvider: string;
       currency: string;
       totals: { requests: number; cost: Record<string, string> };
-      costComponents: { id: string; tokens: number }[];
+      pricingBands: { model: string; components: { id: string; tokens: number }[] }[];
     };
     expect(parsed.agent).toBe('dsh');
     expect(parsed.pricingProvider).toBe('deepseek');
     expect(parsed.currency).toBe('CNY');
     expect(parsed.totals.requests).toBe(1);
     expect(parsed.totals.cost['total']).toBe('5.0200');
-    // The component breakdown names its own basis, so a vendor's rate list is
-    // visible in the output rather than implied.
-    expect(parsed.costComponents.map((component) => component.id).sort()).toEqual(['input-hit', 'input-miss', 'output']);
+    // Each band carries the rate card that produced it, so a vendor's rate list
+    // is visible in the output rather than implied — and it names its model.
+    expect(parsed.pricingBands).toHaveLength(1);
+    expect(parsed.pricingBands[0]?.model).toBe('deepseek-flash');
+    expect(parsed.pricingBands[0]?.components.map((component) => component.id).sort()).toEqual([
+      'input-hit',
+      'input-miss',
+      'output',
+    ]);
   });
 
   it('reports the exact cost components that produced the total', async () => {
@@ -236,7 +242,11 @@ describe('usage', () => {
     expect(stdout).toContain('演示会话');
     // The fixture is one project with one session, so both aggregate levels
     // collapse and a single metric line remains.
-    expect(stdout).toContain('I 1.00M · I/C 1.00M · I/T 2.00M · O 1.00M · R 0 · O/T 1.00M · T 3.00M · Q 1 · ¥5.02');
+    expect(stdout).toContain('I/M 1.00M');
+    expect(stdout).toContain('I/C 1.00M / 50.0%');
+    expect(stdout).toContain('I/T 2.00M');
+    expect(stdout).toContain('R 0 ');
+    expect(stdout).toContain('Q 1 · ¥5.02');
     expect(stdout.match(/ · Q /g)).toHaveLength(1);
   });
 
@@ -277,9 +287,9 @@ describe('usage', () => {
 
   it('adds the cost tables only with --cost, and windows only with --windows', async () => {
     const plain = (await cli(['usage'])).stdout;
-    expect(plain).not.toContain('费用明细');
+    expect(plain).not.toContain('计价区间');
     expect(plain).not.toContain('时间窗口');
-    expect((await cli(['usage', '--cost'])).stdout).toContain('费用明细（单价见计价区间）');
+    expect((await cli(['usage', '--cost'])).stdout).toContain('计价区间:');
     const windows = (await cli(['usage', '--windows'])).stdout;
     expect(windows).toContain('时间窗口  总 / 今日 / 本周 / 本月 / 今年');
     for (const label of ['总', '今日', '本周', '本月', '今年']) expect(windows).toMatch(new RegExp(`\\n${label}( · |\\n)`));
@@ -320,7 +330,7 @@ describe('text output alignment', () => {
     expect(metrics.length).toBeGreaterThan(0);
     for (const line of metrics) {
       const labels = line.trim().split(' · ').map((segment) => segment.split(' ')[0] ?? '');
-      expect(labels.slice(0, 8)).toEqual(['I', 'I/C', 'I/T', 'O', 'R', 'O/T', 'T', 'Q']);
+      expect(labels.slice(0, 8)).toEqual(['I/M', 'I/C', 'I/T', 'O', 'R', 'O/T', 'T', 'Q']);
       expect(labels[8]?.startsWith('¥')).toBe(true);
     }
   });

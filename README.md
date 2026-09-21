@@ -76,15 +76,15 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 
 计算 token 消耗与费用。
 
-默认输出一棵「总 → 项目 → 会话」的树，每个节点两行：名称行和指标行。指标行的十个字段与读法见 [输出与格式](docs/output.md)。
+默认输出一棵「总 → 项目 → 会话」的树，每个节点两行：名称行和指标行。**指标行里每一项都带它自己产生的费用**，所以可以只看输入或只看输出。字段与读法见 [输出与格式](docs/output.md)。
 
 | 选项 | 说明 |
 | --- | --- |
 | `--subagent` | 每个项目与会话再拆成 **总 / 自身 / 子代理** 三行 |
 | `--subagents` | 在 `--subagent` 之外，把每个子代理也单独列出 |
 | `--windows` | 同时输出 **总 / 今日 / 本周 / 本月 / 今年** 五个窗口 |
-| `--cost` | 附上费用明细与计价区间（单价） |
-| `--models` | 附上按模型的明细 |
+| `--cost` | 附上 `计价区间`：每段含自己的指标行与单价（按计费项给） |
+| `--models` | 多模型的节点逐个模型展开成一行 |
 | `-p, --project-filter <sel>` | 只看指定项目：id、名称或路径；支持 `*` 通配；可重复 |
 | `-s, --session-filter <sel>` | 只看指定会话：完整 id、唯一 id 前缀，或**标题**（标题需完全一致，忽略前后空格）；支持 `*` 通配；可重复 |
 | `--today` / `--week` / `--month` / `--year` | 时间范围：今日 / 本周（周一开始）/ 本月 / 今年 |
@@ -125,17 +125,17 @@ DSH 的每一次子代理调用都是一个**独立会话**，因此每笔子代
 | `--subagents` | 在 `--subagent` 之外，把每个子代理也逐个列出 |
 
 ```
-$ agent-usages usage -p example-c --subagent
-Memolink
-  总      I 889K · I/C 257.6M · I/T 258.5M · O 368K · R 558K · O/T 926K · T 259.4M · Q 1,027 · ¥22.0154
-  自身    I 680K · I/C 252.3M · I/T 253.0M · O 274K · R 489K · O/T 763K · T 253.8M · Q 931 · ¥18.0882
-  子代理  I 209K · I/C 5.27M · I/T 5.48M · O 93K · R 69K · O/T 163K · T 5.65M · Q 96 · ¥3.9273
+$ agent-usages usage -p Memolink --subagent
+Memolink (~/ws/apps/Memolink) 2026-08-16
+  总      I/M 889K ¥2.8527 · I/C 257.6M / 99.7% ¥12.1085 · I/T 258.5M ¥14.9612 · O 368K ¥2.8015 · R 558K / 60.3% ¥4.2527 · O/T 926K ¥7.0542 · T 259.4M · Q 1,027 · ¥22.0154
+  自身    I/M 680K ¥1.9127 · I/C 252.3M / 99.7% ¥11.3174 · I/T 253.0M ¥13.2301 · O 274K ¥1.7461 · R 489K / 64.1% ¥3.112 · O/T 763K ¥4.8581 · T 253.8M · Q 931 · ¥18.0882
+  子代理  I/M 209K ¥0.94 · I/C 5.27M / 96.2% ¥0.7912 · I/T 5.48M ¥1.7312 · O 93K ¥1.2607 · R 69K / 42.6% ¥0.9354 · O/T 163K ¥2.1961 · T 5.65M · Q 96 · ¥3.9273
   查看草稿未解决问题
-    I 258K · I/C 178.9M · I/T 179.1M · O 141K · R 342K · O/T 483K · T 179.6M · Q 488 · ¥8.1405
+    I/M 258K ¥0.7729 · I/C 178.9M / 99.9% ¥4.4717 · I/T 179.1M ¥5.2446 · O 141K ¥0.8469 · R 342K / 70.8% ¥2.049 · O/T 483K ¥2.8959 · T 179.6M · Q 488 · ¥8.1405
   创建回忆主题HTML风格展示集（5 个子代理）
-    总      I 258K · I/C 8.93M · I/T 9.19M · O 127K · R 95K · O/T 222K · T 9.41M · Q 153 · ¥4.452
-    自身    I 49K · I/C 3.66M · I/T 3.71M · O 34K · R 26K · O/T 59K · T 3.77M · Q 57 · ¥0.5248
-    子代理  I 209K · I/C 5.27M · I/T 5.48M · O 93K · R 69K · O/T 163K · T 5.65M · Q 96 · ¥3.9273
+    总      I/M 258K ¥1.0141 · I/C 8.93M / 97.2% ¥0.9741 · I/T 9.19M ¥1.9882 · O 127K ¥1.4125 · R 95K / 42.7% ¥1.0513 · O/T 222K ¥2.4638 · T 9.41M · Q 153 · ¥4.452
+    自身    I/M 49K ¥0.0741 · I/C 3.66M / 98.7% ¥0.183 · I/T 3.71M ¥0.2571 · O 34K ¥0.1529 · R 26K / 42.9% ¥0.1148 · O/T 59K ¥0.2677 · T 3.77M · Q 57 · ¥0.5248
+    子代理  I/M 209K ¥0.94 · I/C 5.27M / 96.2% ¥0.7912 · I/T 5.48M ¥1.7312 · O 93K ¥1.2607 · R 69K / 42.6% ¥0.9354 · O/T 163K ¥2.1961 · T 5.65M · Q 96 · ¥3.9273
 ```
 
 恒等式在各个层级都成立：**自身 + 子代理 = 总**，请求数、token、费用逐项相等（有测试断言）。`--subagents` 会隐含 `--subagent`。
@@ -198,26 +198,27 @@ Agent     dsh（DeepSeek Harness (DSH)）
 时间范围  全部时间
 计价来源  DeepSeek 官方（CNY）
 
-总
-  I 1.87M · I/C 821.4M · I/T 823.3M · O 960.4K · R 558.6K · O/T 1.52M · T 824.8M · Q 2,162 · ¥50.0057
+总 · 2026-08-16 ~ 2026-09-22
+  I/M 2.17M ¥4.5005 · I/C 914.6M / 99.8% ¥37.9376 · I/T 916.8M ¥42.4381 · O 1.25M ¥7.3792 · R 565K / 31.2% ¥3.3427 · O/T 1.81M ¥10.7219 · T 918.6M · Q 2,365 · ¥53.16
 
-agent-usages
-  ❯ pnpm cli $ node
-    I 365K · I/C 141.1M · I/T 141.5M · O 355K · R 0 · O/T 355K · T 141.9M · Q 450 · ¥4.6091
+agent-usages 2026-09-17
+  ❯ pnpm cli $ node 2026-09-22
+    I/M 561K ¥0.5614 · I/C 234.0M / 99.8% ¥4.68 · I/T 234.6M ¥5.2414 · O 630K ¥2.522 · R 0 ¥0.00 · O/T 630K ¥2.522 · T 235.2M · Q 653 · ¥7.7634
 
-Memolink
-  I 889K · I/C 257.6M · I/T 258.5M · O 368K · R 558K · O/T 926K · T 259.4M · Q 1,027 · ¥22.0154
+Memolink (~/ws/apps/Memolink) 2026-08-16
+  I/M 889K ¥2.8527 · I/C 257.6M / 99.7% ¥12.1085 · I/T 258.5M ¥14.9612 · O 368K ¥2.8015 · R 558K / 60.3% ¥4.2527 · O/T 926K ¥7.0542 · T 259.4M · Q 1,027 · ¥22.0154
   查看草稿未解决问题
-    I 258K · I/C 178.9M · I/T 179.1M · O 141K · R 342K · O/T 483K · T 179.6M · Q 488 · ¥8.1405
+    I/M 258K ¥0.7729 · I/C 178.9M / 99.9% ¥4.4717 · I/T 179.1M ¥5.2446 · O 141K ¥0.8469 · R 342K / 70.8% ¥2.049 · O/T 483K ¥2.8959 · T 179.6M · Q 488 · ¥8.1405
   创建回忆主题HTML风格展示集（5 个子代理）
-    I 258K · I/C 8.93M · I/T 9.19M · O 127K · R 95K · O/T 222K · T 9.41M · Q 153 · ¥4.452
+    I/M 258K ¥1.0141 · I/C 8.93M / 97.2% ¥0.9741 · I/T 9.19M ¥1.9882 · O 127K ¥1.4125 · R 95K / 42.7% ¥1.0513 · O/T 222K ¥2.4638 · T 9.41M · Q 153 · ¥4.452
 ```
 
 - 名称行只有名字，数字都在下一行，所以标题再长也不会把行撑开。
 - **项目名后是开始日，会话/子代理名后是结束日**；与上一级日期相同就省略。
 - 窗口标题带数据实际跨度：`本周 · 2026-09-17 ~ 18`（同月只写一次月份）、`今日 · 2026-09-18 0h~3h`（同日才带小时；整段在同一小时写作 `8h ~`）。
 - 只有一个会话的项目、只有一个子代理的会话会省掉重复的聚合行。
-- 指标字段：`I` 未命中输入、`I/C` 缓存命中、`I/T` 输入合计、`O` 输出（非思考）、`R` 思考、`O/T` 输出合计、`T` Token 总计、`Q` 请求数、`¥` 费用。
+- 指标字段：`I/M` 未命中输入、`I/C` 缓存命中（后跟 `/ 缓存命中比`）、`I/W` 缓存写入（仅在不为 0 时出现）、`I/T` 输入合计、`O` 输出（非思考）、`R` 思考（后跟 `/ 思考占比`）、`O/T` 输出合计、`T` Token 总计、`Q` 请求数、行尾是费用总额。
+- 每一项都带自己的费用：`I/M`、`I/C`、`I/W` 是三个独立计费项，`O` 与 `R` 按 token 占比分摊输出账单，`I/T`、`O/T` 是组成部分之和——所以 `I/T + O/T` 永远等于行尾总额。
 
 ---
 
@@ -273,11 +274,15 @@ agent-usages usage --from 2026-08-01 --to 2026-09-01
               "cacheHitInputCost": "4.6782", "cacheMissInputCost": "3.6376",
               "outputCost": "10.5879", "total": "18.9037" }
   },
-  "pricingBands": [ { "periodId": "2026-09-10", "periodLabel": "…",
-                      "band": "off-peak", "resolution": "exact", "requests": 763 } ],
+  "pricingBands": [ { "model": "deepseek-v4-flash", "models": ["deepseek-v4-flash"],
+                      "periodId": "2026-09-10", "periodLabel": "…", "window": "…",
+                      "tier": "off-peak", "resolution": "exact", "requests": 763,
+                      "tokens": { "input": 0, "output": 0, "cacheRead": 130399872, "cacheWrite": 0, "reasoning": 0 },
+                      "cost": { "cacheHitInputCost": "4.6782", "total": "4.6782" },
+                      "components": [ { "id": "input-hit", "label": "缓存命中输入",
+                                        "rate": "0.02", "per": 1000000,
+                                        "tokens": 130399872, "amount": "4.6782" } ] } ],
   "models":   [ { "model": "deepseek-v4-flash", "requests": 1730, "tokens": {}, "cost": {} } ],
-  "costComponents": [ { "id": "input-hit", "label": "缓存命中输入", "basis": "cacheRead",
-                        "rate": "0.02", "per": 1000000, "tokens": 130399872, "amount": "4.6782" } ],
   "projects": [ { "id": "12345678-…", "name": "example-c", "path": "…",
                   "sessions": 44, "activeSessions": 44,
                   "subagentSessions": 42, "requests": 1447,
@@ -298,13 +303,13 @@ agent-usages usage --from 2026-08-01 --to 2026-09-01
 - **金额是十进制字符串**（如 `"18.9037"`），不是浮点数——货币不该被浮点误差污染，字符串也能无损穿过 JSON。token 数是整数。
 - 金额保留 4 位小数。**总量 = 各项目之和 = 各行之和**，精确到最后一位：总量是对范围内记录一次性算出的，不会把各行的取整余数累加进来（合并/拆分两种口径的总量因此完全相同）。
 - 时间同时给出 epoch 毫秒与 ISO 8601（UTC）。
-- `pricingBands[].band` ∈ `peak` / `off-peak` / `flat`；`resolution` ∈ `exact` / `fallback-later` / `fallback-earlier` / `fallback-default`，用于说明价格区间是精确命中还是按回退规则选取。
+- `pricingBands[].tier` ∈ `peak` / `off-peak` / `flat`；`resolution` ∈ `exact` / `fallback-later` / `fallback-earlier` / `fallback-default`，用于说明价格区间是精确命中还是按回退规则选取。
 - `sessionReports` 给出每个会话一行；未产生用量的会话不会作为 0 值行出现。每个项目与会话都带 `own` / `spawned` / `nodeTotal` 三段（自身 / 子代理 / 两者之和），与文本里的 **自身 + 子代理 = 总** 对应。
 - `--windows` 时顶层是 `sections: [{ label, … }]`，每个窗口一份与单窗口相同结构的数据。
 - `subagentMode` 说明当前档位；`subagents` 给出范围内的子代理会话数与派生它们的会话数。
 - `scopeBreakdown` 只在 `--subagent` / `--subagents` 时出现，三段各自带 `tokenBreakdown`，且 `own + subagents == total`。
 - 每行另有 `isSubagent`（是否子代理）、`subagentCount`（合并口径下并入的子代理个数）、`parentId`（子代理的父会话）。
-- `costComponents` 把「哪一项按什么单价计了多少 token、得到多少钱」逐项列出，因此换计价来源后输出仍然自解释。
+- `pricingBands` 每一段都自带 `model`（价格表模型）、`models`（请求里实际写的模型名）、`window`（该区间的生效窗口）、`tokens`、`cost` 与 `components`：`components` 逐项列出「哪一项按什么单价计了多少 token、得到多少钱」，因此换计价来源后输出仍然自解释，也不需要额外再取一次价格表。
 - `projects[].sessions` 在合并口径下是一级会话数，拆分口径下是全部会话数；`subagentSessions` 始终是范围内的子代理会话数。
 - `session list --json` 每个项目有 `sessionCount`（范围内会话数）与 `listRows`（显示行数，合并口径下会少于前者）；每个会话有 `isSubagent`、`depth`、`parentId`、`subagentCount`、`subagentRequests`、`nested`。
 - `warnings` 汇总数据异常与筛选提示（如会话不存在、时间范围内无数据）。文本模式会把这些打印为“提示”。

@@ -224,9 +224,10 @@ async function runUsage(spec: string | undefined, options: UsageOptions): Promis
   }
 
   emit(
-    usageToJson(sections, engine),
-    formatUsageReport(sections, engine, symbol, {
+    usageToJson(sections),
+    formatUsageReport(sections, symbol, {
       agentLabel: loaded.adapter.label,
+      pricingLabel: engine.provider.label,
       scope: subagentMode !== 'total',
       expandSubagents: subagentMode === 'detail',
       cost: options.cost === true,

@@ -23,6 +23,7 @@ export {
   runQuery,
 } from './report.ts';
 export type {
+  BandComponent,
   BandSummary,
   ModelBreakdown,
   ProjectReport,
@@ -44,13 +45,14 @@ export {
   costOf,
   costOfGrouped,
   mergeCosts,
+  moneyBreakdown,
   priceRecords,
   reconcile,
   renderRounded,
   sumTokens,
   summarize,
 } from './accounting.ts';
-export type { ComponentUsage, CostGroup, CostSummary, ExactCost, UsageCost } from './accounting.ts';
+export type { ComponentUsage, CostGroup, CostSummary, ExactCost, MoneyBreakdown, UsageCost } from './accounting.ts';
 export { formatSessionList, formatUsageReport, sessionListToJson, usageToJson } from './format.ts';
 export { inRange, parseInstant, presetRange, resolveRange } from './timerange.ts';
 export type { RangePreset, TimeRange } from './timerange.ts';

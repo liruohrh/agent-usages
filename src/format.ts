@@ -1,18 +1,27 @@
 /**
- * Presentation layer: render reports as aligned terminal tables or stable JSON.
+ * Presentation layer: render reports as a token tree or stable JSON.
  *
- * Table layout accounts for East-Asian wide characters so Chinese titles do not
- * shear the columns. Cost rows are generated from the pricing provider's own
- * component list, so a vendor that bills something unusual still gets a labelled
- * line instead of an empty cell.
+ * The renderer is deliberately dumb: everything it prints — the tokens, the
+ * money per token figure, the bands with their rate cards, the labels — is
+ * resolved by the report and pricing layers and handed over as data. Nothing
+ * here reaches back into a pricing engine to explain a number, so a figure can
+ * only be wrong once, in the layer that owns it.
  */
 
 import stringWidth from 'string-width';
 
+import { alignMoney, moneyBreakdown, type MoneyBreakdown } from './accounting.ts';
 import { tokenBreakdown } from './core/buckets.ts';
 import type { CostTotals, TokenTotals } from './core/types.ts';
-import type { PricingEngine, RateComponent } from './pricing/index.ts';
-import type { ProjectReport, ScopeTotals, SessionListResult, SessionReport, UsageResult } from './report.ts';
+import type {
+  BandSummary,
+  ModelBreakdown,
+  ProjectReport,
+  ScopeTotals,
+  SessionListResult,
+  SessionReport,
+  UsageResult,
+} from './report.ts';
 import type { TimeRange } from './timerange.ts';
 
 /**
@@ -176,210 +185,118 @@ const RESOLUTION_NOTES: Readonly<Record<string, string>> = {
   'fallback-default': ' ← 该模型无价格表，按默认模型价格计算',
 };
 
-/** How a provider's billing basis reads in a breakdown. */
-function basisLabel(engine: PricingEngine, component: RateComponent): string {
-  return component.label.length > 0 ? component.label : engine.describeBasis(component.basis);
+/**
+ * The metric vocabulary, and the billed component each token figure prices.
+ *
+ * One vocabulary everywhere: the metric line, the band's rate card and the model
+ * lines all name a token figure the same way, so `I/C 0.02` is recognisably the
+ * price of the `I/C 241.8M` printed above it.
+ */
+const COMPONENT_METRICS: Readonly<Record<string, string>> = {
+  'input-miss': 'I/M',
+  'input-hit': 'I/C',
+  'input-write': 'I/W',
+  output: 'O/T',
+};
+
+/** The unit a rate card is quoted in. */
+function rateUnit(symbol: string): string {
+  return symbol.length === 0 ? '每百万 token' : `${symbol} / 百万 token`;
+}
+
+/** A share of a whole, shown beside the figure it describes. */
+function ratioSuffix(part: number, whole: number): string {
+  // Nothing to compare when the figure is zero, and a bare `0%` beside a zero
+  // only adds noise to an already long line.
+  if (whole <= 0 || part <= 0) return '';
+  return ` / ${((part / whole) * 100).toFixed(1)}%`;
 }
 
 /**
- * Render the cost decomposition per pricing component.
+ * The metric line every node prints.
  *
- * The columns are deliberately not the token totals, and the block has no token
- * total: a component's token count answers "how many tokens were charged for
- * this item", which for some providers is a slice of a bucket and for others
- * spans two (`inputAndCacheWrite`). Adding those counts up would double-count
- * tokens, so only the money — which does add up — is totalled.
- *
- * Unit prices are not shown here either: a component billed across two tiers has
- * no single price, so the rate card lives in the band table.
+ * Every token figure carries the money it produced, so a reader can look at the
+ * input alone or the output alone instead of only at the total. The three prompt
+ * buckets are billed one by one, so their money is exact; the completion is
+ * billed as a whole, so `O` and `R` share it (`O + R = O/T`); and the aggregates
+ * are sums of the figures beside them, never a second bill. `T` deliberately
+ * carries no money of its own — the total at the end of the line is its money,
+ * and printing both would say the same number twice. `I/W` appears only when a
+ * provider actually wrote to the cache, since until then it is a column of
+ * zeroes.
  */
-function costLines(
-  cost: CostTotals,
-  components: Map<string, { component: RateComponent; tokens: number }>,
-  symbol: string,
-  currency: string,
-  currencyRate: number,
-): string[] {
-  const rows: string[][] = [];
-  const seen = new Set<string>();
-  for (const [id, info] of components) {
-    const amount = amountForComponent(id, cost);
-    if (amount === undefined) continue;
-    seen.add(id);
-    rows.push([basisLabelText(info.component), count(info.tokens), money(amount, symbol)]);
-  }
-  for (const [id, amount] of componentAmounts(cost)) {
-    if (seen.has(id)) continue;
-    rows.push([id, '—', money(amount, symbol)]);
-  }
-  const lines = [
-    table(
-      ['计费项', '计费 token', symbol],
-      rows,
-      ['left', 'right', 'right'],
-      ['费用合计', '', money(cost.total, symbol)],
-    ),
-  ];
-  if (currencyRate !== 1) lines.push(`(按 1:${currencyRate} 折算为 ${currency}，原始计价货币见 price)`);
-  return lines;
-}
-
-/** Component label without engine access, for the fallback path. */
-function basisLabelText(component: RateComponent): string {
-  return component.label.length > 0 ? component.label : component.id;
-}
-
-/** The amount for a known component id. */
-function amountForComponent(id: string, cost: CostTotals): string | undefined {
-  switch (id) {
-    case 'input-hit':
-      return cost.cacheHitInputCost;
-    case 'input-miss':
-      return cost.cacheMissInputCost;
-    case 'output':
-      return cost.outputCost;
-    case 'input-write':
-      return cost.cacheWriteInputCost;
-    default:
-      return undefined;
-  }
-}
-
-/** Every component amount a cost total carries. */
-function componentAmounts(cost: CostTotals): [string, string][] {
-  return [
-    ['input-hit', cost.cacheHitInputCost],
-    ['input-miss', cost.cacheMissInputCost],
-    ['output', cost.outputCost],
-    ...(cost.cacheWriteInputCost === '0.0000' ? [] : ([['input-write', cost.cacheWriteInputCost]] as [string, string][])),
-  ];
+function metricsLine(tokens: TokenTotals, amounts: MoneyBreakdown, requests: number, symbol: string): string {
+  const counts = tokenBreakdown(tokens);
+  const items = [`I/M ${compact(counts.inputMiss)} ${money(amounts.inputMiss, symbol)}`];
+  if (counts.inputWrite > 0) items.push(`I/W ${compact(counts.inputWrite)} ${money(amounts.inputWrite, symbol)}`);
+  items.push(`I/C ${compact(counts.inputHit)}${ratioSuffix(counts.inputHit, counts.inputTotal)} ${money(amounts.inputHit, symbol)}`);
+  items.push(`I/T ${compact(counts.inputTotal)} ${money(amounts.inputTotal, symbol)}`);
+  items.push(`O ${compact(counts.outputOnly)} ${money(amounts.outputOnly, symbol)}`);
+  items.push(`R ${compact(counts.reasoning)}${ratioSuffix(counts.reasoning, counts.outputTotal)} ${money(amounts.reasoning, symbol)}`);
+  items.push(`O/T ${compact(counts.outputTotal)} ${money(amounts.outputTotal, symbol)}`);
+  items.push(`T ${compact(counts.total)}`);
+  items.push(`Q ${count(requests)}`);
+  // The headline total is the figure every level above and below agrees on: the
+  // breakdown is aligned to it, never the other way round.
+  items.push(money(amounts.total, symbol));
+  return items.join(' · ');
 }
 
 /**
- * Render the pricing bands as a table, one row per (period, tier).
+ * Render the pricing bands, one block each: where the rate came from, what it
+ * billed, and what the rate card said.
  *
- * This is where unit prices belong. A report-wide "unit price" would be a
- * fiction whenever usage spans two tiers — cache hits charged partly at the
- * off-peak rate and partly at the peak rate have no single price — so the rate
- * card is shown per band, beside the amount that band actually produced.
+ * A block per band rather than a row per band because a band now carries a whole
+ * metric line: the tokens it billed and the money they produced, in the same
+ * vocabulary as the tree above. The model is named in the heading because one
+ * session can span several models whose bands share a period and a tier — the
+ * unit price alone was the only thing telling those rows apart.
  */
-function bandTable(result: UsageResult, engine: PricingEngine, symbol: string): string[] {
-  if (result.bands.length === 0) return [];
-  const windows = new Map<string, string>();
-  for (const price of engine.provider.models()) {
-    for (const period of price.periods) {
-      if (!windows.has(period.id)) windows.set(period.id, engine.describeWindow(period));
-    }
-  }
-  const rows = result.bands.map((band) => {
-    const rates = Object.entries(band.rates)
-      .map(([id, rate]) => `${componentShortLabel(id)} ${rate}`)
-      .join(' / ');
-    return [
-      band.periodId,
-      TIER_LABELS[band.tier] ?? band.tier,
-      count(band.requests),
-      compact(band.inputTokens ?? 0),
-      rates.length > 0 ? `${rates} 元/M` : '—',
-      money(band.total, symbol),
-    ];
-  });
-  const lines = [
-    '计价区间:',
-    table(
-      ['区间', '时段', '请求', 'I/T', '单价', symbol],
-      rows,
-      ['left', 'left', 'right', 'right', 'left', 'right'],
-    ),
-  ];
-  // One footnote per period, not per band: a period usually contributes both an
-  // off-peak and a peak row, and repeating its window twice reads as a bug.
-  const footnotes = new Map<string, { label: string; note: string; window?: string }>();
-  for (const band of result.bands) {
+function bandBlocks(bands: readonly BandSummary[], symbol: string): string[] {
+  if (bands.length === 0) return [];
+  const lines = ['计价区间:'];
+  for (const band of bands) {
     const note = RESOLUTION_NOTES[band.resolution] ?? '';
-    const window = windows.get(band.periodId);
-    if (note === '' && window === undefined) continue;
-    const existing = footnotes.get(band.periodId);
-    // A period has one provenance; a fallback note is preferred over silence.
-    if (existing !== undefined && (existing.note !== '' || note === '')) continue;
-    footnotes.set(band.periodId, { label: band.periodLabel, note, ...(window === undefined ? {} : { window }) });
-  }
-  // The footnotes explain the period ids used above, so they sit left-aligned
-  // under the table, separated by a blank line. They must not be indented: an
-  // indented period id reads as a table row that drifted right, and there is no
-  // column it could belong to.
-  if (footnotes.size > 0) lines.push('');
-  for (const [periodId, footnote] of footnotes) {
-    const where = footnote.window === undefined ? '' : `（${footnote.window}）`;
-    lines.push(`${periodId}${where}：${footnote.label}${footnote.note}`);
+    const window = band.window.length === 0 ? '' : `（${band.window}）`;
+    // The model names the requests carried, which are the ones the reader saw in
+    // the tree above; a price schedule reached through an alias is an internal
+    // detail and is only reported in `--json`.
+    const named = band.models.length > 0 ? band.models.join('、') : band.model;
+    lines.push(`▸ ${band.periodId} ${TIER_LABELS[band.tier] ?? band.tier} · ${named}`);
+    lines.push(`  ${band.periodLabel}${window}${note}`);
+    lines.push(`  ${metricsLine(band.tokens, moneyBreakdown(band.cost, band.tokens), band.requests, symbol)}`);
+    const rates = band.components
+      .map((component) => `${COMPONENT_METRICS[component.id] ?? component.label} ${component.rate}`)
+      .join(' · ');
+    if (rates.length > 0) lines.push(`  P（${rateUnit(symbol)}）: ${rates}`);
   }
   return lines;
 }
 
-/** A short, stable name for a pricing component id, for dense tables. */
-function componentShortLabel(id: string): string {
-  switch (id) {
-    case 'input-hit':
-      return '命中';
-    case 'input-miss':
-      return '未命中';
-    case 'output':
-      return '输出';
-    case 'input-write':
-      return '写入';
-    default:
-      return id;
-  }
-}
-
 /**
- * The token figures every table reports, in one order and one vocabulary.
+ * One line per model, for a node that billed under more than one.
  *
- * Each table used to pick its own three columns, which made the tables
- * incomparable: the `总量` block reports seven figures, so a reader could not
- * check a project's input total or its reasoning against it. Every table now
- * carries the same set — abbreviated, because seven spelled-out headers push a
- * table past the terminal width:
- *
- * `I` 未命中输入 · `I/C` 缓存命中 · `I/T` 输入合计 ·
- * `O` 输出(非思考) · `R` 输出(思考) · `O/T` 输出合计 · `T` Token 总计
+ * A node keeps exactly one metric line — the money across models is summed, and
+ * it sums honestly because every rate was converted into the report's currency
+ * before it was applied. This only says how that one line splits, which is what
+ * tells a reader that the blended numbers came from two different price lists.
  */
-const TOKEN_HEADERS = ['I', 'I/C', 'I/T', 'O', 'R', 'O/T', 'T'] as const;
-
-/** Token figures in {@link TOKEN_HEADERS} order, comma-compacted for table width. */
-function tokenCells(tokens: TokenTotals): string[] {
-  const parts = tokenBreakdown(tokens);
-  return [
-    compact(parts.inputMiss),
-    compact(parts.inputHit),
-    compact(parts.inputTotal),
-    compact(parts.outputOnly),
-    compact(parts.reasoning),
-    compact(parts.outputTotal),
-    compact(parts.total),
-  ];
-}
-
-/** Right-alignment spec for a table that ends in the shared token columns. */
-function tokenAligns(leading: number, trailing: number): ('left' | 'right')[] {
-  return [
-    ...Array.from({ length: leading }, (): 'left' => 'left'),
-    ...TOKEN_HEADERS.map((): 'right' => 'right'),
-    ...Array.from({ length: trailing }, (): 'right' => 'right'),
-  ];
-}
-
-/** Render a per-model table. */
-function modelTable(result: UsageResult, symbol: string): string {
-  return table(
-    ['M', '请求', ...TOKEN_HEADERS, symbol],
-    result.models.map((model) => [
-      model.model,
-      count(model.requests),
-      ...tokenCells(model.tokens),
-      money(model.cost.total, symbol),
-    ]),
-    tokenAligns(1, 1),
+function modelLines(
+  models: readonly ModelBreakdown[],
+  level: number,
+  symbol: string,
+  parentMoney: MoneyBreakdown,
+): string[] {
+  if (models.length <= 1) return [];
+  // The model rows are parts of the node's line above them, so they are aligned
+  // to it: a reader adding the rows must land on the number they were split from.
+  const rows = alignMoney(
+    parentMoney,
+    models.map((model) => moneyBreakdown(model.cost, model.tokens)),
+  );
+  return models.map(
+    (model, index) =>
+      `${indent(level)}[${model.model}]  ${metricsLine(model.tokens, rows[index]!, model.requests, symbol)}`,
   );
 }
 
@@ -401,10 +318,12 @@ export interface FormatOptions {
   scope?: boolean | undefined;
   /** List every subagent under its session's 子代理 line. */
   expandSubagents?: boolean | undefined;
-  /** Append the per-component cost table and the pricing bands. */
+  /** Append the pricing bands: what each rate billed, and what it charged. */
   cost?: boolean | undefined;
-  /** Append the per-model table. */
+  /** Expand every node that billed under more than one model. */
   models?: boolean | undefined;
+  /** Pricing provider's display name, for the header. */
+  pricingLabel?: string | undefined;
 }
 
 /** Two-digit zero pad. */
@@ -451,28 +370,6 @@ function indent(level: number): string {
   return '  '.repeat(level);
 }
 
-/**
- * The metric line every node prints.
- *
- * Terse by design — `I/C` is cache-read input, `R` reasoning, `Q` requests — so
- * the seven token figures, the request count, and the money fit one line without
- * a table's fixed columns and their width limit.
- */
-function metricsLine(tokens: TokenTotals, requests: number, cost: string, symbol: string): string {
-  const parts = tokenBreakdown(tokens);
-  return [
-    `I ${compact(parts.inputMiss)}`,
-    `I/C ${compact(parts.inputHit)}`,
-    `I/T ${compact(parts.inputTotal)}`,
-    `O ${compact(parts.outputOnly)}`,
-    `R ${compact(parts.reasoning)}`,
-    `O/T ${compact(parts.outputTotal)}`,
-    `T ${compact(parts.total)}`,
-    `Q ${count(requests)}`,
-    money(cost, symbol),
-  ].join(' · ');
-}
-
 /** Width of the 总 / 自身 / 子代理 labels, in display cells. */
 const SCOPE_LABEL_WIDTH = 6;
 
@@ -483,9 +380,14 @@ function scopeLines(
   symbol: string,
 ): string[] {
   const at = indent(level);
-  const line = (name: string, totals: ScopeTotals): string =>
-    `${at}${pad(name, SCOPE_LABEL_WIDTH)}  ${metricsLine(totals.tokens, totals.requests, totals.cost.total, symbol)}`;
-  return [line('总', node.total), line('自身', node.own), line('子代理', node.spawned)];
+  const total = moneyBreakdown(node.total.cost, node.total.tokens);
+  const [own, spawned] = alignMoney(total, [
+    moneyBreakdown(node.own.cost, node.own.tokens),
+    moneyBreakdown(node.spawned.cost, node.spawned.tokens),
+  ]) as [MoneyBreakdown, MoneyBreakdown];
+  const line = (name: string, totals: ScopeTotals, amounts: MoneyBreakdown): string =>
+    `${at}${pad(name, SCOPE_LABEL_WIDTH)}  ${metricsLine(totals.tokens, amounts, totals.requests, symbol)}`;
+  return [line('总', node.total, total), line('自身', node.own, own), line('子代理', node.spawned, spawned)];
 }
 
 /** One session and, recursively, everything it spawned. */
@@ -496,6 +398,7 @@ function sessionLines(
   symbol: string,
   options: FormatOptions,
   parentDate: string | undefined,
+  parentMoney: MoneyBreakdown | undefined,
 ): string[] {
   const children = childrenOf.get(session.id) ?? [];
   const badge = session.subagentCount > 0 ? `（${count(session.subagentCount)} 个子代理）` : '';
@@ -503,27 +406,41 @@ function sessionLines(
   // The date is only worth repeating when it differs from the row above.
   const suffix = end === undefined || end === parentDate ? '' : ` ${end}`;
   const lines = [`${indent(level)}${clip(session.title ?? '(无标题)', TITLE_WIDTH)}${badge}${suffix}`];
-  const metric = (totals: ScopeTotals): string =>
-    `${indent(level + 1)}${metricsLine(totals.tokens, totals.requests, totals.cost.total, symbol)}`;
+  // This row is a part of the nearest line above it, so it is aligned to that
+  // line's amount rather than rounded on its own.
+  const own = moneyBreakdown(session.total.cost, session.total.tokens);
+  const total = parentMoney === undefined ? own : alignMoney(parentMoney, [own])[0]!;
   // The split is worth printing only when there is something to split off; a
   // session with no subagents says everything in one line.
   const split = session.spawned.requests > 0 || children.length > 0;
   if (options.scope === true && split) {
     lines.push(...scopeLines(session, level + 1, symbol));
+    if (options.models === true) lines.push(...modelLines(session.models, level + 1, symbol, total));
     if (options.expandSubagents === true) {
-      for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 2, symbol, options, end));
+      const spawned = alignMoney(moneyBreakdown(session.total.cost, session.total.tokens), [
+        moneyBreakdown(session.spawned.cost, session.spawned.tokens),
+      ])[0]!;
+      for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 2, symbol, options, end, spawned));
     }
     return lines;
   }
-  lines.push(metric(session.total));
+  lines.push(`${indent(level + 1)}${metricsLine(session.total.tokens, total, session.total.requests, symbol)}`);
+  if (options.models === true) lines.push(...modelLines(session.models, level + 1, symbol, total));
   if (options.expandSubagents === true) {
-    for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 1, symbol, options, end));
+    for (const child of children) {
+      lines.push(...sessionLines(child, childrenOf, level + 1, symbol, options, end, total));
+    }
   }
   return lines;
 }
 
 /** One project's block: its name, its metrics, and its sessions. */
-function projectLines(project: ProjectReport, symbol: string, options: FormatOptions): string[] {
+function projectLines(
+  project: ProjectReport,
+  symbol: string,
+  options: FormatOptions,
+  parentMoney: MoneyBreakdown | undefined,
+): string[] {
   const rows = project.sessionReports ?? [];
   const known = new Set(rows.map((row) => row.id));
   const roots = rows.filter((row) => row.parentId === null || !known.has(row.parentId));
@@ -536,23 +453,35 @@ function projectLines(project: ProjectReport, symbol: string, options: FormatOpt
   }
   const projectStart = project.firstUsage === null ? undefined : dayText(project.firstUsage);
   const lines = [projectStart === undefined ? project.name : `${project.name} ${projectStart}`];
-  // A project whose whole tree is one session repeats that session's numbers,
-  // so its own line is dropped; a session whose only children it already lists
-  // collapses the same way.
+  // A project whose whole tree is one session repeats that session's numbers, so
+  // its own line is dropped — and then the sessions below are aligned straight to
+  // the line above the project instead.
+  const own = moneyBreakdown(project.total.cost, project.total.tokens);
+  const shown = parentMoney === undefined || rows.length === 1 ? own : alignMoney(parentMoney, [own])[0]!;
   const split = project.spawned.requests > 0 || rows.some((row) => row.isSubagent);
   if (rows.length !== 1) {
     lines.push(
       options.scope === true && split
         ? [...scopeLines(project, 1, symbol)].join('\n')
-        : `${indent(1)}${metricsLine(project.total.tokens, project.total.requests, project.total.cost.total, symbol)}`,
+        : `${indent(1)}${metricsLine(project.total.tokens, shown, project.total.requests, symbol)}`,
     );
+    if (options.models === true) lines.push(...modelLines(project.models, 1, symbol, shown));
   }
-  for (const root of roots) lines.push(...sessionLines(root, childrenOf, 1, symbol, options, projectStart));
+  // Session rows are parts of whichever project line was printed, or of the
+  // nearest line above it when this project collapsed.
+  const rowMoney = alignMoney(
+    rows.length === 1 ? (parentMoney ?? own) : shown,
+    rows.map((row) => moneyBreakdown(row.total.cost, row.total.tokens)),
+  );
+  const byRow = new Map(rows.map((row, index) => [row.id, rowMoney[index]!]));
+  for (const root of roots) {
+    lines.push(...sessionLines(root, childrenOf, 1, symbol, options, projectStart, byRow.get(root.id)));
+  }
   return lines;
 }
 
 /** Render one window: its heading, the root total, and the project tree. */
-function renderSection(section: ReportSection, engine: PricingEngine, symbol: string, options: FormatOptions): string[] {
+function renderSection(section: ReportSection, symbol: string, options: FormatOptions): string[] {
   const { result } = section;
   const span =
     result.firstUsage === null || result.lastUsage === null ? undefined : spanText(result.firstUsage, result.lastUsage);
@@ -561,23 +490,27 @@ function renderSection(section: ReportSection, engine: PricingEngine, symbol: st
   const active = result.projects.filter((project) => (project.sessionReports ?? []).length > 0);
   // One project already prints exactly the report's own numbers, so the root
   // block would only repeat them.
+  const rootMoney = moneyBreakdown(result.cost, result.tokens);
   if (active.length !== 1) {
     lines.push(
       options.scope === true && result.scopeBreakdown !== undefined
         ? [...scopeLines({ own: result.scopeBreakdown.own, spawned: result.scopeBreakdown.subagents, total: result.scopeBreakdown.total }, 1, symbol)].join('\n')
-        : `${indent(1)}${metricsLine(result.tokens, result.requests, result.cost.total, symbol)}`,
+        : `${indent(1)}${metricsLine(result.tokens, rootMoney, result.requests, symbol)}`,
     );
+    if (options.models === true) lines.push(...modelLines(result.models, 1, symbol, rootMoney));
   }
-  for (const project of active) {
-    lines.push('', ...projectLines(project, symbol, options));
+  // A single project prints exactly the root's numbers, so the projects are
+  // aligned to the root line when it is shown and stand alone when it is not.
+  const projectMoney = active.length === 1 ? [] : alignMoney(
+    rootMoney,
+    active.map((project) => moneyBreakdown(project.total.cost, project.total.tokens)),
+  );
+  for (const [index, project] of active.entries()) {
+    lines.push('', ...projectLines(project, symbol, options, active.length === 1 ? rootMoney : projectMoney[index]));
   }
   if (options.cost === true) {
-    lines.push('', '费用明细（单价见计价区间）:', ...costLines(result.cost, result.components, symbol, result.currency, result.currencyRate));
-    const bands = bandTable(result, engine, symbol);
+    const bands = bandBlocks(result.bands, symbol);
     if (bands.length > 0) lines.push('', ...bands);
-  }
-  if (options.models === true && result.models.length > 0) {
-    lines.push('', '模型明细:', modelTable(result, symbol));
   }
   if (result.warnings.length > 0) {
     lines.push('', '提示:', ...result.warnings.map((warning) => `  - ${warning}`));
@@ -588,14 +521,12 @@ function renderSection(section: ReportSection, engine: PricingEngine, symbol: st
 /**
  * Render a usage report for the terminal.
  * @param sections - one window, or several when the caller asked for them together.
- * @param engine - pricing engine, for period descriptions and component labels.
  * @param symbol - currency symbol to print.
  * @param options - what to include beyond the default tree.
  * @returns the text to print.
  */
 export function formatUsageReport(
   sections: readonly ReportSection[],
-  engine: PricingEngine,
   symbol: string,
   options: FormatOptions = {},
 ): string {
@@ -608,10 +539,10 @@ export function formatUsageReport(
     sections.length === 1
       ? `时间范围  ${first.range.label}`
       : `时间窗口  ${sections.map((section) => section.label).join(' / ')}`,
-    `计价来源  ${engine.provider.label}（${first.result.currency}${first.result.currencyRate === 1 ? '' : `，1:${first.result.currencyRate}`}）`,
+    `计价来源  ${options.pricingLabel ?? first.result.pricingProvider}（${first.result.currency}${first.result.currencyRate === 1 ? '' : `，1:${first.result.currencyRate}`}）`,
   ].join('\n');
   const blocks = [header];
-  for (const section of sections) blocks.push(renderSection(section, engine, symbol, options).join('\n'));
+  for (const section of sections) blocks.push(renderSection(section, symbol, options).join('\n'));
   return `${blocks.join('\n\n')}\n`;
 }
 
@@ -675,10 +606,9 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
 /**
  * Serialise a usage result as JSON-ready data.
  * @param result - the aggregated result.
- * @param engine - pricing engine, for component labels.
  * @returns a plain object with ISO timestamps beside every epoch value.
  */
-function resultToJson(result: UsageResult, engine: PricingEngine): Record<string, unknown> {
+function resultToJson(result: UsageResult): Record<string, unknown> {
   return {
     agent: result.agent,
     source: result.source,
@@ -716,15 +646,8 @@ function resultToJson(result: UsageResult, engine: PricingEngine): Record<string
       tokenBreakdown: tokenBreakdown(result.tokens),
       cost: result.cost,
     },
-    costComponents: [...result.components].map(([id, info]) => ({
-      id,
-      label: basisLabel(engine, info.component),
-      basis: info.component.basis,
-      rate: info.component.rate,
-      per: info.component.per,
-      tokens: info.tokens,
-      amount: amountForComponent(id, result.cost) ?? result.cost.total,
-    })),
+    // The bands carry the whole rate card — rate, tokens charged, money — so a
+    // separate component list would be the same data projected twice.
     pricingBands: result.bands,
     models: result.models,
     projects: result.projects.map((project) => ({
@@ -783,13 +706,12 @@ function resultToJson(result: UsageResult, engine: PricingEngine): Record<string
 /**
  * Serialise one report window as JSON-ready data.
  * @param sections - the windows that were rendered.
- * @param engine - pricing engine, for component labels.
  * @returns the single window's object, or one object per window under `sections`.
  */
-export function usageToJson(sections: readonly ReportSection[], engine: PricingEngine): unknown {
+export function usageToJson(sections: readonly ReportSection[]): unknown {
   const [first] = sections;
   if (first === undefined) return {};
-  if (sections.length === 1) return resultToJson(first.result, engine);
+  if (sections.length === 1) return resultToJson(first.result);
   return {
     agent: first.result.agent,
     source: first.result.source,
@@ -797,7 +719,7 @@ export function usageToJson(sections: readonly ReportSection[], engine: PricingE
     currency: first.result.currency,
     currencyRate: first.result.currencyRate,
     subagentMode: first.result.subagentMode,
-    sections: sections.map((section) => ({ label: section.label, ...resultToJson(section.result, engine) })),
+    sections: sections.map((section) => ({ label: section.label, ...resultToJson(section.result) })),
   };
 }
 

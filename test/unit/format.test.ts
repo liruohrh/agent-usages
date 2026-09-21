@@ -26,9 +26,12 @@ function cost(total: string, overrides: Partial<CostTotals> = {}): CostTotals {
     outputTokens: 0,
     cacheWriteTokens: 0,
     cacheHitInputCost: '0.0000',
-    cacheMissInputCost: '0.0000',
+    // The bills in these fixtures live on the cache-miss bucket unless a test
+    // says otherwise, so every component adds up to the total.
+    cacheMissInputCost: total,
     outputCost: '0.0000',
     cacheWriteInputCost: '0.0000',
+    reasoningCost: '0.0000',
     total,
     ...overrides,
   };
@@ -75,7 +78,6 @@ function report(overrides: Partial<UsageResult> = {}): UsageResult {
     tokens: emptyBuckets(),
     cost: cost('0.0000'),
     bands: [],
-    components: new Map(),
     models: [],
     projects: [],
     warnings: [],
@@ -134,7 +136,7 @@ function one(result: UsageResult, label = '总'): ReportSection[] {
 
 /** Render a report, defaulting to the plain tree. */
 function render(result: UsageResult, options: FormatOptions = {}): string {
-  return formatUsageReport(one(result), engine, '¤', options);
+  return formatUsageReport(one(result), '¤', { pricingLabel: engine.provider.label, ...options });
 }
 
 /** A tiny token set whose figures stay below `compact`'s rounding. */
@@ -170,7 +172,9 @@ describe('formatUsageReport', () => {
         ],
       }),
     );
-    expect(text).toContain('I 10 · I/C 20 · I/T 30 · O 40 · R 10 · O/T 50 · T 80 · Q 3 · ¤1.00');
+    expect(text).toContain(
+      'I/M 10 ¤1.00 · I/C 20 / 66.7% ¤0.00 · I/T 30 ¤1.00 · O 40 ¤0.00 · R 10 / 20.0% ¤0.00 · O/T 50 ¤0.00 · T 80 · Q 3 · ¤1.00',
+    );
     // The name line carries only the name.
     expect(text).toContain('\n  First\n');
     expect(text).not.toContain('  First I ');
@@ -200,7 +204,9 @@ describe('formatUsageReport', () => {
     expect(lines).toContain('总');
     expect(lines).toContain('alpha');
     expect(lines).toContain('  A one');
-    expect(lines).toContain('    I 10 · I/C 20 · I/T 30 · O 40 · R 10 · O/T 50 · T 80 · Q 1 · ¤1.00');
+    expect(lines).toContain(
+      '    I/M 10 ¤1.00 · I/C 20 / 66.7% ¤0.00 · I/T 30 ¤1.00 · O 40 ¤0.00 · R 10 / 20.0% ¤0.00 · O/T 50 ¤0.00 · T 80 · Q 1 · ¤1.00',
+    );
   });
 
   it('drops a project line that only repeats its single session', () => {
@@ -347,18 +353,41 @@ describe('formatUsageReport', () => {
     expect(text).toContain('      Child');
   });
 
-  it('appends the cost and model tables only when asked', () => {
-    const plain = render(report());
-    expect(plain).not.toContain('费用明细');
-    expect(plain).not.toContain('模型明细');
+  it('appends pricing bands and per-model lines only when asked', () => {
+    const band = {
+      model: 'demo-model',
+      models: ['demo-model'],
+      periodId: '2026-08-16',
+      periodLabel: '正式版',
+      window: '2026-08-16 00:00 → 至今',
+      tier: 'flat' as const,
+      resolution: 'exact' as const,
+      requests: 3,
+      tokens: SMALL,
+      cost: cost('1.0000'),
+      components: [{ id: 'input-miss', label: '未命中', rate: '1', per: 1_000_000, tokens: 10, amount: '1.0000' }],
+    };
+    const plain = render(report({ bands: [band] }));
+    expect(plain).not.toContain('计价区间');
+    expect(plain).not.toContain('P（');
     const full = render(
       report({
-        models: [{ model: 'demo-model', requests: 1, tokens: SMALL, cost: cost('1.0000') }],
+        bands: [band],
+        models: [
+          { model: 'demo-model', requests: 1, tokens: SMALL, cost: cost('1.0000') },
+          { model: 'other-model', requests: 2, tokens: SMALL, cost: cost('2.0000') },
+        ],
       }),
       { cost: true, models: true },
     );
-    expect(full).toContain('费用明细（单价见计价区间）');
-    expect(full).toContain('模型明细');
+    expect(full).toContain('计价区间:');
+    expect(full).toContain('▸ 2026-08-16 统一价格 · demo-model');
+    expect(full).toContain('  正式版（2026-08-16 00:00 → 至今）');
+    expect(full).toContain('P（¤ / 百万 token）: I/M 1');
+    expect(full).toContain('[demo-model]');
+    expect(full).toContain('[other-model]');
+    // A single-model node says nothing the line above it does not.
+    expect(render(report({ models: [{ model: 'solo', requests: 1, tokens: SMALL, cost: cost('1.0000') }] }), { models: true })).not.toContain('[solo]');
   });
 
   it('prints warnings under a heading', () => {
@@ -375,7 +404,6 @@ describe('formatUsageReport', () => {
         { label: '总', range: first.range, result: first },
         { label: '今日', range: second.range, result: second },
       ],
-      engine,
       '¤',
     );
     expect(text).toContain('时间窗口  总 / 今日');
@@ -418,7 +446,6 @@ describe('date labels', () => {
   const window = (label: string, from: number | null, to: number | null): string =>
     formatUsageReport(
       [{ label, range: { from, to, label }, result: report({ firstUsage: from, lastUsage: to }) }],
-      engine,
       '¤',
     );
 
@@ -482,8 +509,7 @@ describe('date labels', () => {
 });
 
 describe('usageToJson', () => {
-  const json = (result: UsageResult, engine2 = engine): Record<string, unknown> =>
-    usageToJson(one(result), engine2) as Record<string, unknown>;
+  const json = (result: UsageResult): Record<string, unknown> => usageToJson(one(result)) as Record<string, unknown>;
 
   it('carries agent, source, and pricing provider for provenance', () => {
     const body = json(report());
@@ -546,19 +572,38 @@ describe('usageToJson', () => {
     expect(body.range['toIso']).toBeNull();
   });
 
-  it('lists each cost component with its own rate basis', () => {
+  it('carries each band with its rate card and what it charged', () => {
     const body = json(
       report({
         cost: cost('5.0200', { cacheMissInputCost: '1.0000' }),
-        components: new Map([
-          [
-            'input-miss',
-            { component: { id: 'input-miss', label: '未命中', basis: 'inputAndCacheWrite', rate: '1', per: 1_000_000 }, tokens: 1_000_000 },
-          ],
-        ]),
+        bands: [
+          {
+            model: 'demo-model',
+            models: ['demo-model'],
+            periodId: '2026-08-16',
+            periodLabel: '正式版',
+            window: '2026-08-16 00:00 → 至今',
+            tier: 'flat',
+            resolution: 'exact',
+            requests: 3,
+            tokens: SMALL,
+            cost: cost('1.0000', { cacheMissInputCost: '1.0000' }),
+            components: [
+              { id: 'input-miss', label: '未命中', rate: '1', per: 1_000_000, tokens: 1_000_000, amount: '1.0000' },
+            ],
+          },
+        ],
       }),
-    ) as { costComponents: Record<string, unknown>[] };
-    expect(body.costComponents[0]).toMatchObject({ id: 'input-miss', basis: 'inputAndCacheWrite', rate: '1', amount: '1.0000' });
+    ) as { pricingBands: Record<string, unknown>[] };
+    expect(body.pricingBands[0]).toMatchObject({
+      model: 'demo-model',
+      models: ['demo-model'],
+      periodId: '2026-08-16',
+      periodLabel: '正式版',
+      tier: 'flat',
+      requests: 3,
+      components: [{ id: 'input-miss', rate: '1', amount: '1.0000', tokens: 1_000_000 }],
+    });
   });
 
   it('carries each node\'s own / spawned / total split', () => {
@@ -592,7 +637,6 @@ describe('usageToJson', () => {
         { label: '总', range: first.range, result: first },
         { label: '今日', range: second.range, result: second },
       ],
-      engine,
     ) as { sections: { label: string }[] };
     expect(body.sections.map((section) => section.label)).toEqual(['总', '今日']);
   });

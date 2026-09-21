@@ -9,9 +9,9 @@
  * the rows displayed beside it.
  */
 
-import { emptyBuckets } from './core/buckets.ts';
+import { addBuckets, emptyBuckets } from './core/buckets.ts';
 import type { CostTotals, ProjectRecord, SessionRecord, TokenTotals, UsageDataset, UsageRecord } from './core/types.ts';
-import { costOf, costOfGrouped, type ComponentUsage, type CostSummary } from './accounting.ts';
+import { costOf, costOfGrouped, type CostSummary } from './accounting.ts';
 import type { PricingEngine } from './pricing/index.ts';
 import { inRange, type TimeRange } from './timerange.ts';
 
@@ -64,32 +64,58 @@ export interface ModelBreakdown {
   cost: CostTotals;
 }
 
-/** One (period, tier) group of cost, with the rates that produced it. */
+/** One billed item inside a band: the rate, what it charged, and the money. */
+export interface BandComponent {
+  /** Component id from the provider's rate card. */
+  id: string;
+  /** Human-readable label, e.g. `缓存命中输入`. */
+  label: string;
+  /** Published rate, in the report's currency per {@link per} tokens. */
+  rate: string;
+  /** Tokens the rate is quoted per. */
+  per: number;
+  /** Tokens this component charged in this band. */
+  tokens: number;
+  /** Money this component produced in this band. */
+  amount: string;
+}
+
+/**
+ * One (model, period, tier) group of cost, with the rate card that produced it.
+ *
+ * Complete on purpose: a reader can see the tokens billed in the band, the money
+ * they produced, and the unit price of every item — so the renderer never has to
+ * go back to the pricing engine to explain a number it prints.
+ */
 export interface BandSummary {
+  /** Price schedule the band's rates came from. */
+  model: string;
+  /**
+   * Models the billed requests actually named.
+   *
+   * A record may name an alias of {@link model}, so the two can differ; both are
+   * kept because the rate belongs to the schedule while the request belongs to
+   * the name the agent logged.
+   */
+  models: string[];
   /** Price period the rate came from. */
   periodId: string;
   /** Period label. */
   periodLabel: string;
+  /** When that period is in effect, as the provider describes it. */
+  window: string;
   /** Tier within the period. */
   tier: 'peak' | 'off-peak' | 'flat';
   /** How the period was selected. */
   resolution: 'exact' | 'fallback-later' | 'fallback-earlier' | 'fallback-default';
   /** Requests billed under this band. */
   requests: number;
-  /** Amount charged under this band. */
-  total: string;
-  /**
-   * Amount per pricing component, keyed by component id.
-   *
-   * Carried per band so a reader can see that, for example, cache hits were
-   * partly charged at the off-peak rate and partly at the peak rate — a single
-   * "unit price" for the whole report would be a fiction.
-   */
-  amounts: Readonly<Record<string, string>>;
-  /** Rates charged in this band, keyed by component id. */
-  rates: Readonly<Record<string, string>>;
-  /** Prompt tokens billed in this band: cache misses + hits + writes. */
-  inputTokens: number;
+  /** Tokens billed under this band, in every bucket. */
+  tokens: TokenTotals;
+  /** Money this band produced, per billed component. */
+  cost: CostTotals;
+  /** The rate card that applied, with what each item charged. */
+  components: BandComponent[];
 }
 
 /** One session's aggregate. */
@@ -242,10 +268,8 @@ export interface UsageResult {
   tokens: TokenTotals;
   /** Cost totals. */
   cost: CostTotals;
-  /** Which bands contributed. */
+  /** Which bands contributed, each with its own rate card and money. */
   bands: BandSummary[];
-  /** Tokens charged per pricing component, keyed by component id. */
-  components: Map<string, ComponentUsage>;
   /** Per-model figures. */
   models: ModelBreakdown[];
   /** Per-project rows. */
@@ -451,37 +475,89 @@ function sumOf(records: readonly UsageRecord[]): TokenTotals {
   return totals;
 }
 
-/** Turn a cost summary's breakdown into the report's band rows. */
+/** Cost totals carrying only the billed components a band knows about. */
+function bandCost(amounts: Readonly<Record<string, string>>, total: string, reasoning: string): CostTotals {
+  return {
+    cacheHitInputTokens: 0,
+    cacheMissInputTokens: 0,
+    outputTokens: 0,
+    cacheWriteTokens: 0,
+    cacheHitInputCost: amounts['input-hit'] ?? '0.0000',
+    cacheMissInputCost: amounts['input-miss'] ?? '0.0000',
+    outputCost: amounts['output'] ?? '0.0000',
+    cacheWriteInputCost: amounts['input-write'] ?? '0.0000',
+    reasoningCost: reasoning,
+    total,
+  };
+}
+
+/**
+ * Turn a cost summary's breakdown into the report's band rows.
+ *
+ * Records the engine could not price contribute nothing, which is why the
+ * per-band tokens are summed here rather than taken from the record list: a
+ * band's tokens are exactly the tokens its money was charged on.
+ */
 function bandsOf(summary: CostSummary, engine: PricingEngine, records: readonly UsageRecord[]): BandSummary[] {
-  // Rates are per (model, period, tier), so the rate for a band is taken from
-  // any record billed in it — the engine is the only place that knows.
-  const ratesByBand = new Map<string, Record<string, string>>();
-  const inputTokensByBand = new Map<string, number>();
+  interface Accumulated {
+    tokens: TokenTotals;
+    charged: Map<string, number>;
+    rateCard: BandComponent[];
+    window: string;
+    models: Set<string>;
+  }
+  const accumulated = new Map<string, Accumulated>();
   for (const record of records) {
     const resolved = engine.resolve(record);
     if (resolved === undefined) continue;
     const key = `${resolved.model}\u0000${resolved.period.id}\u0000${resolved.tier}`;
-    // The prompt side of the request, which is what the rate card prices.
-    inputTokensByBand.set(
-      key,
-      (inputTokensByBand.get(key) ?? 0) + record.tokens.input + record.tokens.cacheRead + record.tokens.cacheWrite,
-    );
-    if (ratesByBand.has(key)) continue;
-    const rates: Record<string, string> = {};
-    for (const component of resolved.components) rates[component.id] = component.rate;
-    ratesByBand.set(key, rates);
+    let entry = accumulated.get(key);
+    if (entry === undefined) {
+      entry = {
+        tokens: emptyBuckets(),
+        charged: new Map(),
+        // The rate card is a property of the (model, period, tier) the engine
+        // resolved, so one record is enough to describe it.
+        rateCard: resolved.components.map((component) => ({
+          id: component.id,
+          label: component.label.length > 0 ? component.label : engine.describeBasis(component.basis),
+          rate: component.rate,
+          per: component.per,
+          tokens: 0,
+          amount: '0.0000',
+        })),
+        window: engine.describeWindow(resolved.period),
+        models: new Set(),
+      };
+      accumulated.set(key, entry);
+    }
+    entry.tokens = addBuckets(entry.tokens, record.tokens);
+    entry.models.add(record.model);
+    for (const component of resolved.components) {
+      const quantity = engine.quantityOf(component, record.tokens);
+      entry.charged.set(component.id, (entry.charged.get(component.id) ?? 0) + quantity);
+    }
   }
-  return summary.breakdown.map((band) => ({
-    periodId: band.periodId,
-    periodLabel: band.periodLabel,
-    tier: band.tier,
-    resolution: band.resolution,
-    requests: band.requests,
-    total: band.total,
-    amounts: band.amounts,
-    rates: ratesByBand.get(`${band.model}\u0000${band.periodId}\u0000${band.tier}`) ?? {},
-    inputTokens: inputTokensByBand.get(`${band.model}\u0000${band.periodId}\u0000${band.tier}`) ?? 0,
-  }));
+  return summary.breakdown.map((band) => {
+    const entry = accumulated.get(`${band.model}\u0000${band.periodId}\u0000${band.tier}`);
+    return {
+      model: band.model,
+      models: [...(entry?.models ?? [])].sort(),
+      periodId: band.periodId,
+      periodLabel: band.periodLabel,
+      window: entry?.window ?? '',
+      tier: band.tier,
+      resolution: band.resolution,
+      requests: band.requests,
+      tokens: entry?.tokens ?? emptyBuckets(),
+      cost: bandCost(band.amounts, band.total, band.reasoningCost),
+      components: (entry?.rateCard ?? []).map((component) => ({
+        ...component,
+        tokens: entry?.charged.get(component.id) ?? 0,
+        amount: band.amounts[component.id] ?? '0.0000',
+      })),
+    };
+  });
 }
 
 /** Build one session's report row from its records. */
@@ -780,7 +856,6 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
     tokens: sumOf(allRecords),
     cost: mergedAll.totals,
     bands: bandsOf(mergedAll, engine, allRecords),
-    components: mergedAll.components,
     models: modelsOf(allRecords, engine, query.currencyRate),
     projects: projectRows,
     warnings,

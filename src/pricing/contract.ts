@@ -158,6 +158,8 @@ export interface CostBreakdown {
   requests: number;
   /** Amount per component id, as exact decimal strings in the pricing currency. */
   amounts: Readonly<Record<string, string>>;
+  /** Part of the output amount attributable to this group's reasoning tokens. */
+  reasoningCost: string;
   /** Sum of {@link CostBreakdown.amounts}. */
   total: string;
 }
