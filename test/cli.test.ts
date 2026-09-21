@@ -41,7 +41,9 @@ async function cli(args: string[], env: Record<string, string> = {}): Promise<Cl
     const { stdout, stderr } = await run(process.execPath, [CLI, ...args], {
       // Pin the data root explicitly: the adapter prefers DSH_HOME over HOME,
       // and the ambient environment in a developer's shell usually has one.
-      env: { ...process.env, HOME: home, DSH_HOME: join(home, '.dsh'), ...env },
+      // The default display currency follows the locale, so tests pin one:
+      // zh-CN keeps the fixture's own currency and leaves the numbers alone.
+      env: { ...process.env, LANG: 'zh_CN.UTF-8', HOME: home, DSH_HOME: join(home, '.dsh'), ...env },
     });
     return { code: 0, stdout, stderr };
   } catch (error) {
@@ -237,21 +239,47 @@ describe('usage', () => {
     expect(stderr).toMatch(/unknown option/);
   });
 
-  it('multiplies by --currency-rate', async () => {
+  it('converts at --currency-rate and names the currency', async () => {
     const parsed = JSON.parse((await cli(['usage', '--json', '--currency', 'USD', '--currency-rate', '0.14'])).stdout) as {
       currency: string;
       currencyRate: number;
+      rateInfo: { source: string; base: string; display: string };
       totals: { cost: Record<string, string> };
     };
     expect(parsed.currency).toBe('USD');
     expect(parsed.currencyRate).toBe(0.14);
+    expect(parsed.rateInfo).toMatchObject({ source: '手工指定', base: 'CNY', display: 'USD' });
     expect(parsed.totals.cost['total']).toBe('0.7028');
   });
 
-  it('rejects a non-numeric currency rate', async () => {
-    const { code, stderr } = await cli(['usage', '--currency-rate', 'abc']);
-    expect(code).toBe(1);
-    expect(stderr).toMatch(/汇率必须是非负数字/);
+  it('rejects a rate that is not a positive decimal', async () => {
+    for (const bad of ['abc', '0', '-1']) {
+      const { code, stderr } = await cli(['usage', '--currency-rate', bad]);
+      expect(code).toBe(1);
+      expect(stderr).toMatch(/汇率必须是正的十进制数/);
+    }
+  });
+
+  it('follows the locale for its default currency', async () => {
+    // zh-CN prices in the vendor's own currency; en-US converts to dollars.
+    const zh = JSON.parse((await cli(['usage', '--json'])).stdout) as { currency: string; currencyRate: number };
+    expect(zh.currency).toBe('CNY');
+    expect(zh.currencyRate).toBe(1);
+    const en = JSON.parse((await cli(['usage', '--json'], { LANG: 'en_US.UTF-8' })).stdout) as {
+      currency: string;
+      currencyRate: number;
+      totals: { cost: Record<string, string> };
+    };
+    expect(en.currency).toBe('USD');
+    expect(en.currencyRate).toBeGreaterThan(0);
+    expect(en.currencyRate).toBeLessThan(1);
+    expect(Number(en.totals.cost['total'])).toBeLessThan(5.02);
+  });
+
+  it('converts without naming a currency when only a rate is given', async () => {
+    const { stdout } = await cli(['usage', '--currency-rate', '0.5']);
+    expect(stdout).toMatch(/未指定目标货币/);
+    expect(stdout).not.toMatch(/\$|¥[0-9]/u);
   });
 
   it('renders the project/session tree by default, naming both axes', async () => {

@@ -278,11 +278,21 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
+/** Rate provenance every query carries, priced 1:1. */
+const RATE_INFO = {
+  base: 'CNY',
+  display: 'CNY' as string | null,
+  rate: '1',
+  reason: 'fallback-base' as const,
+  source: 'test',
+  date: '2026-09-21',
+};
+
 /** A query over the fixture, overridden per test. */
 const query = (overrides: Partial<UsageQuery> = {}): UsageQuery => ({
   dimension: 'all',
   range: { from: null, to: null, label: '全部时间' },
-  currencyRate: 1,
+  rate: { ...RATE_INFO },
   currency: 'CNY',
   ...overrides,
 });

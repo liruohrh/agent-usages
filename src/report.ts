@@ -12,8 +12,24 @@
 import { addBuckets, emptyBuckets } from './core/buckets.ts';
 import type { CostTotals, ProjectRecord, SessionRecord, TokenTotals, UsageDataset, UsageRecord } from './core/types.ts';
 import { addCostTotals, addSummaries, costOf, zeroCostTotals, type CostSummary } from './accounting.ts';
-import type { PricingEngine } from './pricing/index.ts';
+import type { PricingEngine, DisplayReason } from './pricing/index.ts';
 import { inRange, type TimeRange } from './timerange.ts';
+
+/** How money was converted for one report, for the provenance line. */
+export interface RateInfo {
+  /** Currency the prices were written in. */
+  base: string;
+  /** Currency shown, or `null` when only a rate was given. */
+  display: string | null;
+  /** Units of the display currency per 1 unit of the base currency. */
+  rate: string;
+  /** Why this currency was chosen. */
+  reason: DisplayReason;
+  /** Where the rate came from. */
+  source: string;
+  /** Publication date of the rate, `YYYY-MM-DD`. */
+  date: string;
+}
 
 /** Which aggregation the user asked for. */
 export type UsageDimension = 'all' | 'project' | 'session';
@@ -46,10 +62,10 @@ export interface UsageQuery {
   sessions?: readonly string[] | undefined;
   /** Half-open time range applied to each record's own timestamp. */
   range: TimeRange;
-  /** Units of the target currency per 1 unit of the provider's currency. */
-  currencyRate: number;
-  /** Target currency code, for display. */
-  currency: string;
+  /** Currency being displayed, when the user named one. */
+  currency: string | null;
+  /** How the display currency was chosen, for the provenance line. */
+  rate: RateInfo;
 }
 
 /** Per-model token and cost figures. */
@@ -233,10 +249,12 @@ export interface UsageResult {
   dimension: UsageDimension;
   /** Time range applied. */
   range: TimeRange;
-  /** Display currency. */
+  /** Display currency, or the pricing currency when nothing was converted. */
   currency: string;
   /** Units of the display currency per 1 unit of the pricing currency. */
   currencyRate: number;
+  /** Where that rate came from, for the provenance line. */
+  rateInfo: RateInfo;
   /** Pricing provider that supplied the rates. */
   pricingProvider: string;
   /** How subagents were treated. */
@@ -733,9 +751,9 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   // is the sum of these summaries, so a row can never disagree with the rows
   // beneath it: there is only one place where money is computed at all.
   const summaryOf = new Map<string, CostSummary>();
-  for (const entry of inScope) summaryOf.set(entry.session.id, costOf(entry.records, engine, query.currencyRate));
+  for (const entry of inScope) summaryOf.set(entry.session.id, costOf(entry.records, engine));
   const summariesFor = (entries: readonly ScopedSession[]): CostSummary =>
-    addSummaries(entries.map((entry) => summaryOf.get(entry.session.id) ?? costOf([], engine, query.currencyRate)));
+    addSummaries(entries.map((entry) => summaryOf.get(entry.session.id) ?? costOf([], engine)));
 
   // Which sessions get a row of their own, and what each row covers.
   const scopedByProject = new Map<string, ScopedSession[]>();
@@ -804,12 +822,12 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
         const warning = adapterWarning(session, records);
         // A row's own records are never its folded ones: the split has to stay
         // exact in both modes so `自身 + 子代理` always explains the node.
-        const ownSummary = summaryOf.get(session.id) ?? costOf([], engine, query.currencyRate);
+        const ownSummary = summaryOf.get(session.id) ?? costOf([], engine);
         const ownRecords = rowById.get(session.id)?.records ?? records;
         const descendantIds = collectDescendantIds(dataset, session.id);
         const spawnedRecords = [...descendantIds].flatMap((id) => rowById.get(id)?.records ?? []);
         const spawned = addSummaries(
-          [...descendantIds].map((id) => summaryOf.get(id) ?? costOf([], engine, query.currencyRate)),
+          [...descendantIds].map((id) => summaryOf.get(id) ?? costOf([], engine)),
         );
         // Everything the row reports — its cost, its bands, its model rows —
         // describes the whole subtree, so each of them agrees with the 总 line the
@@ -873,8 +891,9 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
     source: dataset.source,
     dimension: query.dimension,
     range: query.range,
-    currency: query.currency,
-    currencyRate: query.currencyRate,
+    currency: query.currency ?? query.rate.base,
+    currencyRate: Number(query.rate.rate),
+    rateInfo: query.rate,
     pricingProvider: context.pricingProvider,
     subagentMode: mode,
     subagents: { sessions: subagentSessions.length, parents: parents.size },

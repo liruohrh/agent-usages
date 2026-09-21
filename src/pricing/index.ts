@@ -4,10 +4,30 @@
  * - `contract.ts` — what a pricing provider must implement.
  * - `engine.ts`   — the vendor-neutral period/tier resolution and arithmetic.
  * - `registry.ts` — which providers this build ships.
+ * - `currency.ts` — display currency, exchange-rate tables, and converting a
+ *   provider's published rates into the currency the report is shown in.
  * - `vendors/`    — one module per vendor's published price list.
  */
 
 export * from './contract.ts';
+export {
+  SEED_DATE,
+  SEED_RATES,
+  currencyOf,
+  convertProvider,
+  displayRate,
+  localeCurrency,
+  rateFrom,
+  resolveDisplay,
+  seedTable,
+  type CurrencyInfo,
+  type DisplayChoice,
+  type DisplayInput,
+  type DisplayReason,
+  type DisplayResolution,
+  type RateProvenance,
+  type RateTable,
+} from './currency.ts';
 export {
   bareModelName,
   basisQuantity,

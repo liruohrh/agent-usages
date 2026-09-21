@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
+import type { RateInfo } from '../../src/report.ts';
 import {
   expandWithDescendants,
   listSessions,
@@ -24,6 +25,16 @@ import { STUB_AT, stubProvider } from '../support/stub-pricing.ts';
 
 const engine = createPricingEngine(stubProvider());
 const context = { engine, pricingProvider: engine.provider.id };
+
+/** The rate information every query carries, priced 1:1 in the stub's currency. */
+const RATE_INFO: RateInfo = {
+  base: 'XTS',
+  display: 'XTS',
+  rate: '1',
+  reason: 'fallback-base' as const,
+  source: 'test',
+  date: '2026-09-21',
+};
 
 /** One million of each bucket, so 1M of every component applies. */
 const FULL = buckets({ input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000 });
@@ -101,7 +112,7 @@ function query(overrides: Partial<UsageQuery> = {}): UsageQuery {
   return {
     dimension: 'all',
     range: { from: null, to: null, label: '全部时间' },
-    currencyRate: 1,
+    rate: { ...RATE_INFO, base: 'XTS', display: 'XTS' },
     currency: 'XTS',
     ...overrides,
   };
@@ -540,15 +551,18 @@ describe('time ranges', () => {
 });
 
 describe('currency', () => {
-  it('converts by the requested rate', () => {
-    const data = fixture();
-    const one = runQuery(data, query(), context);
-    const half = runQuery(data, query({ currencyRate: 0.5, currency: 'USD' }), context);
-    expect(Number(half.cost.total)).toBeCloseTo(Number(one.cost.total) / 2, 4);
-  });
-
-  it('rejects a negative rate', () => {
-    expect(() => runQuery(fixture(), query({ currencyRate: -1 }), context)).toThrow(/汇率必须是非负有限数字/);
+  it('reports the rate it was priced at, without converting again', () => {
+    // Conversion happens once, on the provider's rates; the report only carries
+    // the provenance so the renderer can explain itself.
+    const result = runQuery(
+      fixture(),
+      query({ currency: 'USD', rate: { ...RATE_INFO, display: 'USD', rate: '0.5', reason: 'flag' } }),
+      context,
+    );
+    expect(result.currency).toBe('USD');
+    expect(result.currencyRate).toBe(0.5);
+    expect(result.rateInfo.rate).toBe('0.5');
+    expect(result.rateInfo.base).toBe('XTS');
   });
 });
 

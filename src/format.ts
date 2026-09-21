@@ -11,6 +11,7 @@
 import stringWidth from 'string-width';
 
 import { moneyBreakdown, type MoneyBreakdown } from './accounting.ts';
+import { displayRate } from './pricing/index.ts';
 import { tokenBreakdown } from './core/buckets.ts';
 import type { CostTotals, TokenTotals } from './core/types.ts';
 import type {
@@ -262,7 +263,7 @@ function bandBlocks(bands: readonly BandSummary[], symbol: string): string[] {
     lines.push(`  ${band.periodLabel}${window}${note}`);
     lines.push(`  ${metricsLine(band.tokens, moneyBreakdown(band.cost, band.tokens), band.requests, symbol)}`);
     const rates = band.components
-      .map((component) => `${COMPONENT_METRICS[component.id] ?? component.label} ${component.rate}`)
+      .map((component) => `${COMPONENT_METRICS[component.id] ?? component.label} ${displayRate(component.rate)}`)
       .join(' · ');
     if (rates.length > 0) lines.push(`  P（${rateUnit(symbol)}）: ${rates}`);
   }
@@ -497,6 +498,16 @@ export function formatUsageReport(
 ): string {
   const [first] = sections;
   if (first === undefined) return '';
+  const rate = first.result.rateInfo;
+  const vendor = options.pricingLabel ?? first.result.pricingProvider;
+  // The vendor's own currency is the reference; a conversion adds the equation
+  // that was applied, so a reader can check every amount against the price list.
+  const source =
+    rate.display === null
+      ? `计价来源  ${vendor}（${rate.base}，按 1 ${rate.base} = ${displayRate(rate.rate)} 折算，未指定目标货币）`
+      : rate.rate === '1'
+        ? `计价来源  ${vendor}（${rate.base}）`
+        : `计价来源  ${vendor}（${rate.base} → ${rate.display}）`;
   const header = [
     'Agent 用量统计',
     `Agent     ${options.agentLabel === undefined ? first.result.agent : `${first.result.agent}（${options.agentLabel}）`}`,
@@ -504,7 +515,10 @@ export function formatUsageReport(
     sections.length === 1
       ? `时间范围  ${first.range.label}`
       : `时间窗口  ${sections.map((section) => section.label).join(' / ')}`,
-    `计价来源  ${options.pricingLabel ?? first.result.pricingProvider}（${first.result.currency}${first.result.currencyRate === 1 ? '' : `，1:${first.result.currencyRate}`}）`,
+    source,
+    ...(rate.display === null || rate.rate === '1'
+      ? []
+      : [`汇率      1 ${rate.base} = ${displayRate(rate.rate)} ${rate.display} · ${rate.source} · ${rate.date}`]),
   ].join('\n');
   const blocks = [header];
   for (const section of sections) blocks.push(renderSection(section, symbol, options).join('\n'));
@@ -588,6 +602,7 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
     },
     currency: result.currency,
     currencyRate: result.currencyRate,
+    rateInfo: result.rateInfo,
     subagentMode: result.subagentMode,
     subagents: {
       sessions: result.subagents.sessions,

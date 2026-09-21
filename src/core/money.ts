@@ -92,3 +92,40 @@ export function sumAmounts(values: readonly bigint[]): bigint {
 
 /** The scale factor as a bigint, for callers that scale values themselves. */
 export const MONEY_SCALE: bigint = SCALE_FACTOR;
+
+/**
+ * Multiply two decimal strings, keeping 9 fractional digits.
+ * @param left - first factor.
+ * @param right - second factor.
+ * @returns the product, truncated at the arithmetic scale.
+ */
+export function multiplyDecimal(left: string, right: string): string {
+  return formatDecimal((parseDecimal(left) * parseDecimal(right)) / SCALE_FACTOR, MONEY_SCALE_DIGITS);
+}
+
+/**
+ * Divide two decimal strings, keeping 9 fractional digits.
+ * @param left - dividend.
+ * @param right - divisor.
+ * @returns the quotient, truncated at the arithmetic scale.
+ * @throws when the divisor is zero.
+ */
+export function divideDecimal(left: string, right: string): string {
+  const divisor = parseDecimal(right);
+  if (divisor === 0n) throw new Error('divideDecimal: 除数不能为 0');
+  return formatDecimal((parseDecimal(left) * SCALE_FACTOR) / divisor, MONEY_SCALE_DIGITS);
+}
+
+/**
+ * Drop trailing fractional zeros.
+ *
+ * Used for rates rather than amounts: `5.000000000` is the same rate as `5`, and
+ * carrying the zeros would suggest a precision the number does not have.
+ * @param text - a decimal string.
+ * @returns the same value without trailing zeros.
+ */
+export function trimDecimal(text: string): string {
+  const [whole = '0', fraction = ''] = text.split('.');
+  const trimmed = fraction.replace(/0+$/, '');
+  return trimmed.length === 0 ? whole : `${whole}.${trimmed}`;
+}

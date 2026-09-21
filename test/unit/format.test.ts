@@ -13,10 +13,20 @@ import { emptyBuckets } from '../../src/core/buckets.ts';
 import type { CostTotals, TokenTotals } from '../../src/core/types.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type FormatOptions, type ReportSection } from '../../src/format.ts';
-import type { ProjectReport, ScopeTotals, SessionListResult, SessionReport, UsageResult } from '../../src/report.ts';
+import type { ProjectReport, RateInfo, ScopeTotals, SessionListResult, SessionReport, UsageResult } from '../../src/report.ts';
 import { stubProvider, TEST_CURRENCY } from '../support/stub-pricing.ts';
 
 const engine = createPricingEngine(stubProvider());
+
+/** Rate provenance every fixture carries, priced 1:1. */
+const RATE_INFO: RateInfo = {
+  base: 'XTS',
+  display: 'XTS',
+  rate: '1',
+  reason: 'fallback-base' as const,
+  source: 'test',
+  date: '2026-09-21',
+};
 
 /** A cost total with the fields a test does not set left at zero. */
 function cost(total: string, overrides: Partial<CostTotals> = {}): CostTotals {
@@ -68,6 +78,7 @@ function report(overrides: Partial<UsageResult> = {}): UsageResult {
     range: { from: null, to: null, label: '全部时间' },
     currency: TEST_CURRENCY.code,
     currencyRate: 1,
+    rateInfo: RATE_INFO,
     pricingProvider: 'stub',
     subagentMode: 'total',
     subagents: { sessions: 0, parents: 0 },

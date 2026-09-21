@@ -25,6 +25,7 @@ import {
 } from './pricing/index.ts';
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
+import { convertProvider, currencyOf, resolveDisplay, type DisplayResolution } from './pricing/currency.ts';
 import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type ReportSection } from './format.ts';
 import type { UsageDataset } from './core/types.ts';
 
@@ -59,17 +60,35 @@ interface Loaded {
   dataset: UsageDataset;
   adapter: AgentAdapter;
   engine: PricingEngine;
-  currency: string;
+  /** Currency to print amounts in, and where that choice came from. */
+  display: DisplayResolution;
+  /** Symbol to print, empty when the user named no currency. */
   symbol: string;
 }
 
-/** Parse a non-negative float for `--currency-rate`. */
-function parseRateOption(value: string): string {
-  const rate = Number(value);
-  if (!Number.isFinite(rate) || rate < 0) {
-    throw new InvalidArgumentError(`汇率必须是非负数字，收到 ${JSON.stringify(value)}`);
+/**
+ * The user's locale, as the platform reports it.
+ *
+ * `Intl` already reflects `LANG`/`LC_ALL`, so it is asked first; the environment
+ * is only a fallback for runtimes that cannot resolve one.
+ */
+function systemLocale(): string | undefined {
+  try {
+    const resolved = Intl.DateTimeFormat().resolvedOptions().locale;
+    if (resolved.length > 0) return resolved;
+  } catch {
+    // Fall through to the environment.
   }
-  return value;
+  const fromEnv = process.env['LC_ALL'] ?? process.env['LC_MESSAGES'] ?? process.env['LANG'];
+  return fromEnv === undefined || fromEnv.trim().length === 0 ? undefined : fromEnv.trim();
+}
+
+/** Validate `--currency-rate`: a positive decimal, taken literally. */
+function parseRateOption(value: string): string {
+  if (!/^\d+(\.\d+)?$/.test(value.trim()) || Number(value) <= 0) {
+    throw new InvalidArgumentError(`汇率必须是正的十进制数，收到 ${JSON.stringify(value)}`);
+  }
+  return value.trim();
 }
 
 /**
@@ -100,7 +119,7 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
 }
 
 /** Resolve the agent, read its data, and build a pricing engine for it. */
-async function loadOrExit(options: GlobalOptions): Promise<Loaded | undefined> {
+async function loadOrExit(options: GlobalOptions & Pick<UsageOptions, 'currency' | 'currencyRate'>): Promise<Loaded | undefined> {
   try {
     const adapter = await resolveAgent(options.agent, options.home);
     const dataset = await adapter.load({
@@ -108,13 +127,21 @@ async function loadOrExit(options: GlobalOptions): Promise<Loaded | undefined> {
       enrich: true,
     });
     const provider = resolvePricingProvider(options.provider, adapter.id);
-    const engine = createPricingEngine(provider);
+    // The vendor's rates are rewritten into the display currency here, once, so
+    // every amount and every unit price downstream is already in it.
+    const display = resolveDisplay({
+      base: provider.currency.code,
+      ...(options.currency === undefined ? {} : { currencyFlag: options.currency }),
+      ...(options.currencyRate === undefined ? {} : { rateFlag: options.currencyRate }),
+      ...(systemLocale() === undefined ? {} : { locale: systemLocale() }),
+    });
+    const engine = createPricingEngine(convertProvider(provider, display.currency ?? currencyOf(display.base), display.rate));
     return {
       dataset,
       adapter,
       engine,
-      currency: provider.currency.code,
-      symbol: provider.currency.symbol,
+      display,
+      symbol: display.currency?.symbol ?? '',
     };
   } catch (error) {
     process.stderr.write(`agent-usages: ${(error as Error).message}\n`);
@@ -134,7 +161,7 @@ function emit(payload: unknown, text: string, json: boolean, requests: number): 
 async function runUsage(options: UsageOptions): Promise<void> {
   const loaded = await loadOrExit(options);
   if (loaded === undefined) return;
-  const { dataset, engine, currency, symbol } = loaded;
+  const { dataset, engine, display, symbol } = loaded;
 
   let range: ReturnType<typeof resolveRange>;
   try {
@@ -146,8 +173,14 @@ async function runUsage(options: UsageOptions): Promise<void> {
   }
   const ranges = [{ label: range.from === null && range.to === null ? '总' : range.label, range }];
 
-  const currencyRate = options.currencyRate === undefined ? 1 : Number(options.currencyRate);
-  const selectedCurrency = (options.currency ?? currency).toUpperCase();
+  const rate: UsageQuery['rate'] = {
+    base: display.base,
+    display: display.currency?.code ?? null,
+    rate: display.rate,
+    reason: display.reason,
+    source: display.provenance.source,
+    date: display.provenance.date,
+  };
   // `--subagents` implies the by-scope breakdown, because listing every subagent
   // without saying what they add up to would be less informative than the default.
   const subagentMode = options.subagents === true ? 'detail' : options.subagent === true ? 'subagents' : 'total';
@@ -158,20 +191,13 @@ async function runUsage(options: UsageOptions): Promise<void> {
       // The tree always needs session rows: it is what the renderer walks.
       dimension: 'session',
       range,
-      currencyRate,
-      // The provider's own currency unless the user renamed it; `--currency-rate`
-      // is what actually converts, so a mismatched label is warned about below.
-      currency: selectedCurrency,
+      currency: display.currency?.code ?? null,
+      rate,
       subagentMode,
       ...(options.projectFilter === undefined ? {} : { projects: options.projectFilter }),
       ...(options.sessionFilter === undefined ? {} : { sessions: options.sessionFilter }),
     };
     const result = runQuery(dataset, query, { engine, pricingProvider: engine.provider.id });
-    if (selectedCurrency !== currency && options.currencyRate === undefined && !options.json) {
-      result.warnings.push(
-        `${engine.provider.label} 以 ${currency} 计价；--currency ${selectedCurrency} 未同时给出 --currency-rate，金额仍按 1:1 显示`,
-      );
-    }
     sections.push({ label, range, result });
     requests += result.requests;
   }
@@ -335,8 +361,8 @@ export function buildProgram(): Command {
       .option('--models', '附上按模型的明细')
       .option('-p, --project-filter <selector>', '只统计指定项目：id、名称或路径（支持 * 通配；可重复）', collect)
       .option('-s, --session-filter <selector>', '只统计指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；支持 * 通配；可重复）', collect)
-      .option('--currency <code>', '显示货币（默认取计价来源的货币）')
-      .option('--currency-rate <rate>', '1 单位计价货币折算为目标货币的汇率（默认 1）', parseRateOption),
+      .option('--currency <code>', '显示货币（默认按系统语言选，中文人民币、英文美元）')
+      .option('--currency-rate <rate>', '1 单位计价货币折算为目标货币的汇率（可单独使用，此时不显示货币）', parseRateOption),
   )
     .allowExcessArguments(false)
     .action(async (options: UsageOptions, command: Command) => {
