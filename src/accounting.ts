@@ -156,7 +156,7 @@ export function renderRounded(value: bigint): string {
  * Price a set of records.
  *
  * Pure and engine-agnostic: it asks the engine for each record's rates, groups by
- * (model, period, tier), and accumulates exact amounts. Records the engine cannot
+ * (as-named model, period, tier), and accumulates exact amounts. Records the engine cannot
  * price are counted rather than silently treated as free.
  * @param records - the records to bill.
  * @param engine - the engine supplying rates.
@@ -177,11 +177,15 @@ export function priceRecords(records: readonly UsageRecord[], engine: PricingEng
     }
     priced += 1;
     const { period, tier, resolution, model } = cost.rate;
-    const groupKey = `${model}\u0000${period.id}\u0000${tier}`;
+    // Grouped by the model the *request* named, not by the price schedule it was
+    // matched to: an alias is what the reader sees, and two names that happen to
+    // share a schedule are still two models with their own rows. The schedule
+    // name survives in `resolution` and in the engine's own provenance.
+    const groupKey = `${record.model}\u0000${period.id}\u0000${tier}`;
     let group = groups.get(groupKey);
     if (group === undefined) {
       group = {
-        model,
+        model: record.model,
         periodId: period.id,
         periodLabel: period.label,
         tier,
@@ -273,23 +277,6 @@ export function mergeCosts(costs: readonly UsageCost[]): UsageCost {
   return { tokens, exact, components, priced, unpriced, groups: [...groups.values()] };
 }
 
-/**
- * Split each group's output bill between its reasoning and its plain completion.
- *
- * Done per group, where one output rate applies, and summed afterwards: thinking
- * billed at a higher rate than another model's must not have its money diluted
- * by a token-weighted average of the two. The parts are rounded group by group,
- * matching how the components themselves are rounded.
- * @param cost - the priced sets.
- * @param convert - turns a scaled amount into the target currency.
- * @returns the reasoning share, at the arithmetic scale.
- */
-function reasoningShare(cost: UsageCost, convert: (value: bigint) => bigint): bigint {
-  let share = 0n;
-  for (const group of cost.groups) share += groupReasoningShare(group, convert);
-  return share;
-}
-
 /** The reasoning slice of one group's output bill. */
 function groupReasoningShare(group: CostGroup, convert: (value: bigint) => bigint): bigint {
   const output = group.amounts.get('output') ?? 0n;
@@ -309,33 +296,6 @@ function groupReasoningShare(group: CostGroup, convert: (value: bigint) => bigin
  * @returns display totals and per-group breakdown.
  */
 export function summarize(cost: UsageCost, convert: (value: bigint) => bigint = (value) => value): CostSummary {
-  const rounded = new Map<string, bigint>();
-  let total = 0n;
-  for (const [id, amount] of cost.exact.byComponent) {
-    const value = round(convert(amount));
-    rounded.set(id, value);
-    total += value;
-  }
-
-  const totals: CostTotals = {
-    cacheHitInputTokens: 0,
-    cacheMissInputTokens: 0,
-    outputTokens: 0,
-    cacheWriteTokens: 0,
-    cacheHitInputCost: renderRounded(rounded.get('input-hit') ?? 0n),
-    cacheMissInputCost: renderRounded(rounded.get('input-miss') ?? 0n),
-    outputCost: renderRounded(rounded.get('output') ?? 0n),
-    cacheWriteInputCost: renderRounded(rounded.get('input-write') ?? 0n),
-    reasoningCost: renderRounded(reasoningShare(cost, convert)),
-    total: renderRounded(total),
-  };
-  for (const group of cost.groups) {
-    totals.cacheHitInputTokens += group.counters.cacheHitInputTokens;
-    totals.cacheMissInputTokens += group.counters.cacheMissInputTokens;
-    totals.outputTokens += group.counters.outputTokens;
-    totals.cacheWriteTokens += group.counters.cacheWriteTokens;
-  }
-
   const breakdown: CostBreakdown[] = cost.groups.map((group) => {
     const amounts: Record<string, string> = {};
     let groupTotal = 0n;
@@ -357,7 +317,130 @@ export function summarize(cost: UsageCost, convert: (value: bigint) => bigint = 
     };
   });
 
+  // The totals are the sum of the bands, never a second rounding of the same
+  // money: a band is the finest unit that has a price of its own, so it is the
+  // only place rounding happens. Everything above a band adds up exactly.
+  const byComponent = new Map<string, bigint>();
+  let total = 0n;
+  let reasoning = 0n;
+  for (const band of breakdown) {
+    for (const [id, amount] of Object.entries(band.amounts)) {
+      byComponent.set(id, (byComponent.get(id) ?? 0n) + parseDecimal(amount));
+    }
+    total += parseDecimal(band.total);
+    reasoning += parseDecimal(band.reasoningCost);
+  }
+  const atDisplay = (value: bigint | undefined): string => formatDecimal(value ?? 0n, COST_DIGITS);
+  const totals: CostTotals = {
+    cacheHitInputTokens: 0,
+    cacheMissInputTokens: 0,
+    outputTokens: 0,
+    cacheWriteTokens: 0,
+    cacheHitInputCost: atDisplay(byComponent.get('input-hit')),
+    cacheMissInputCost: atDisplay(byComponent.get('input-miss')),
+    outputCost: atDisplay(byComponent.get('output')),
+    cacheWriteInputCost: atDisplay(byComponent.get('input-write')),
+    reasoningCost: atDisplay(reasoning),
+    total: atDisplay(total),
+  };
+  for (const group of cost.groups) {
+    totals.cacheHitInputTokens += group.counters.cacheHitInputTokens;
+    totals.cacheMissInputTokens += group.counters.cacheMissInputTokens;
+    totals.outputTokens += group.counters.outputTokens;
+    totals.cacheWriteTokens += group.counters.cacheWriteTokens;
+  }
+
   return { totals, breakdown, components: cost.components, priced: cost.priced, unpriced: cost.unpriced };
+}
+
+/** Display totals with every field at zero. */
+export function zeroCostTotals(): CostTotals {
+  return {
+    cacheHitInputTokens: 0,
+    cacheMissInputTokens: 0,
+    outputTokens: 0,
+    cacheWriteTokens: 0,
+    cacheHitInputCost: '0.0000',
+    cacheMissInputCost: '0.0000',
+    outputCost: '0.0000',
+    cacheWriteInputCost: '0.0000',
+    reasoningCost: '0.0000',
+    total: '0.0000',
+  };
+}
+
+/**
+ * Add two display totals, exactly.
+ *
+ * Both sides are already rounded to display precision, so this is plain decimal
+ * addition of the numbers a reader can see — which is the point: a total that is
+ * the sum of the rows beneath it always agrees with them.
+ * @param left - first total.
+ * @param right - second total.
+ * @returns their sum.
+ */
+export function addCostTotals(left: CostTotals, right: CostTotals): CostTotals {
+  const sum = (first: string, second: string): string =>
+    formatDecimal(parseDecimal(first) + parseDecimal(second), COST_DIGITS);
+  return {
+    cacheHitInputTokens: left.cacheHitInputTokens + right.cacheHitInputTokens,
+    cacheMissInputTokens: left.cacheMissInputTokens + right.cacheMissInputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
+    cacheHitInputCost: sum(left.cacheHitInputCost, right.cacheHitInputCost),
+    cacheMissInputCost: sum(left.cacheMissInputCost, right.cacheMissInputCost),
+    outputCost: sum(left.outputCost, right.outputCost),
+    cacheWriteInputCost: sum(left.cacheWriteInputCost, right.cacheWriteInputCost),
+    reasoningCost: sum(left.reasoningCost, right.reasoningCost),
+    total: sum(left.total, right.total),
+  };
+}
+
+/**
+ * Add display summaries together.
+ * @param sets - the summaries to add, in any order.
+ * @returns one summary whose bands are the union, keyed by (model, period, tier).
+ */
+export function addSummaries(sets: readonly CostSummary[]): CostSummary {
+  const sum = (left: string, right: string): string =>
+    formatDecimal(parseDecimal(left) + parseDecimal(right), COST_DIGITS);
+  let totals = zeroCostTotals();
+  const bands = new Map<string, CostBreakdown>();
+  const components = new Map<string, ComponentUsage>();
+  let priced = 0;
+  let unpriced = 0;
+
+  for (const set of sets) {
+    priced += set.priced;
+    unpriced += set.unpriced;
+    totals = addCostTotals(totals, set.totals);
+    for (const [id, usage] of set.components) {
+      const known = components.get(id);
+      if (known === undefined) components.set(id, { ...usage });
+      else known.tokens += usage.tokens;
+    }
+    for (const band of set.breakdown) {
+      const key = `${band.model}\u0000${band.periodId}\u0000${band.tier}`;
+      const existing = bands.get(key);
+      if (existing === undefined) {
+        bands.set(key, { ...band, amounts: { ...band.amounts } });
+        continue;
+      }
+      const amounts: Record<string, string> = { ...existing.amounts };
+      for (const [id, amount] of Object.entries(band.amounts)) {
+        amounts[id] = sum(amounts[id] ?? '0.0000', amount);
+      }
+      bands.set(key, {
+        ...existing,
+        requests: existing.requests + band.requests,
+        total: sum(existing.total, band.total),
+        reasoningCost: sum(existing.reasoningCost, band.reasoningCost),
+        amounts,
+      });
+    }
+  }
+
+  return { totals, breakdown: [...bands.values()], components, priced, unpriced };
 }
 
 /** Convert a JavaScript number into the scaled decimal representation. */
@@ -389,11 +472,12 @@ export function costOf(records: readonly UsageRecord[], engine: PricingEngine, c
 }
 
 /**
- * Price several record sets and merge them at full precision before rounding.
+ * Price several record sets and add the results.
  *
- * Merging rounded per-set summaries instead would let each set's rounding
- * remainder accumulate, making the same grand total come out differently
- * depending on how the records were grouped.
+ * Each set is priced and rounded on its own, then the display values are added:
+ * this is what makes a group of rows add up to the row above them. Rounding the
+ * merged exact total instead would make the total depend on how the usage was
+ * grouped — one number for the sum of the rows and another for the whole.
  * @param sets - one record list per group.
  * @param engine - the engine supplying rates.
  * @param currencyRate - units of the target currency per 1 unit of the provider's currency.
@@ -404,7 +488,7 @@ export function costOfGrouped(
   engine: PricingEngine,
   currencyRate = 1,
 ): CostSummary {
-  return summarize(mergeCosts(sets.map((records) => priceRecords(records, engine))), converter(currencyRate));
+  return addSummaries(sets.map((records) => costOf(records, engine, currencyRate)));
 }
 
 /** Money per reader-facing token figure, at display precision. */

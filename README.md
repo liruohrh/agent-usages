@@ -138,7 +138,7 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
     子代理  I/M 209K ¥0.94 · I/C 5.27M / 96.2% ¥0.7912 · I/T 5.48M ¥1.7312 · O 93K ¥1.2607 · R 69K / 42.6% ¥0.9354 · O/T 163K ¥2.1961 · T 5.65M · Q 96 · ¥3.9273
 ```
 
-**自身 + 子代理 = 总**在请求数与 token 上逐项精确相等；金额在每一层都是自己范围内精确累加后取整的真实值，不做跨层调整，所以显示值相加可能差 0.0001。`--subagents` 会隐含 `--subagent`。
+**自身 + 子代理 = 总**在请求数、token 与金额上逐项精确相等：每个会话只计价一次，上面所有层级都是把已经算好的数字相加，所以每一层都严丝合缝地等于下面各行相加。`--subagents` 会隐含 `--subagent`。
 
 ### 按会话筛选
 
@@ -218,7 +218,7 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 - 窗口标题带数据实际跨度：`本周 · 2026-09-17 ~ 18`（同月只写一次月份）、`今日 · 2026-09-18 0h~3h`（同日才带小时；整段在同一小时写作 `8h ~`）。
 - 只有一个会话的项目、只有一个子代理的会话会省掉重复的聚合行。
 - 指标字段：`I/M` 未命中输入、`I/C` 缓存命中（后跟 `/ 缓存命中比`）、`I/W` 缓存写入（仅在不为 0 时出现）、`I/T` 输入合计、`O` 输出（非思考）、`R` 思考（后跟 `/ 思考占比`）、`O/T` 输出合计、`T` Token 总计、`Q` 请求数、行尾是费用总额。
-- 每一项都带自己的费用：`I/M`、`I/C`、`I/W` 是三个独立计费项，`O` 与 `R` 按 token 占比分摊输出账单，`I/T`、`O/T` 是组成部分之和——所以 `I/T + O/T` 永远等于行尾总额。
+- 每一项都带自己的费用：`I/M`、`I/C`、`I/W` 是三个独立计费项，`O` 与 `R` 是输出账单的拆分（在单价已知的那一段里按 token 占比分），`I/T`、`O/T` 是组成部分之和——所以 `I/T + O/T` 永远等于行尾总额，而且上下各行相加也永远相等。
 
 ---
 
@@ -274,7 +274,7 @@ agent-usages usage --from 2026-08-01 --to 2026-09-01
               "cacheHitInputCost": "4.6782", "cacheMissInputCost": "3.6376",
               "outputCost": "10.5879", "total": "18.9037" }
   },
-  "pricingBands": [ { "model": "deepseek-v4-flash", "models": ["deepseek-v4-flash"],
+  "pricingBands": [ { "model": "deepseek-v4-flash", 
                       "periodId": "2026-09-10", "periodLabel": "…", "window": "…",
                       "tier": "off-peak", "resolution": "exact", "requests": 763,
                       "tokens": { "input": 0, "output": 0, "cacheRead": 130399872, "cacheWrite": 0, "reasoning": 0 },
@@ -301,7 +301,7 @@ agent-usages usage --from 2026-08-01 --to 2026-09-01
 约定：
 
 - **金额是十进制字符串**（如 `"18.9037"`），不是浮点数——货币不该被浮点误差污染，字符串也能无损穿过 JSON。token 数是整数。
-- 金额保留 4 位小数。**总量 = 各项目之和 = 各行之和**，精确到最后一位：总量是对范围内记录一次性算出的，不会把各行的取整余数累加进来（合并/拆分两种口径的总量因此完全相同）。
+- 金额保留 4 位小数。**每个会话只计价一次**（精确累加到「会话 × 模型 × 区间 × 峰谷」，取整一次），项目、根、自身/子代理、模型行、计价区间都是把这些已经算好的数字相加——所以总量 = 各项目之和 = 各行之和，精确到最后一位，合并/拆分两种口径也完全相同。
 - 时间同时给出 epoch 毫秒与 ISO 8601（UTC）。
 - `pricingBands[].tier` ∈ `peak` / `off-peak` / `flat`；`resolution` ∈ `exact` / `fallback-later` / `fallback-earlier` / `fallback-default`，用于说明价格区间是精确命中还是按回退规则选取。
 - `sessionReports` 给出每个会话一行；未产生用量的会话不会作为 0 值行出现。每个项目与会话都带 `own` / `spawned` / `nodeTotal` 三段（自身 / 子代理 / 两者之和），与文本里的 **自身 + 子代理 = 总** 对应。
@@ -309,7 +309,7 @@ agent-usages usage --from 2026-08-01 --to 2026-09-01
 - `subagentMode` 说明当前档位；`subagents` 给出范围内的子代理会话数与派生它们的会话数。
 - `scopeBreakdown` 只在 `--subagent` / `--subagents` 时出现，三段各自带 `tokenBreakdown`，且 `own + subagents == total`。
 - 每行另有 `isSubagent`（是否子代理）、`subagentCount`（合并口径下并入的子代理个数）、`parentId`（子代理的父会话）。
-- `pricingBands` 每一段都自带 `model`（价格表模型）、`models`（请求里实际写的模型名）、`window`（该区间的生效窗口）、`tokens`、`cost` 与 `components`：`components` 逐项列出「哪一项按什么单价计了多少 token、得到多少钱」，因此换计价来源后输出仍然自解释，也不需要额外再取一次价格表。
+- `pricingBands` 每一段都自带 `model`（请求当时写的模型名）、`window`（该区间的生效窗口）、`tokens`、`cost` 与 `components`：`components` 逐项列出「哪一项按什么单价计了多少 token、得到多少钱」，因此换计价来源后输出仍然自解释，也不需要额外再取一次价格表。
 - `projects[].sessions` 在合并口径下是一级会话数，拆分口径下是全部会话数；`subagentSessions` 始终是范围内的子代理会话数。
 - `session list --json` 每个项目有 `sessionCount`（范围内会话数）与 `listRows`（显示行数，合并口径下会少于前者）；每个会话有 `isSubagent`、`depth`、`parentId`、`subagentCount`、`subagentRequests`、`nested`。
 - `warnings` 汇总数据异常与筛选提示（如会话不存在、时间范围内无数据）。文本模式会把这些打印为“提示”。

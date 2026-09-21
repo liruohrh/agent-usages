@@ -258,11 +258,7 @@ function bandBlocks(bands: readonly BandSummary[], symbol: string): string[] {
   for (const band of bands) {
     const note = RESOLUTION_NOTES[band.resolution] ?? '';
     const window = band.window.length === 0 ? '' : `（${band.window}）`;
-    // The model names the requests carried, which are the ones the reader saw in
-    // the tree above; a price schedule reached through an alias is an internal
-    // detail and is only reported in `--json`.
-    const named = band.models.length > 0 ? band.models.join('、') : band.model;
-    lines.push(`▸ ${band.periodId} ${TIER_LABELS[band.tier] ?? band.tier} · ${named}`);
+    lines.push(`▸ ${band.periodId} ${TIER_LABELS[band.tier] ?? band.tier} · ${band.model}`);
     lines.push(`  ${band.periodLabel}${window}${note}`);
     lines.push(`  ${metricsLine(band.tokens, moneyBreakdown(band.cost, band.tokens), band.requests, symbol)}`);
     const rates = band.components

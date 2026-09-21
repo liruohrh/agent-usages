@@ -114,8 +114,8 @@ src/
 │   ├── engine.ts          与厂商无关的区间选取、峰谷判定、按组件计费
 │   ├── registry.ts        注册表
 │   └── vendors/deepseek.ts  DeepSeek 官方价格表（唯一随官方调价更新的文件）
-├── accounting.ts          逐条计费、精确累加、一次性取整、按 token 项拆金额
-├── report.ts              筛选、维度聚合、会话清单
+├── accounting.ts          逐条计费、按「模型×区间×峰谷」精确累加并取整、聚合只是相加
+├── report.ts              筛选、每个会话计价一次、向上全部相加、会话清单
 ├── timerange.ts           时间范围解析
 ├── format.ts              纯排版：token 树、计价区间、JSON 序列化（不读价格表）
 └── cli.ts                 命令行入口

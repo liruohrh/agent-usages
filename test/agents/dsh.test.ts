@@ -629,7 +629,9 @@ describe('cost from session logs', () => {
     const splitRows = split.projects.find((project) => project.name === 'example-app')?.sessionReports ?? [];
     expect(foldedRows.every((row) => !row.isSubagent)).toBe(true);
     expect(splitRows.filter((row) => row.isSubagent)).toHaveLength(3);
-    expect(splitRows.find((row) => row.id === SID.spanning)?.cost.total).toBe('33.2100');
+    // The row stands for its subtree in both modes; `own` is the session itself.
+    expect(splitRows.find((row) => row.id === SID.spanning)?.cost.total).toBe('48.2700');
+    expect(splitRows.find((row) => row.id === SID.spanning)?.own.cost.total).toBe('33.2100');
   });
 
   it('breaks the real numbers down by scope', async () => {

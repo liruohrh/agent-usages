@@ -138,7 +138,9 @@ describe('usage', () => {
     // Each band carries the rate card that produced it, so a vendor's rate list
     // is visible in the output rather than implied — and it names its model.
     expect(parsed.pricingBands).toHaveLength(1);
-    expect(parsed.pricingBands[0]?.model).toBe('deepseek-flash');
+    // Named as the request named it — the price schedule it matched (and any
+    // fallback) stays visible through `resolution`.
+    expect(parsed.pricingBands[0]?.model).toBe('deepseek-v4-flash');
     expect(parsed.pricingBands[0]?.components.map((component) => component.id).sort()).toEqual([
       'input-hit',
       'input-miss',
@@ -326,7 +328,11 @@ describe('text output alignment', () => {
 
   it('prints the same compact label set on every node', async () => {
     const { stdout } = await cli(['usage', '--cost', '--models']);
-    const metrics = stdout.split('\n').filter((line) => line.includes(' · Q '));
+    // Model rows are the node's line split up, and carry the model name first;
+    // every other line is a node's own metric line.
+    const metrics = stdout
+      .split('\n')
+      .filter((line) => line.includes(' · Q ') && !line.trim().startsWith('['));
     expect(metrics.length).toBeGreaterThan(0);
     for (const line of metrics) {
       const labels = line.trim().split(' · ').map((segment) => segment.split(' ')[0] ?? '');

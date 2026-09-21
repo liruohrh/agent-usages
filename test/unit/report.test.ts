@@ -299,8 +299,12 @@ describe('subagent presentation modes', () => {
     const rows = alpha?.sessionReports ?? [];
     expect(rows).toHaveLength(4);
     expect(rows.filter((row) => row.isSubagent)).toHaveLength(3);
-    expect(rows.find((row) => row.id === SID.parent)?.cost.total).toBe('36.0000');
-    expect(rows.find((row) => row.id === SID.childA)?.cost.total).toBe('36.0000');
+    // A row's cost describes what its line shows — the whole subtree — while
+    // `own` is the session's own four requests.
+    expect(rows.find((row) => row.id === SID.parent)?.cost.total).toBe('144.0000');
+    expect(rows.find((row) => row.id === SID.parent)?.own.cost.total).toBe('36.0000');
+    expect(rows.find((row) => row.id === SID.childA)?.cost.total).toBe('72.0000');
+    expect(rows.find((row) => row.id === SID.childA)?.own.cost.total).toBe('36.0000');
     expect(alpha?.subagentSessions).toBe(3);
     expect(alpha?.sessions).toBe(4);
   });
@@ -360,9 +364,10 @@ describe('reconciliation', () => {
     expect(sum).toBeCloseTo(Number(cost.total), 10);
   });
 
-  it('does not let per-row rounding reach the grand total', () => {
-    // Three rows whose exact shares each round up; a total built by adding the
-    // rounded rows would be larger than the exact total.
+  it('makes the grand total the sum of the rows, rounding included', () => {
+    // Three rows whose exact shares each round up. The total is the sum of what
+    // is printed, so a reader adding the rows always lands on it — even though
+    // the exact sum of the three is a ten-thousandth lower.
     const awkward = dataset([
       project({
         id: 'p',
@@ -376,11 +381,129 @@ describe('reconciliation', () => {
     ]);
     const result = runQuery(awkward, query({ dimension: 'session' }), context);
     const sum = (result.projects[0]?.sessionReports ?? []).reduce((total, row) => total + Number(row.cost.total), 0);
-    // 999,999 tokens at 1 unit per million is 0.999999; each row rounds up to
-    // 0.3333, so adding the rows would give 0.9999 while the true total is 1.0000.
-    expect(result.cost.total).toBe('1.0000');
-    expect(sum).toBeCloseTo(0.9999, 4);
-    expect(Number(result.cost.total)).toBeGreaterThan(sum);
+    // 333,333 tokens at 1 unit per million is 0.333333 per row, shown as 0.3333,
+    // so the three rows add up to 0.9999 and the total says 0.9999 too.
+    expect(result.cost.total).toBe('0.9999');
+    expect(Number(result.cost.total)).toBeCloseTo(sum, 4);
+  });
+});
+
+describe('additivity', () => {
+  /** Money as a number, so two rows can be added in a test. */
+  const amount = (total: string): number => Number(total);
+
+  it('makes the grand total the sum of the projects', () => {
+    const result = runQuery(fixture(), query({ dimension: 'session' }), context);
+    const sum = result.projects.reduce((total, entry) => total + amount(entry.cost.total), 0);
+    expect(amount(result.cost.total)).toBeCloseTo(sum, 4);
+    expect(Number(sum.toFixed(4))).toBe(amount(result.cost.total));
+  });
+
+  it('makes each project the sum of its sessions', () => {
+    const result = runQuery(fixture(), query({ dimension: 'session' }), context);
+    for (const entry of result.projects) {
+      const sum = (entry.sessionReports ?? []).reduce((total, row) => total + amount(row.cost.total), 0);
+      expect(Number(sum.toFixed(4))).toBe(amount(entry.cost.total));
+    }
+  });
+
+  it('makes each session row its own records plus everything it spawned', () => {
+    for (const mode of ['subagents', 'detail'] as const) {
+      const result = runQuery(fixture(), query({ dimension: 'session', subagentMode: mode }), context);
+      for (const project of result.projects) {
+        for (const row of project.sessionReports ?? []) {
+          expect(amount(row.own.cost.total) + amount(row.spawned.cost.total)).toBeCloseTo(amount(row.total.cost.total), 4);
+          expect(Number((amount(row.own.cost.total) + amount(row.spawned.cost.total)).toFixed(4))).toBe(
+            amount(row.total.cost.total),
+          );
+        }
+      }
+    }
+  });
+
+  it('makes each project its own sessions plus every subagent', () => {
+    const result = runQuery(fixture(), query({ dimension: 'session', subagentMode: 'subagents' }), context);
+    for (const project of result.projects) {
+      expect(amount(project.own.cost.total) + amount(project.spawned.cost.total)).toBeCloseTo(amount(project.total.cost.total), 4);
+    }
+    const breakdown = result.scopeBreakdown;
+    expect(breakdown).toBeDefined();
+    expect(amount(breakdown!.own.cost.total) + amount(breakdown!.subagents.cost.total)).toBeCloseTo(
+      amount(breakdown!.total.cost.total),
+      4,
+    );
+    expect(amount(breakdown!.total.cost.total)).toBe(amount(result.cost.total));
+  });
+
+  it('makes the model rows add up to the node above them', () => {
+    // Two models in one session, so the node's line really is a split.
+    const mixed = dataset([
+      project({
+        id: 'p',
+        sessions: [
+          session({
+            id: 's',
+            records: [
+              record({ id: 'r1', time: STUB_AT.early, model: 'flat-model', tokens: buckets({ input: 333_333 }) }),
+              record({ id: 'r2', time: STUB_AT.early, model: 'tiered-model', tokens: buckets({ input: 333_333 }) }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+    const result = runQuery(mixed, query({ dimension: 'session' }), context);
+    expect(result.models).toHaveLength(2);
+    const sum = result.models.reduce((total, model) => total + amount(model.cost.total), 0);
+    expect(Number(sum.toFixed(4))).toBe(amount(result.cost.total));
+  });
+
+  it('makes tokens and requests add up the same way money does', () => {
+    const tokenCount = (tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }): number =>
+      tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
+    for (const subagentMode of ['total', 'subagents', 'detail'] as const) {
+      const result = runQuery(fixture(), query({ dimension: 'session', subagentMode }), context);
+      const perProjectTokens = result.projects.reduce((total, entry) => total + tokenCount(entry.tokens), 0);
+      const perProjectRequests = result.projects.reduce((total, entry) => total + entry.requests, 0);
+      expect(perProjectTokens).toBe(tokenCount(result.tokens));
+      expect(perProjectRequests).toBe(result.requests);
+      for (const entry of result.projects) {
+        const rows = entry.sessionReports ?? [];
+        const known = new Set(rows.map((row) => row.id));
+        // Rows are nested: only the roots stand for the whole project.
+        const roots = rows.filter((row) => row.parentId === null || !known.has(row.parentId));
+        expect(roots.reduce((total, row) => total + tokenCount(row.tokens), 0)).toBe(tokenCount(entry.tokens));
+      }
+    }
+  });
+
+  it('makes every row its own bands and its own model rows', () => {
+    for (const subagentMode of ['total', 'subagents', 'detail'] as const) {
+      const result = runQuery(fixture(), query({ dimension: 'session', subagentMode }), context);
+      for (const project of result.projects) {
+        for (const row of project.sessionReports ?? []) {
+          const bands = row.bands.reduce((total, band) => total + amount(band.cost.total), 0);
+          expect(Number(bands.toFixed(4))).toBe(amount(row.cost.total));
+          const models = row.models.reduce((total, model) => total + amount(model.cost.total), 0);
+          expect(Number(models.toFixed(4))).toBe(amount(row.cost.total));
+          const components = row.bands.flatMap((band) => band.components);
+          for (const band of row.bands) {
+            const own = band.components.reduce((total, component) => total + amount(component.amount), 0);
+            expect(Number(own.toFixed(4))).toBe(amount(band.cost.total));
+          }
+          expect(components.length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('makes the bands add up to the node they price', () => {
+    const result = runQuery(fixture(), query({ dimension: 'session' }), context);
+    const sum = result.bands.reduce((total, band) => total + amount(band.cost.total), 0);
+    expect(Number(sum.toFixed(4))).toBe(amount(result.cost.total));
+    for (const band of result.bands) {
+      const components = band.components.reduce((total, component) => total + amount(component.amount), 0);
+      expect(Number(components.toFixed(4))).toBe(amount(band.cost.total));
+    }
   });
 });
 

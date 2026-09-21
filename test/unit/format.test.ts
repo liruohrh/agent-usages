@@ -356,7 +356,6 @@ describe('formatUsageReport', () => {
   it('appends pricing bands and per-model lines only when asked', () => {
     const band = {
       model: 'demo-model',
-      models: ['demo-model'],
       periodId: '2026-08-16',
       periodLabel: '正式版',
       window: '2026-08-16 00:00 → 至今',
@@ -579,7 +578,6 @@ describe('usageToJson', () => {
         bands: [
           {
             model: 'demo-model',
-            models: ['demo-model'],
             periodId: '2026-08-16',
             periodLabel: '正式版',
             window: '2026-08-16 00:00 → 至今',
@@ -597,7 +595,6 @@ describe('usageToJson', () => {
     ) as { pricingBands: Record<string, unknown>[] };
     expect(body.pricingBands[0]).toMatchObject({
       model: 'demo-model',
-      models: ['demo-model'],
       periodId: '2026-08-16',
       periodLabel: '正式版',
       tier: 'flat',
