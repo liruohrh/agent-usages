@@ -24,7 +24,7 @@ import {
   type PricingEngine,
 } from './pricing/index.ts';
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
-import { resolveRange, type RangePreset } from './timerange.ts';
+import { resolveRange } from './timerange.ts';
 import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type ReportSection } from './format.ts';
 import type { UsageDataset } from './core/types.ts';
 
@@ -44,17 +44,11 @@ interface GlobalOptions {
 interface UsageOptions extends GlobalOptions {
   subagent?: boolean;
   subagents?: boolean;
-  today?: boolean;
-  week?: boolean;
-  windows?: boolean;
   cost?: boolean;
   models?: boolean;
   projectFilter?: string[];
   sessionFilter?: string[];
-  month?: boolean;
-  year?: boolean;
-  from?: string;
-  to?: string;
+  range?: string;
   currency?: string;
   currencyRate?: string;
   noEnrich?: boolean;
@@ -136,62 +130,21 @@ function emit(payload: unknown, text: string, json: boolean, requests: number): 
   process.exitCode = requests === 0 ? EXIT_NO_DATA : EXIT_OK;
 }
 
-/** The presets `--windows` expands, in display order. */
-const WINDOW_PRESETS: readonly { label: string; preset: RangePreset }[] = [
-  { label: '今日', preset: 'today' },
-  { label: '本周', preset: 'week' },
-  { label: '本月', preset: 'month' },
-  { label: '今年', preset: 'year' },
-];
-
 /** The `usage` command implementation. */
-async function runUsage(spec: string | undefined, options: UsageOptions): Promise<void> {
+async function runUsage(options: UsageOptions): Promise<void> {
   const loaded = await loadOrExit(options);
   if (loaded === undefined) return;
   const { dataset, engine, currency, symbol } = loaded;
 
-  const presetCount = [options.today, options.week, options.month, options.year].filter(Boolean).length;
-  if (presetCount > 1) {
-    process.stderr.write('agent-usages: --today / --week / --month / --year 只能指定一个\n');
-    process.exitCode = EXIT_ERROR;
-    return;
-  }
-  const preset: RangePreset | undefined =
-    options.today === true ? 'today' : options.week === true ? 'week' : options.month === true ? 'month' : options.year === true ? 'year' : undefined;
-  if (options.windows === true && preset !== undefined) {
-    process.stderr.write('agent-usages: --windows 已经包含四个时间窗口，不能再指定 --today/--week/--month/--year\n');
-    process.exitCode = EXIT_ERROR;
-    return;
-  }
-  if (options.windows === true && (spec !== undefined || options.from !== undefined || options.to !== undefined)) {
-    process.stderr.write('agent-usages: --windows 不能与位置参数或 --from/--to 同时使用\n');
-    process.exitCode = EXIT_ERROR;
-    return;
-  }
-
-  let ranges: { label: string; range: ReturnType<typeof resolveRange> }[];
+  let range: ReturnType<typeof resolveRange>;
   try {
-    ranges = options.windows === true
-      ? [
-          { label: '总', range: resolveRange({}) },
-          ...WINDOW_PRESETS.map((window) => ({ label: window.label, range: resolveRange({ preset: window.preset }) })),
-        ]
-      : [
-          (() => {
-            const range = resolveRange({
-              ...(spec === undefined ? {} : { spec }),
-              ...(options.from === undefined ? {} : { from: options.from }),
-              ...(options.to === undefined ? {} : { to: options.to }),
-              ...(preset === undefined ? {} : { preset }),
-            });
-            return { label: range.from === null && range.to === null ? '总' : range.label, range };
-          })(),
-        ];
+    range = resolveRange(options.range === undefined ? {} : { spec: options.range });
   } catch (error) {
     process.stderr.write(`agent-usages: ${(error as Error).message}\n`);
     process.exitCode = EXIT_ERROR;
     return;
   }
+  const ranges = [{ label: range.from === null && range.to === null ? '总' : range.label, range }];
 
   const currencyRate = options.currencyRate === undefined ? 1 : Number(options.currencyRate);
   const selectedCurrency = (options.currency ?? currency).toUpperCase();
@@ -375,26 +328,19 @@ export function buildProgram(): Command {
     program
       .command('usage', { isDefault: true })
       .description('计算 token 消耗与费用')
-      .argument('[range]', '时间范围：today/week/month/year（可加偏移，如 month-1）或 "起始..结束"')
+      .option('--range <spec>', '时间范围：today/week/month/year（可加偏移，如 month-1）或 "起始..结束"（左闭右开）')
       .option('--subagent', '每个项目与会话额外拆成 总 / 自身 / 子代理')
       .option('--subagents', '在 --subagent 之外，把每个子代理也单独列出')
-      .option('--windows', '同时输出 总 / 今日 / 本周 / 本月 / 今年')
       .option('--cost', '附上费用明细与计价区间（单价）')
       .option('--models', '附上按模型的明细')
       .option('-p, --project-filter <selector>', '只统计指定项目：id、名称或路径（支持 * 通配；可重复）', collect)
       .option('-s, --session-filter <selector>', '只统计指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；支持 * 通配；可重复）', collect)
-      .option('--today', '时间范围：今天')
-      .option('--week', '时间范围：本周（周一开始）')
-      .option('--month', '时间范围：本月')
-      .option('--year', '时间范围：今年')
-      .option('--from <time>', '起始时间（含），如 2026-09-01 或 2026-09-01T10:30')
-      .option('--to <time>', '结束时间，日期形式含当天')
       .option('--currency <code>', '显示货币（默认取计价来源的货币）')
       .option('--currency-rate <rate>', '1 单位计价货币折算为目标货币的汇率（默认 1）', parseRateOption),
   )
     .allowExcessArguments(false)
-    .action(async (range: string | undefined, options: UsageOptions, command: Command) => {
-      await runUsage(range, withGlobals(command, options));
+    .action(async (options: UsageOptions, command: Command) => {
+      await runUsage(withGlobals(command, options));
     });
 
   const sessionCommand = commonOptions(program.command('session').description('会话相关操作'));

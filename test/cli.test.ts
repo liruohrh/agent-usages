@@ -203,20 +203,38 @@ describe('usage', () => {
   });
 
   it('scopes by time range', async () => {
-    const inside = JSON.parse((await cli(['usage', '--json', '--from', '2026-09-01'])).stdout) as {
+    const inside = JSON.parse((await cli(['usage', '--json', '--range', '2026-09-01..'])).stdout) as {
       totals: { requests: number };
     };
     expect(inside.totals.requests).toBe(1);
-    const outside = JSON.parse((await cli(['usage', '--json', '--from', '2027-01-01'])).stdout) as {
+    const outside = JSON.parse((await cli(['usage', '--json', '--range', '2027-01-01..'])).stdout) as {
       totals: { requests: number };
     };
     expect(outside.totals.requests).toBe(0);
   });
 
-  it('rejects contradictory time-range inputs', async () => {
-    const { code, stderr } = await cli(['usage', '--today', '--from', '2026-09-01']);
+  it('takes the end of a range literally, excluding that instant', async () => {
+    // The fixture's only request is at 2026-09-11T12:00:00Z. A range ending at
+    // that instant excludes it; one ending a second later includes it. No end
+    // date is quietly widened to the whole day.
+    const requests = async (spec: string): Promise<number> =>
+      (JSON.parse((await cli(['usage', '--json', '--range', spec])).stdout) as { totals: { requests: number } }).totals
+        .requests;
+    expect(await requests('2026-09-11T12:00:00Z..')).toBe(1);
+    expect(await requests('..2026-09-11T12:00:00Z')).toBe(0);
+    expect(await requests('..2026-09-11T12:00:01Z')).toBe(1);
+  });
+
+  it('rejects an unreadable range instead of guessing', async () => {
+    const { code, stderr } = await cli(['usage', '--range', 'last-week']);
     expect(code).toBe(1);
-    expect(stderr).toMatch(/只能指定一次/);
+    expect(stderr).toMatch(/无法识别的时间/);
+  });
+
+  it('retires the flags --range replaced', async () => {
+    const { code, stderr } = await cli(['usage', '--today']);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/unknown option/);
   });
 
   it('multiplies by --currency-rate', async () => {
@@ -287,18 +305,15 @@ describe('usage', () => {
     expect(await rows(['usage', '--subagents', '--json'])).toBe(0);
   });
 
-  it('adds the cost tables only with --cost, and windows only with --windows', async () => {
+  it('adds the pricing bands only with --cost', async () => {
     const plain = (await cli(['usage'])).stdout;
     expect(plain).not.toContain('计价区间');
     expect(plain).not.toContain('时间窗口');
     expect((await cli(['usage', '--cost'])).stdout).toContain('计价区间:');
-    const windows = (await cli(['usage', '--windows'])).stdout;
-    expect(windows).toContain('时间窗口  总 / 今日 / 本周 / 本月 / 今年');
-    for (const label of ['总', '今日', '本周', '本月', '今年']) expect(windows).toMatch(new RegExp(`\\n${label}( · |\\n)`));
   });
 
   it('exits 2 when the filter matches no usage', async () => {
-    expect((await cli(['usage', '--from', '2027-01-01'])).code).toBe(2);
+    expect((await cli(['usage', '--range', '2027-01-01..'])).code).toBe(2);
   });
 });
 

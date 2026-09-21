@@ -12,7 +12,7 @@
 DeepSeek 只是**目前唯一支持的计价来源**，DSH 只是**目前唯一支持的 agent**。两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱，因此新增任何一方都只是加一个模块 + 一条注册项（见[架构与扩展](docs/architecture.md)）。
 
 - **维度**：全部 / 按项目 / 按会话 / 子代理，可按项目、会话筛选（各支持多个）
-- **时间范围**：今年、本月、今日、任意区间；不指定即为全部时间
+- **时间范围**：`--range today|week|month|year`（支持偏移）或 `--range 起始..结束`，左闭右开；不指定即为全部时间
 - **费用**：按价格表**分时段（峰谷）逐条**计算，默认取价格表的货币，可用 `--currency-rate` 折算
 - **`--json`**：所有命令都支持结构化输出
 
@@ -82,14 +82,11 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 | --- | --- |
 | `--subagent` | 每个项目与会话再拆成 **总 / 自身 / 子代理** 三行 |
 | `--subagents` | 在 `--subagent` 之外，把每个子代理也单独列出 |
-| `--windows` | 同时输出 **总 / 今日 / 本周 / 本月 / 今年** 五个窗口 |
 | `--cost` | 附上 `计价区间`：每段含自己的指标行与单价（按计费项给） |
 | `--models` | 多模型的节点逐个模型展开成一行 |
 | `-p, --project-filter <sel>` | 只看指定项目：id、名称或路径；支持 `*` 通配；可重复 |
 | `-s, --session-filter <sel>` | 只看指定会话：完整 id、唯一 id 前缀，或**标题**（标题需完全一致，忽略前后空格）；支持 `*` 通配；可重复 |
-| `--today` / `--week` / `--month` / `--year` | 时间范围：今日 / 本周（周一开始）/ 本月 / 今年 |
-| `--from <time>` | 起始时间（**含**），如 `2026-09-01`、`2026-09-01T10:30` |
-| `--to <time>` | 结束时间，日期形式**含当天**（内部按左闭右开实现） |
+| `--range <spec>` | 时间范围：`today` / `week` / `month` / `year`（支持 `week-1` 这类偏移）或 `起始..结束`（左闭右开） |
 | `--currency <code>` | 显示货币，默认取计价来源的货币 |
 | `--currency-rate <rate>` | 1 单位计价货币折算为目标货币的汇率，默认 1 |
 | `--agent` / `--home` / `--provider` / `--json` | 见上 |
@@ -224,24 +221,24 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 
 ## 时间范围
 
-四选一，不能同时使用：
+只有一个入口：`--range`。不指定就是**全部时间**。
 
 ```bash
-agent-usages usage --today          # 今日
-agent-usages usage --week           # 本周（周一开始）
-agent-usages usage --month          # 本月
-agent-usages usage --year           # 今年
-agent-usages usage --windows        # 总 + 今日 + 本周 + 本月 + 今年 一起输出
-agent-usages usage week-1           # 位置参数：today / week / month / year，支持偏移 week-1、month-1
-agent-usages usage 2026-09-01..2026-09-10
-agent-usages usage --from 2026-08-01 --to 2026-09-01
+agent-usages usage                            # 全部时间
+agent-usages usage --range today              # 今日（today / week / month / year，本机本地时区）
+agent-usages usage --range week-1             # 支持偏移：week-1、month-1、year-1、today-7
+agent-usages usage --range 2026-09-01..2026-09-19
+agent-usages usage --range 2026-09-01T08:00:00..2026-09-19T17:30:00
+agent-usages usage --range ..2026-09-19       # 只给结束；也可以只给开始：2026-09-01..
+agent-usages usage --range 2026-09-01         # 只给一个时间 = 从这时起
 ```
 
-- **没有时区的日期时间按本机本地时区解释**：`2026-09-01` 即本地当日 00:00。
-- 带显式时区则按字面解释：`2026-09-01T10:30:00+08:00`、`...Z`。
-- 区间一律**左闭右开**：`--from` 含、`--to` 不含；`--to 2026-09-10` 会包含 9 月 10 日一整天。
+- **左闭右开，按字面理解**：`2026-09-01..2026-09-19` 覆盖 1 号到 18 号，**不含 19 号**；结束时间不会自动扩成"一整天"。两端相同是合法的空区间（会提示没有数据），起始晚于结束才报错。
+- **裸日期 = 本地当日 00:00**；带时间必须写全 **`YYYY-MM-DDTHH:MM:SS`**（秒不能省），可带 `Z` 或 `±HH:MM`：
+  - 不带时区 → 本机本地时区：`2026-09-01`、`2026-09-01T10:30:00`
+  - 带时区 → 按字面解释：`2026-09-01T10:30:00+08:00`、`2026-09-01T10:30:00Z`
+  - `2026-09-01T10:30`（缺秒）、`2026/09/01` 这类写法会被直接拒绝，不会猜。
 - 记录按**各自的请求时间**落入区间，因此一个跨价格调整的会话会正确地被拆成两段计价。
-
 ---
 
 ## JSON 输出
@@ -305,7 +302,7 @@ agent-usages usage --from 2026-08-01 --to 2026-09-01
 - 时间同时给出 epoch 毫秒与 ISO 8601（UTC）。
 - `pricingBands[].tier` ∈ `peak` / `off-peak` / `flat`；`resolution` ∈ `exact` / `fallback-later` / `fallback-earlier` / `fallback-default`，用于说明价格区间是精确命中还是按回退规则选取。
 - `sessionReports` 给出每个会话一行；未产生用量的会话不会作为 0 值行出现。每个项目与会话都带 `own` / `spawned` / `nodeTotal` 三段（自身 / 子代理 / 两者之和），与文本里的 **自身 + 子代理 = 总** 对应。
-- `--windows` 时顶层是 `sections: [{ label, … }]`，每个窗口一份与单窗口相同结构的数据。
+- 库层面支持一次渲染多段（`sections: [{ label, … }]`）；CLI 的 `--range` 只输出一段，顶层就是那份扁平结构。
 - `subagentMode` 说明当前档位；`subagents` 给出范围内的子代理会话数与派生它们的会话数。
 - `scopeBreakdown` 只在 `--subagent` / `--subagents` 时出现，三段各自带 `tokenBreakdown`，且 `own + subagents == total`。
 - 每行另有 `isSubagent`（是否子代理）、`subagentCount`（合并口径下并入的子代理个数）、`parentId`（子代理的父会话）。

@@ -1,10 +1,14 @@
 /**
  * Time-range parsing.
  *
- * Every range is half-open: `from` is inclusive and `to` is exclusive. Bare
- * dates and datetimes without an explicit offset are interpreted in the
- * machine's local timezone, which is what a user means by "today" or
- * "2026-09-01"; an explicit `Z` or `±HH:MM` offset is honoured as written.
+ * Every range is half-open: `from` is inclusive and `to` is exclusive, taken
+ * literally — `2026-09-01..2026-09-19` covers the 1st up to (not including) the
+ * 19th, and no end date is silently widened to "the whole day".
+ *
+ * An endpoint is a bare date (`2026-09-01`, meaning local midnight) or a full
+ * `YYYY-MM-DDTHH:MM:SS`, optionally followed by `Z` or `±HH:MM`. Without an
+ * offset the machine's local zone applies, which is what a user means by "today";
+ * an explicit offset is honoured exactly as written.
  */
 
 /** Resolved half-open instant range. */
@@ -32,7 +36,10 @@ interface LocalParts {
 }
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-const DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
+/** A full local datetime: seconds are required, so `10:30` cannot be misread. */
+const DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/;
+/** The same, with the offset the user wrote instead of the local zone. */
+const OFFSET_DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:?\d{2})$/;
 const PRESET_PATTERN = /^(today|week|month|year|今日|本周|这周|本月|今年|今天)(?:([+-])(\d+))?$/;
 
 /** Parse a bare ISO date, rejecting impossible calendar dates. */
@@ -50,19 +57,23 @@ function parseDate(text: string): LocalParts | undefined {
   };
 }
 
-/** Parse an ISO-like datetime with no offset suffix. */
-function parseDateTime(text: string): LocalParts | undefined {
-  const match = DATETIME_PATTERN.exec(text);
-  if (match === null) return undefined;
+/** Parse a full ISO-like datetime from a regex match. */
+function partsOf(match: RegExpExecArray): LocalParts {
   return {
     year: Number(match[1]),
     month: Number(match[2]),
     day: Number(match[3]),
     hour: Number(match[4]),
     minute: Number(match[5]),
-    second: match[6] === undefined ? 0 : Number(match[6]),
+    second: Number(match[6]),
     millisecond: match[7] === undefined ? 0 : Number(match[7].padEnd(3, '0')),
   };
+}
+
+/** Parse an ISO-like datetime with no offset suffix. */
+function parseDateTime(text: string): LocalParts | undefined {
+  const match = DATETIME_PATTERN.exec(text);
+  return match === null ? undefined : partsOf(match);
 }
 
 /** Reject values that `Date.UTC` would silently roll over, e.g. month 13 or day 32. */
@@ -93,44 +104,44 @@ function localInstant(parts: LocalParts): number {
 
 /**
  * Parse one user-supplied endpoint.
- * @param text - an ISO date, an ISO-like datetime, or an offset-qualified datetime.
- * @param edge - which side of the range this endpoint is; an upper bound given as a bare date covers that whole day.
- * @returns the instant and whether the input carried an explicit UTC offset.
+ *
+ * Deliberately strict: a bare date means local midnight and a datetime must
+ * carry seconds, so `2026-09-01T10:30` is rejected rather than guessed at. The
+ * range is half-open, so an endpoint is used exactly as written — nothing is
+ * widened to the end of a day.
+ * @param text - a bare date, or `YYYY-MM-DDTHH:MM:SS` with an optional offset.
+ * @returns the instant and whether the user supplied an explicit offset.
  * @throws when the text is not a recognisable date or datetime.
  */
-export function parseInstant(text: string, edge: 'from' | 'to'): { instant: number; explicitOffset: boolean } {
+export function parseInstant(text: string): { instant: number; explicitOffset: boolean } {
   const trimmed = text.trim();
   if (trimmed.length === 0) throw new Error('时间不能为空');
-
-  // An explicit zone designator means "interpret exactly as written".
-  if (/(?:Z|[+-]\d{2}:?\d{2})$/.test(trimmed)) {
-    const instant = Date.parse(trimmed);
-    if (Number.isNaN(instant)) throw new Error(`无效的时间: ${JSON.stringify(text)}`);
-    return { instant, explicitOffset: true };
-  }
 
   const dateOnly = parseDate(trimmed);
   if (dateOnly !== undefined) {
     assertRealDate(dateOnly, trimmed);
-    // A bare end date means "through the end of that day", which the half-open
-    // convention expresses as the start of the next day.
-    if (edge === 'to') {
-      const next = new Date(dateOnly.year, dateOnly.month - 1, dateOnly.day + 1);
-      return {
-        instant: new Date(next.getFullYear(), next.getMonth(), next.getDate()).getTime(),
-        explicitOffset: false,
-      };
-    }
     return { instant: localInstant(dateOnly), explicitOffset: false };
   }
 
-  const dateTime = parseDateTime(trimmed);
-  if (dateTime !== undefined) {
-    assertRealDate(dateTime, trimmed);
-    return { instant: localInstant(dateTime), explicitOffset: false };
+  const local = DATETIME_PATTERN.exec(trimmed);
+  if (local !== null) {
+    const parts = partsOf(local);
+    assertRealDate(parts, trimmed);
+    return { instant: localInstant(parts), explicitOffset: false };
   }
 
-  throw new Error(`无法识别的时间: ${JSON.stringify(text)}（支持 2026-09-01、2026-09-01T10:30、2026-09-01T10:30:00+08:00）`);
+  const offset = OFFSET_DATETIME_PATTERN.exec(trimmed);
+  if (offset !== null) {
+    const parts = partsOf(offset);
+    assertRealDate(parts, trimmed);
+    const instant = Date.parse(trimmed);
+    if (Number.isNaN(instant)) throw new Error(`无效的日期时间: ${JSON.stringify(text)}`);
+    return { instant, explicitOffset: true };
+  }
+
+  throw new Error(
+    `无法识别的时间: ${JSON.stringify(text)}（支持 2026-09-01、2026-09-01T10:30:00、2026-09-01T10:30:00+08:00）`,
+  );
 }
 
 const PRESET_ALIASES: Readonly<Record<string, RangePreset>> = {
@@ -197,73 +208,46 @@ export function presetFromToken(token: string, now: Date = new Date()): TimeRang
   };
 }
 
-/** Combine `--from` / `--to` / preset flags into one range. */
+/** The one range input the CLI accepts. */
 export interface RangeInput {
-  /** Lower bound text, already parsed from `--from`. */
-  from?: string | undefined;
-  /** Upper bound text, already parsed from `--to`. */
-  to?: string | undefined;
-  /** A preset selected by `--today` / `--week` / `--month` / `--year`. */
-  preset?: RangePreset | undefined;
-  /** A positional range spec: a preset token or `A..B`. */
+  /** A preset token (`today`, `week-1`, `本月`) or `A..B`; omitted means everything. */
   spec?: string | undefined;
   /** Reference instant, for tests. */
   now?: Date | undefined;
 }
 
 /**
- * Resolve every time-range input into a single half-open range.
- * @param input - the CLI's range inputs.
- * @returns the resolved range; `{from: null, to: null}` when nothing was requested.
- * @throws when inputs contradict each other or a range is empty.
+ * Resolve the range the user asked for.
+ * @param input - the CLI's single range input.
+ * @returns the resolved range; `{from: null, to: null}` when nothing was asked.
+ * @throws when an endpoint is unreadable or the bounds are the wrong way round.
  */
 export function resolveRange(input: RangeInput = {}): TimeRange {
   const now = input.now ?? new Date();
-  const given = [input.preset !== undefined, input.spec !== undefined, input.from !== undefined || input.to !== undefined];
-  if (given.filter(Boolean).length > 1) {
-    throw new Error('时间范围只能指定一次：--today/--week/--month/--year、位置参数、或 --from/--to 三选一');
-  }
+  const spec = input.spec?.trim() ?? '';
+  if (spec.length === 0) return { from: null, to: null, label: '全部时间' };
 
-  let from: number | null = null;
-  let to: number | null = null;
-  let label = '全部时间';
+  const preset = presetFromToken(spec, now);
+  if (preset !== undefined) return preset;
 
-  if (input.preset !== undefined) {
-    const range = presetRange(input.preset, now);
-    return range;
+  const parts = spec.split('..');
+  if (parts.length > 2) {
+    throw new Error(`无法识别的时间范围: ${JSON.stringify(spec)}（至多一个 ".."）`);
   }
-
-  if (input.spec !== undefined) {
-    const spec = input.spec.trim();
-    const preset = presetFromToken(spec, now);
-    if (preset !== undefined) return preset;
-    const parts = spec.split('..');
-    if (parts.length === 2) {
-      const lower = parts[0]?.trim() ?? '';
-      const upper = parts[1]?.trim() ?? '';
-      if (lower.length > 0) from = parseInstant(lower, 'from').instant;
-      if (upper.length > 0) to = parseInstant(upper, 'to').instant;
-      label = `${lower.length > 0 ? lower : '起始'} → ${upper.length > 0 ? upper : '现在'}`;
-    } else {
-      // A single bare instant is treated as a lower bound, matching `--from`.
-      from = parseInstant(spec, 'from').instant;
-      label = `${spec} 起`;
-    }
-  } else {
-    if (input.from !== undefined) {
-      from = parseInstant(input.from, 'from').instant;
-      label = `${input.from} 起`;
-    }
-    if (input.to !== undefined) {
-      to = parseInstant(input.to, 'to').instant;
-      label = from === null ? `至 ${input.to}` : `${input.from ?? ''} → ${input.to}`;
-    }
+  if (parts.length === 1) {
+    // A single instant is a lower bound: "from here on".
+    const text = spec;
+    return { from: parseInstant(text).instant, to: null, label: `${text} 起` };
   }
-
-  if (from !== null && to !== null && from >= to) {
-    throw new Error('时间范围的起始时间必须早于结束时间');
+  const lower = parts[0]?.trim() ?? '';
+  const upper = parts[1]?.trim() ?? '';
+  const from = lower.length > 0 ? parseInstant(lower).instant : null;
+  const to = upper.length > 0 ? parseInstant(upper).instant : null;
+  if (from !== null && to !== null && from > to) {
+    throw new Error('时间范围的起始时间不能晚于结束时间');
   }
-  return { from, to, label };
+  // Equal bounds are a legal, empty range: the same instant twice excludes it.
+  return { from, to, label: `${lower.length > 0 ? lower : '起始'} → ${upper.length > 0 ? upper : '现在'}` };
 }
 
 /**

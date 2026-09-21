@@ -64,15 +64,16 @@ token 数字用紧凑写法（`K` / `M` / `B`，三位有效数字），显示�
 
 ## 时间窗口
 
-默认只输出**总**（全部时间）。指定了才显示那一个范围：
+默认只输出一段：**总**（全部时间）。`--range` 指定后输出那一段。
 
 | 参数 | 范围 |
 | --- | --- |
-| `--today` / `--week` / `--month` / `--year` | 今日 / 本周（周一开始）/ 本月 / 今年 |
-| `--windows` | 一次输出 **总 / 今日 / 本周 / 本月 / 今年** 五段，每段内部与默认相同 |
-| 位置参数或 `--from` / `--to` | 任意区间 |
+| （默认） | 全部时间 |
+| `--range today` / `week` / `month` / `year` | 今日 / 本周（周一开始）/ 本月 / 今年 |
+| `--range week-1`、`month-1`、`year-1`、`today-7` | 上一周 / 上个月 / 去年 / 7 天前（也认 今日/本周/本月/今年） |
+| `--range A..B` | 任意区间，**左闭右开**：`2026-09-01..2026-09-19` 不含 19 号 |
 
-位置参数也认 `today` / `week` / `month` / `year` 及其偏移（`week-1`、`month-1`、`today-7`）。
+端点可以只写一边（`..2026-09-19`、`2026-09-01..`），也可以只写一个时间（等于"从这时起"）。裸日期是本地 00:00；带时间必须写全 `YYYY-MM-DDTHH:MM:SS`，可带 `Z` 或 `±HH:MM`，不写时区就是本机本地时区。
 
 ## 范围拆分
 
@@ -132,4 +133,4 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 
 ## JSON
 
-`--json` 与文本同源：单窗口时是原来的扁平结构，`--windows` 时顶层是 `sections: [{ label, … }]`。项目与会话都带 `own` / `spawned` / `nodeTotal` 三段，金额仍是十进制字符串；`pricingBands` 里每一项都带 `model`、`models`、`periodId`、`tier`、`tokens`、`cost` 和 `components`（每项的 `rate`、`tokens`、`amount`）。字段清单见 [README](../README.md)。
+`--json` 与文本同源：顶层就是那一份扁平结构（库层面支持一次渲染多段，此时是 `sections: [{ label, … }]`）。项目与会话都带 `own` / `spawned` / `nodeTotal` 三段，金额仍是十进制字符串；`pricingBands` 里每一项都带 `model`、`models`、`periodId`、`tier`、`tokens`、`cost` 和 `components`（每项的 `rate`、`tokens`、`amount`）。字段清单见 [README](../README.md)。

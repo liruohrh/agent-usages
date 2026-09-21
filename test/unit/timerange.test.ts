@@ -54,41 +54,39 @@ describe('week tokens', () => {
 
 describe('parseInstant', () => {
   it('reads a bare date as local midnight', () => {
-    const { instant, explicitOffset } = parseInstant('2026-09-01', 'from');
-    expect(explicitOffset).toBe(false);
+    const { instant, explicitOffset } = parseInstant('2026-09-01');
     expect(new Date(instant)).toEqual(new Date(2026, 8, 1, 0, 0, 0, 0));
+    expect(explicitOffset).toBe(false);
   });
 
-  it('extends a bare END date through the end of that day', () => {
-    // `--to 2026-09-10` must include everything that happened on the 10th.
-    const { instant } = parseInstant('2026-09-10', 'to');
-    expect(new Date(instant)).toEqual(new Date(2026, 8, 11, 0, 0, 0, 0));
-    expect(inRange(new Date(2026, 8, 10, 23, 59, 59).getTime(), { from: null, to: instant, label: '' })).toBe(true);
-    expect(inRange(new Date(2026, 8, 11, 0, 0, 0).getTime(), { from: null, to: instant, label: '' })).toBe(false);
+  it('reads a full datetime, offset optional', () => {
+    expect(new Date(parseInstant('2026-09-01T10:30:45').instant)).toEqual(new Date(2026, 8, 1, 10, 30, 45, 0));
+    expect(new Date(parseInstant('2026-09-01T10:30:45.250').instant)).toEqual(new Date(2026, 8, 1, 10, 30, 45, 250));
+    // An explicit offset is honoured as written, whatever the machine's zone is.
+    expect(parseInstant('2026-09-01T10:30:45+08:00').instant).toBe(Date.parse('2026-09-01T10:30:45+08:00'));
+    expect(parseInstant('2026-09-01T10:30:45Z').instant).toBe(Date.parse('2026-09-01T10:30:45Z'));
   });
 
-  it('reads a datetime with and without seconds', () => {
-    expect(new Date(parseInstant('2026-09-01T10:30', 'from').instant)).toEqual(new Date(2026, 8, 1, 10, 30, 0, 0));
-    expect(new Date(parseInstant('2026-09-01 10:30:45', 'from').instant)).toEqual(new Date(2026, 8, 1, 10, 30, 45, 0));
-    expect(new Date(parseInstant('2026-09-01T10:30:45.250', 'from').instant)).toEqual(new Date(2026, 8, 1, 10, 30, 45, 250));
+  it('flags an explicit offset, so a caller can tell the two apart', () => {
+    expect(parseInstant('2026-09-01T10:30:45+08:00').explicitOffset).toBe(true);
+    expect(parseInstant('2026-09-01T10:30:45').explicitOffset).toBe(false);
   });
 
-  it('honours an explicit offset instead of the local zone', () => {
-    const withOffset = parseInstant('2026-09-01T10:30:00+08:00', 'from');
-    expect(withOffset.explicitOffset).toBe(true);
-    expect(withOffset.instant).toBe(Date.parse('2026-09-01T02:30:00Z'));
-    expect(parseInstant('2026-09-01T10:30:00Z', 'from').instant).toBe(Date.parse('2026-09-01T10:30:00Z'));
+  it('rejects an impossible calendar date', () => {
+    expect(() => parseInstant('2026-13-01')).toThrow(/无效的日期时间/);
+    expect(() => parseInstant('2026-02-30')).toThrow(/无效的日期时间/);
+    expect(() => parseInstant('2026-09-01T25:00:00')).toThrow(/无效的日期时间/);
   });
 
-  it('rejects impossible calendar dates', () => {
-    expect(() => parseInstant('2026-13-01', 'from')).toThrow(/无效的日期时间/);
-    expect(() => parseInstant('2026-02-30', 'from')).toThrow(/无效的日期时间/);
-    expect(() => parseInstant('2026-09-01T25:00', 'from')).toThrow(/无效的日期时间/);
+  it('rejects a partial time instead of guessing the missing field', () => {
+    // Seconds are required: `10:30` could be 10:30:00 or a typo for `10:30:xx`.
+    expect(() => parseInstant('2026-09-01T10:30')).toThrow(/无法识别的时间/);
+    expect(() => parseInstant('2026-09-01 10:30:45')).toThrow(/无法识别的时间/);
   });
 
-  it('rejects text that is not a time at all', () => {
-    expect(() => parseInstant('yesterday', 'from')).toThrow(/无法识别的时间/);
-    expect(() => parseInstant('', 'from')).toThrow(/时间不能为空/);
+  it('rejects anything that is not a date or datetime', () => {
+    expect(() => parseInstant('yesterday')).toThrow(/无法识别的时间/);
+    expect(() => parseInstant('')).toThrow(/时间不能为空/);
   });
 });
 
@@ -97,20 +95,16 @@ describe('resolveRange', () => {
     expect(resolveRange({ now: NOW })).toEqual({ from: null, to: null, label: '全部时间' });
   });
 
-  it('accepts a preset flag', () => {
-    const range = resolveRange({ preset: 'month', now: NOW });
+  it('accepts a preset token, including an offset', () => {
+    const range = resolveRange({ spec: 'month', now: NOW });
     expect(new Date(range.from as number)).toEqual(new Date(2026, 8, 1));
     expect(new Date(range.to as number)).toEqual(new Date(2026, 9, 1));
-  });
-
-  it('accepts a preset token, including a negative offset', () => {
     expect(new Date(resolveRange({ spec: 'today', now: NOW }).from as number)).toEqual(new Date(2026, 8, 17));
     const lastMonth = resolveRange({ spec: 'month-1', now: NOW });
     expect(new Date(lastMonth.from as number)).toEqual(new Date(2026, 7, 1));
     expect(new Date(lastMonth.to as number)).toEqual(new Date(2026, 8, 1));
     const lastYear = resolveRange({ spec: 'year-1', now: NOW });
     expect(new Date(lastYear.from as number)).toEqual(new Date(2025, 0, 1));
-    expect(new Date(lastYear.to as number)).toEqual(new Date(2026, 0, 1));
   });
 
   it('accepts the Chinese preset words', () => {
@@ -119,53 +113,49 @@ describe('resolveRange', () => {
     expect(resolveRange({ spec: '今日', now: NOW }).label).toBe('今日');
   });
 
-  it('accepts an explicit A..B range', () => {
-    const range = resolveRange({ spec: '2026-09-01..2026-09-10', now: NOW });
+  it('takes A..B literally: the end date is not included', () => {
+    const range = resolveRange({ spec: '2026-09-01..2026-09-19', now: NOW });
     expect(new Date(range.from as number)).toEqual(new Date(2026, 8, 1, 0, 0, 0, 0));
-    // The end date is inclusive of its whole day.
-    expect(new Date(range.to as number)).toEqual(new Date(2026, 8, 11, 0, 0, 0, 0));
+    expect(new Date(range.to as number)).toEqual(new Date(2026, 8, 19, 0, 0, 0, 0));
+    expect(inRange(new Date(2026, 8, 18, 23, 59, 59).getTime(), range)).toBe(true);
+    expect(inRange(new Date(2026, 8, 19, 0, 0, 0).getTime(), range)).toBe(false);
   });
 
-  it('accepts --from/--to', () => {
-    const range = resolveRange({ from: '2026-08-01', to: '2026-09-01', now: NOW });
-    expect(new Date(range.from as number)).toEqual(new Date(2026, 7, 1));
-    // `--to 2026-09-01` is inclusive of 2026-09-01 itself.
-    expect(new Date(range.to as number)).toEqual(new Date(2026, 8, 2));
+  it('accepts a full datetime on either side', () => {
+    const range = resolveRange({ spec: '2026-09-01T08:00:00..2026-09-19T17:30:00', now: NOW });
+    expect(new Date(range.from as number)).toEqual(new Date(2026, 8, 1, 8, 0, 0, 0));
+    expect(new Date(range.to as number)).toEqual(new Date(2026, 8, 19, 17, 30, 0, 0));
   });
 
-  it('treats a lone positional value as a lower bound', () => {
+  it('leaves either side open', () => {
+    const openStart = resolveRange({ spec: '..2026-09-19', now: NOW });
+    expect(openStart.from).toBeNull();
+    expect(new Date(openStart.to as number)).toEqual(new Date(2026, 8, 19));
+    const openEnd = resolveRange({ spec: '2026-09-01..', now: NOW });
+    expect(new Date(openEnd.from as number)).toEqual(new Date(2026, 8, 1));
+    expect(openEnd.to).toBeNull();
+  });
+
+  it('treats a lone instant as a lower bound', () => {
     const range = resolveRange({ spec: '2026-09-01', now: NOW });
     expect(new Date(range.from as number)).toEqual(new Date(2026, 8, 1));
     expect(range.to).toBeNull();
+    expect(range.label).toBe('2026-09-01 起');
   });
 
-  it('lets a pre-existing price period gap stay queryable with an open range', () => {
-    const range = resolveRange({ from: '2026-08-01', now: NOW });
-    expect(range.to).toBeNull();
+  it('accepts equal bounds as an empty range rather than an error', () => {
+    const range = resolveRange({ spec: '2026-09-19..2026-09-19', now: NOW });
+    expect(range.from).toBe(range.to);
+    expect(inRange(range.from as number, range)).toBe(false);
   });
 
-  it('rejects combining range inputs', () => {
-    expect(() => resolveRange({ preset: 'today', from: '2026-09-01', now: NOW })).toThrow(/只能指定一次/);
-    expect(() => resolveRange({ preset: 'today', spec: 'today', now: NOW })).toThrow(/只能指定一次/);
-    expect(() => resolveRange({ spec: 'today', from: '2026-09-01', now: NOW })).toThrow(/只能指定一次/);
+  it('rejects an inverted range', () => {
+    expect(() => resolveRange({ spec: '2026-09-10..2026-09-01', now: NOW })).toThrow(/不能晚于/);
+    expect(() => resolveRange({ spec: '2026-09-10T10:00:00..2026-09-10T09:00:00', now: NOW })).toThrow(/不能晚于/);
   });
 
-  it('rejects an empty or inverted range', () => {
-    expect(() => resolveRange({ from: '2026-09-10', to: '2026-09-01', now: NOW })).toThrow(/起始时间必须早于结束时间/);
-    expect(() => resolveRange({ from: '2026-09-10T10:00', to: '2026-09-10T10:00', now: NOW })).toThrow(
-      /起始时间必须早于结束时间/,
-    );
-    expect(() => resolveRange({ spec: '2026-09-10T10:00..2026-09-10T09:00', now: NOW })).toThrow(
-      /起始时间必须早于结束时间/,
-    );
-  });
-
-  it('treats the same date for both bounds as the whole of that day', () => {
-    // `--from 2026-09-10 --to 2026-09-10` is a one-day query, not an empty one:
-    // the end date is inclusive of its own day.
-    const range = resolveRange({ from: '2026-09-10', to: '2026-09-10', now: NOW });
-    expect(new Date(range.from as number)).toEqual(new Date(2026, 8, 10, 0, 0, 0, 0));
-    expect(new Date(range.to as number)).toEqual(new Date(2026, 8, 11, 0, 0, 0, 0));
+  it('rejects a spec with more than one range separator', () => {
+    expect(() => resolveRange({ spec: '2026-09-01..2026-09-10..2026-09-19', now: NOW })).toThrow(/至多一个/);
   });
 });
 
