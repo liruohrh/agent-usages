@@ -290,6 +290,8 @@ async function runSessionList(options: SessionListOptions): Promise<void> {
 /** Options accepted by `price`. */
 interface PriceOptions extends GlobalOptions {
   all?: boolean;
+  currency?: string;
+  current?: boolean;
 }
 
 /** The `price` command implementation. */
@@ -297,18 +299,34 @@ function runPrice(options: PriceOptions, config: ResolvedConfig): void {
   const providers = options.all === true
     ? config.providers
     : [resolvePricingProvider(options.provider, undefined, config.providers)];
+  const wanted = options.currency === undefined ? undefined : options.currency.trim().toUpperCase();
+  const now = Date.now();
   const lines: string[] = [];
   for (const provider of providers) {
     const engine = createPricingEngine(provider);
     const currencies = providerCurrencies(provider);
-    lines.push(`▸ ${provider.label}（${provider.id}，${currencies.join(' / ')} / 百万 tokens）`);
+    const listed = currencies.filter((code) => wanted === undefined || code === wanted);
+    if (listed.length === 0) {
+      lines.push(`▸ ${provider.label}（${provider.id}）没有 ${wanted} 的价格`);
+      lines.push('');
+      continue;
+    }
+    lines.push(`▸ ${provider.label}（${provider.id}，${listed.join(' / ')} / 百万 tokens）`);
     lines.push(`  默认价格模型: ${provider.defaultModel ?? '（无，未知模型不计价）'}`);
     for (const price of provider.models()) {
+      // A currency filter narrows the list; `--current` narrows it to the period
+      // in effect now, which is what a price question is usually about.
+      const shown = price.periods.filter(
+        (period) =>
+          (wanted === undefined || period.currency === wanted) &&
+          (options.current !== true || (period.from <= now && (period.to === null || now < period.to))),
+      );
+      if (shown.length === 0) continue;
       lines.push(`\n  ${price.model}`);
       if (price.aliases.length > 1) {
         lines.push(`    别名: ${price.aliases.filter((alias) => alias !== price.model).join('、')}`);
       }
-      for (const period of price.periods) {
+      for (const period of shown) {
         lines.push(`    [${period.id}] ${period.label}（${period.currency}）`);
         lines.push(`      生效: ${engine.describeWindow(period)}`);
         lines.push(`      峰谷: ${engine.describeTiers(period)}`);
@@ -542,8 +560,10 @@ export function buildProgram(): Command {
   commonOptions(
     program
       .command('price')
-      .description('显示内置价格表与生效区间（不读取任何数据）')
-      .option('--all', '列出全部计价来源'),
+      .description('显示价格表与生效区间（不读取任何数据）')
+      .option('--all', '列出全部计价来源')
+      .option('--currency <code>', '只看某个币种的价格表，如 CNY / USD')
+      .option('--current', '只看当前生效的区间'),
   ).action(async (options: PriceOptions, command: Command) => {
     runPrice(withGlobals(command, options), await resolveConfig({ noUpdate: true }));
   });

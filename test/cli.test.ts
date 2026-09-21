@@ -584,3 +584,31 @@ describe('configuration commands', () => {
     expect(JSON.parse(stdout)).toMatchObject({ agent: 'dsh' });
   });
 });
+
+describe('price filters', () => {
+  it('narrows to one currency', async () => {
+    const { stdout } = await cli(['price', '--currency', 'usd']);
+    expect(stdout).toContain('deepseek，USD / 百万 tokens');
+    expect(stdout).toContain('（USD）');
+    expect(stdout).not.toContain('（CNY）');
+  });
+
+  it('narrows to the period in effect now', async () => {
+    const all = (await cli(['price', '--currency', 'CNY'])).stdout;
+    const current = (await cli(['price', '--currency', 'CNY', '--current'])).stdout;
+    expect(all).toContain('[2026-01-01]');
+    expect(current).not.toContain('[2026-01-01]');
+    expect(current).toContain('[2026-09-10]');
+    expect(current.split('[2026-').length).toBeLessThan(all.split('[2026-').length);
+  });
+
+  it('says so when a provider has no such currency', async () => {
+    const { stdout } = await cli(['price', '--currency', 'JPY']);
+    expect(stdout).toContain('没有 JPY 的价格');
+  });
+
+  it('lists every provider with --all', async () => {
+    const { stdout } = await cli(['price', '--all', '--current']);
+    expect(stdout).toContain('DeepSeek 官方');
+  });
+});
