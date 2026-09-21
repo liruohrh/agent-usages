@@ -54,59 +54,40 @@ const WEEKDAY_INDEX: Readonly<Record<string, number>> = {
   Sat: 6,
 };
 
-const formatterCache = new Map<string, Intl.DateTimeFormat>();
+/** `Date#getUTCDay` index back to a name, for {@link zoneTime}. */
+const WEEKDAY_NAMES: readonly string[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/** Memoized formatter: constructing `Intl.DateTimeFormat` is not cheap. */
-function formatterFor(timeZone: string): Intl.DateTimeFormat {
-  let formatter = formatterCache.get(timeZone);
-  if (formatter === undefined) {
-    formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      weekday: 'short',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    });
-    formatterCache.set(timeZone, formatter);
-  }
-  return formatter;
-}
-
-/** Formatted parts of an instant in a timezone, keyed by part type. */
-function partsOf(instant: number, timeZone: string): Record<string, string> {
-  const parts: Record<string, string> = {};
-  for (const part of formatterFor(timeZone).formatToParts(new Date(instant))) {
-    if (part.type !== 'literal') parts[part.type] = part.value;
-  }
-  return parts;
+/** Formatted parts of an instant on a fixed clock, keyed by part type. */
+function partsOf(instant: number, utcOffset: number): Record<string, string> {
+  const shifted = new Date(instant + utcOffset * 60_000);
+  const pad = (value: number, width = 2): string => String(value).padStart(width, '0');
+  return {
+    year: String(shifted.getUTCFullYear()),
+    month: pad(shifted.getUTCMonth() + 1),
+    day: pad(shifted.getUTCDate()),
+    hour: pad(shifted.getUTCHours()),
+    minute: pad(shifted.getUTCMinutes()),
+    second: pad(shifted.getUTCSeconds()),
+    weekday: WEEKDAY_NAMES[shifted.getUTCDay()] as string,
+  };
 }
 
 /**
- * Describe one instant in a specific IANA timezone.
+ * Describe one instant on the clock a period's rules are written in.
  * @param instant - milliseconds since the Unix epoch.
- * @param timeZone - IANA zone name, e.g. `Asia/Shanghai`.
+ * @param utcOffset - minutes east of UTC.
  * @returns the local weekday, second-of-day, and calendar date.
- * @throws when the timezone is unknown to `Intl`.
  */
-export function zoneTime(instant: number, timeZone: string): ZoneTime {
-  const parts = partsOf(instant, timeZone);
-  const weekdayName = parts['weekday'] ?? 'Sun';
-  const weekday = WEEKDAY_INDEX[weekdayName];
+export function zoneTime(instant: number, utcOffset: number): ZoneTime {
+  const parts = partsOf(instant, utcOffset);
+  const weekday = WEEKDAY_INDEX[parts['weekday'] as string];
   if (weekday === undefined) {
-    throw new Error(`zoneTime: unexpected weekday ${JSON.stringify(weekdayName)} from Intl`);
+    throw new Error(`zoneTime: unexpected weekday ${JSON.stringify(parts['weekday'])}`);
   }
-  // Some ICU versions emit hour 24 for midnight despite hourCycle: 'h23'.
-  const hour = Number(parts['hour'] ?? '0') % 24;
-  const minute = Number(parts['minute'] ?? '0');
-  const second = Number(parts['second'] ?? '0');
   return {
     weekday,
-    secondsOfDay: hour * 3600 + minute * 60 + second,
-    isoDate: `${parts['year'] ?? '1970'}-${parts['month'] ?? '01'}-${parts['day'] ?? '01'}`,
+    secondsOfDay: Number(parts['hour']) * 3600 + Number(parts['minute']) * 60 + Number(parts['second']),
+    isoDate: `${parts['year']}-${parts['month']}-${parts['day']}`,
   };
 }
 
@@ -114,13 +95,13 @@ export function zoneTime(instant: number, timeZone: string): ZoneTime {
  * Whether an instant falls inside any peak window.
  * Windows are half-open: `fromHour` belongs to the window, `toHour` does not.
  * @param instant - milliseconds since the Unix epoch.
- * @param windows - windows expressed in `timeZone` wall-clock time.
- * @param timeZone - IANA zone the windows are expressed in.
+ * @param windows - windows expressed in the period's wall-clock time.
+ * @param utcOffset - minutes east of UTC that clock runs on.
  * @returns `true` when at least one window contains the instant.
  */
-export function isPeak(instant: number, windows: readonly PeakWindow[], timeZone: string): boolean {
+export function isPeak(instant: number, windows: readonly PeakWindow[], utcOffset: number): boolean {
   if (windows.length === 0) return false;
-  const { weekday, secondsOfDay } = zoneTime(instant, timeZone);
+  const { weekday, secondsOfDay } = zoneTime(instant, utcOffset);
   for (const window of windows) {
     // A `null` weekday list means the window applies every day.
     if (window.weekdays !== null && !window.weekdays.includes(weekday)) continue;
@@ -129,11 +110,19 @@ export function isPeak(instant: number, windows: readonly PeakWindow[], timeZone
   return false;
 }
 
-/** Format an instant as `YYYY-MM-DD HH:MM` in a timezone. */
-export function formatInstant(instant: number, timeZone: string): string {
-  const parts = partsOf(instant, timeZone);
-  const hour = String(Number(parts['hour'] ?? '0') % 24).padStart(2, '0');
-  return `${parts['year'] ?? '1970'}-${parts['month'] ?? '01'}-${parts['day'] ?? '01'} ${hour}:${parts['minute'] ?? '00'}`;
+/** Format an instant as `YYYY-MM-DD HH:MM` on the period's clock. */
+export function formatInstant(instant: number, utcOffset: number): string {
+  const parts = partsOf(instant, utcOffset);
+  return `${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']}`;
+}
+
+/** How a period's clock reads, e.g. `UTC+08:00`. */
+export function offsetLabel(utcOffset: number): string {
+  const sign = utcOffset < 0 ? '-' : '+';
+  const absolute = Math.abs(utcOffset);
+  const hours = String(Math.floor(absolute / 60)).padStart(2, '0');
+  const minutes = String(absolute % 60).padStart(2, '0');
+  return `UTC${sign}${hours}:${minutes}`;
 }
 
 /** Milliseconds since local midnight rendered as `HH:MM`. */
@@ -338,7 +327,7 @@ class Engine implements PricingEngine {
     if (!tiered) {
       return { model, period, tier: 'flat', components: period.offPeak, resolution };
     }
-    const peak = isPeak(record.time, period.peakWindows, period.timezone);
+    const peak = isPeak(record.time, period.peakWindows, period.utcOffset);
     return {
       model,
       period,
@@ -363,9 +352,9 @@ class Engine implements PricingEngine {
   }
 
   describeWindow(period: PricePeriod): string {
-    const from = formatInstant(period.from, period.timezone);
-    const to = period.to === null ? '至今' : formatInstant(period.to, period.timezone);
-    return `${from} → ${to} (${period.timezone})`;
+    const from = formatInstant(period.from, period.utcOffset);
+    const to = period.to === null ? '至今' : formatInstant(period.to, period.utcOffset);
+    return `${from} → ${to} (${offsetLabel(period.utcOffset)})`;
   }
 
   describeTiers(period: PricePeriod): string {
@@ -382,7 +371,7 @@ class Engine implements PricingEngine {
         !window.weekdays.includes(6),
     );
     const days = everyDay ? '每天' : weekdaysOnly ? '周一至周五' : '指定星期';
-    return `${days} ${windows}（${period.timezone}）`;
+    return `${days} ${windows}（${offsetLabel(period.utcOffset)}）`;
   }
 
   describeBasis(basis: BillingBasis): string {

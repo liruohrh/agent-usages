@@ -251,7 +251,7 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
     "providers": [{ "id": "deepseek", "label": "DeepSeek 官方", "defaultModel": "deepseek-flash",
       "models": [{ "model": "deepseek-flash", "aliases": ["deepseek-flash"],
         "periods": [{ "id": "my-price", "label": "我的价", "from": "2026-09-10T12:00:00+08:00", "to": null,
-                      "timezone": "Asia/Shanghai", "currency": "CNY",
+                      "currency": "CNY",
                       "offPeak": [{ "id": "input-miss", "label": "缓存未命中输入",
                                     "basis": "inputAndCacheWrite", "rate": "0.5", "per": 1000000 }],
                       "peak": null, "peakWindows": [],

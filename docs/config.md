@@ -5,6 +5,11 @@
 | 层 | 位置 | 谁写 |
 | --- | --- | --- |
 | 仓库默认 | `config/pricing.json`、`config/rates.json`（随包发布） | 维护者提交 |
+
+价格区间只写 `from` / `to`（必须带偏移）与 `currency`（只有代码）：**时段与时钟都从 `from` 的偏移读出来**
+（`+08:00` → UTC+08:00），峰谷时段就按这个钟走，所以文件里不再重复写 `timezone`。厂商若按有夏令时的时区
+发布时段，这个模型不够用，届时再加回可选的 IANA 时区；当前收录的价格表都是固定偏移（北京时间为 UTC+8、
+DeepSeek 英文站直接写 UTC）。
 | 拉取缓存 | `~/.config/agent-usages/cache-pricing.json`、`cache-rates.json` | 工具自动写 |
 | 用户覆盖 | `~/.config/agent-usages/config.json` | 用户手写 |
 

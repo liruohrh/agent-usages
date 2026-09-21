@@ -51,7 +51,7 @@ function userOverride(): Record<string, unknown> {
                   label: '我的价',
                   from: '2026-09-15T00:00:00+08:00',
                   to: null,
-                  timezone: 'Asia/Shanghai',
+                  utcOffset: 480,
                   currency: 'CNY',
                   offPeak: [
                     { id: 'input-hit', label: '缓存命中输入', basis: 'cacheRead', rate: '0.01', per: 1_000_000 },

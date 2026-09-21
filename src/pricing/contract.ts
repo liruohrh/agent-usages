@@ -92,10 +92,17 @@ export interface PricePeriod {
   offPeak: readonly RateComponent[];
   /** Rates charged inside a peak window; `null` when the period has no tiers. */
   peak: readonly RateComponent[] | null;
-  /** Peak windows in {@link PricePeriod.timezone} wall-clock time. */
+  /** Peak windows in the period's own wall-clock time. */
   peakWindows: readonly PeakWindow[];
-  /** IANA zone the peak window hours are expressed in. */
-  timezone: string;
+  /**
+   * Minutes east of UTC that this period's wall clock runs on.
+   *
+   * Read from the offset the period's own `from` carries (`+08:00` → 480), which
+   * is why a period never names a zone: the timestamps already say which clock
+   * the vendor's hours are written in. A vendor whose hours follow a DST zone
+   * would need that zone back; none of the published lists here do.
+   */
+  utcOffset: number;
   /**
    * ISO code of the currency these rates are quoted in.
    *

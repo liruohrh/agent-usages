@@ -54,7 +54,7 @@ function overridePeriod(from: string, to: string | null, rate: string): PricePer
     label: '用户自定义价',
     from: Date.parse(from),
     to: to === null ? null : Date.parse(to),
-    timezone: 'Asia/Shanghai',
+    utcOffset: 480,
     currency: 'CNY',
     offPeak: [
       component('input-hit', '缓存命中输入', 'cacheRead', rate),

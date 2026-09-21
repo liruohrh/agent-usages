@@ -50,7 +50,7 @@ export interface AgentAdapter {
 { "id": "deepseek", "label": "DeepSeek 官方", "defaultModel": "deepseek-flash",
   "models": [{ "model": "deepseek-flash", "aliases": ["deepseek-chat", "..."],
                "periods": [{ "id": "2026-09-10", "from": "2026-09-10T12:00:00+08:00", "to": null,
-                             "timezone": "Asia/Shanghai", "currency": "CNY",   // 只要代码，符号内置
+                             "currency": "CNY",   // 只要代码，符号内置；时钟取自 from 的偏移
                              "offPeak": [{ "id": "input-miss", "basis": "inputAndCacheWrite",
                                            "rate": "1", "per": 1000000, "label": "缓存未命中输入" }],
                              "peak": [ /* … */ ], "peakWindows": [ /* … */ ],

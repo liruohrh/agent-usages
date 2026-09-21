@@ -78,15 +78,33 @@ function boolean(value: unknown, path: string): boolean {
   return value;
 }
 
-/** Read an instant written as an ISO datetime with an explicit offset. */
-function instant(value: unknown, path: string): number {
+/** An instant written as an ISO datetime, with the offset it carried. */
+interface Stamped {
+  /** Milliseconds since the Unix epoch. */
+  instant: number;
+  /** Minutes east of UTC the timestamp was written in. */
+  utcOffset: number;
+}
+
+/**
+ * Read an instant that must carry its own offset.
+ *
+ * The offset is not decoration: it is the only place a period says which clock
+ * its peak hours are written in, which is why a bare local time is rejected.
+ */
+function stamped(value: unknown, path: string): Stamped {
   const raw = text(value, path);
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(raw)) {
-    throw new ConfigError(path, `应为带时区的 ISO 时间（如 2026-09-10T12:00:00+08:00），收到 ${JSON.stringify(raw)}`);
+  const match = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.exec(raw);
+  if (match === null) {
+    throw new ConfigError(path, `应为带偏移的 ISO 时间（如 2026-09-10T12:00:00+08:00），收到 ${JSON.stringify(raw)}`);
   }
   const parsed = Date.parse(raw);
   if (Number.isNaN(parsed)) throw new ConfigError(path, `不是有效时间：${JSON.stringify(raw)}`);
-  return parsed;
+  const zone = match[1] as string;
+  const utcOffset =
+    zone === 'Z' ? 0 : (zone.startsWith('-') ? -1 : 1) * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(4, 6)));
+  if (Math.abs(utcOffset) > 14 * 60) throw new ConfigError(path, `偏移超出 ±14:00：${JSON.stringify(raw)}`);
+  return { instant: parsed, utcOffset };
 }
 
 /** A rate component, as the vendor publishes it. */
@@ -141,20 +159,21 @@ function period(value: unknown, path: string): PricePeriod {
   // carry them: otherwise a rate card would silently never apply.
   if (peak === null && peakWindows.length > 0) throw new ConfigError(`${path}.peakWindows`, '没有高峰价却写了高峰时段');
   if (peak !== null && peakWindows.length === 0) throw new ConfigError(`${path}.peak`, '有高峰价却没有高峰时段');
-  const from = instant(node['from'], `${path}.from`);
-  const to = node['to'] === null || node['to'] === undefined ? null : instant(node['to'], `${path}.to`);
-  if (to !== null && to <= from) throw new ConfigError(`${path}.to`, '结束时间必须晚于开始时间');
+  const from = stamped(node['from'], `${path}.from`);
+  const to = node['to'] === null || node['to'] === undefined ? null : stamped(node['to'], `${path}.to`);
+  if (to !== null && to.instant <= from.instant) throw new ConfigError(`${path}.to`, '结束时间必须晚于开始时间');
   const source = text(node['source'], `${path}.source`);
   if (!/^https?:\/\//.test(source)) throw new ConfigError(`${path}.source`, `应为来源 URL，收到 ${JSON.stringify(source)}`);
   return {
     id: text(node['id'], `${path}.id`),
     label: text(node['label'], `${path}.label`),
-    from,
-    to,
+    from: from.instant,
+    to: to === null ? null : to.instant,
+    // The period's clock is the offset its own start carries.
+    utcOffset: from.utcOffset,
     offPeak: array(node['offPeak'], `${path}.offPeak`).map((entry, index) => component(entry, `${path}.offPeak[${index}]`)),
     peak,
     peakWindows,
-    timezone: text(node['timezone'], `${path}.timezone`),
     currency,
     source,
     note: text(node['note'], `${path}.note`),

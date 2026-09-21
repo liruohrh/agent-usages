@@ -65,7 +65,7 @@ describe('period selection', () => {
               offPeak: [perMillion('output', 'out', 'output', '1')],
               peak: null,
               peakWindows: [],
-              timezone: 'UTC',
+              utcOffset: 0,
               currency: TEST_CURRENCY.code,
               source: 'test',
               note: '',
@@ -95,21 +95,21 @@ describe('period selection', () => {
 
 describe('tier selection', () => {
   it('opens a window inclusively and closes it exclusively', () => {
-    expect(isPeak(STUB_AT.earlyOffPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 'UTC')).toBe(false);
-    expect(isPeak(STUB_AT.earlyPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 'UTC')).toBe(true);
-    expect(isPeak(STUB_AT.earlyJustAfterPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 'UTC')).toBe(false);
+    expect(isPeak(STUB_AT.earlyOffPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 0)).toBe(false);
+    expect(isPeak(STUB_AT.earlyPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 0)).toBe(true);
+    expect(isPeak(STUB_AT.earlyJustAfterPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 0)).toBe(false);
   });
 
   it('honours a null weekday list as every day', () => {
     // 2026-03-01 is a Sunday.
-    expect(zoneTime(STUB_AT.earlyPeakSunday, 'UTC').weekday).toBe(0);
-    expect(isPeak(STUB_AT.earlyPeakSunday, [{ fromHour: 9, toHour: 12, weekdays: null }], 'UTC')).toBe(true);
+    expect(zoneTime(STUB_AT.earlyPeakSunday, 0).weekday).toBe(0);
+    expect(isPeak(STUB_AT.earlyPeakSunday, [{ fromHour: 9, toHour: 12, weekdays: null }], 0)).toBe(true);
   });
 
   it('restricts a window to listed weekdays', () => {
     const weekdaysOnly = [{ fromHour: 9, toHour: 12, weekdays: [1, 2, 3, 4, 5] }];
-    expect(isPeak(STUB_AT.earlyPeakSunday, weekdaysOnly, 'UTC')).toBe(false);
-    expect(isPeak(Date.parse('2026-03-02T09:00:00Z'), weekdaysOnly, 'UTC')).toBe(true);
+    expect(isPeak(STUB_AT.earlyPeakSunday, weekdaysOnly, 0)).toBe(false);
+    expect(isPeak(Date.parse('2026-03-02T09:00:00Z'), weekdaysOnly, 0)).toBe(true);
   });
 
   it('resolves the tier inside the period and reports it', () => {
@@ -119,10 +119,10 @@ describe('tier selection', () => {
     expect(engine.resolve(record({ time: STUB_AT.early, model: 'flat-model' }))?.tier).toBe('flat');
   });
 
-  it('evaluates windows in the period timezone, not the machine zone', () => {
-    // The stub's window is UTC; 09:00 UTC is not 09:00 in Shanghai.
-    expect(isPeak(STUB_AT.earlyPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 'UTC')).toBe(true);
-    expect(isPeak(STUB_AT.earlyPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 'Asia/Shanghai')).toBe(false);
+  it('evaluates windows on the period clock, not the machine clock', () => {
+    // The stub's window is written in UTC; 09:00 UTC is 17:00 in Shanghai.
+    expect(isPeak(STUB_AT.earlyPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 0)).toBe(true);
+    expect(isPeak(STUB_AT.earlyPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 480)).toBe(false);
   });
 });
 
@@ -176,10 +176,10 @@ describe('component arithmetic', () => {
 });
 
 describe('descriptions', () => {
-  it('describes windows in the period timezone', () => {
+  it('describes windows on the period clock', () => {
     const period = engine.provider.models()[0]?.periods[0];
     expect(period).toBeDefined();
-    expect(engine.describeWindow(period!)).toContain('(UTC)');
+    expect(engine.describeWindow(period!)).toContain('(UTC+00:00)');
     expect(engine.describeWindow(period!)).toContain('至今');
   });
 

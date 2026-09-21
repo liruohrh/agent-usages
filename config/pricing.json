@@ -23,7 +23,6 @@
               "label": "V3.2（deepseek-chat / deepseek-reasoner）统一价",
               "from": "2026-01-01T00:00:00+08:00",
               "to": "2026-04-24T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -58,7 +57,6 @@
               "label": "V4-Flash 预览版上线价",
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -93,7 +91,6 @@
               "label": "V4-Flash 缓存命中降价",
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -128,7 +125,6 @@
               "label": "V4-Flash（正式版）峰谷定价",
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -196,7 +192,6 @@
               "label": "V4-Flash（正式版）峰谷定价（周末全天低谷）",
               "from": "2026-08-23T00:00:00+08:00",
               "to": "2026-09-10T12:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -276,7 +271,6 @@
               "label": "V4.1-Flash（deepseek-flash）峰谷定价",
               "from": "2026-09-10T12:00:00+08:00",
               "to": null,
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -356,7 +350,6 @@
               "label": "V3.2（deepseek-chat / deepseek-reasoner）统一价",
               "from": "2026-01-01T00:00:00+08:00",
               "to": "2026-04-24T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -391,7 +384,6 @@
               "label": "V4-Flash 预览版上线价",
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -426,7 +418,6 @@
               "label": "V4-Flash 缓存命中降价",
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -461,7 +452,6 @@
               "label": "V4-Flash（正式版）峰谷定价",
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -529,7 +519,6 @@
               "label": "V4-Flash（正式版）峰谷定价（周末全天低谷）",
               "from": "2026-08-23T00:00:00+08:00",
               "to": "2026-09-10T12:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -609,7 +598,6 @@
               "label": "V4.1-Flash（deepseek-flash）峰谷定价",
               "from": "2026-09-10T12:00:00+08:00",
               "to": null,
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -697,7 +685,6 @@
               "label": "V4-Pro 预览版上线价",
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -732,7 +719,6 @@
               "label": "V4-Pro 限时 2.5 折",
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-06-01T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -767,7 +753,6 @@
               "label": "V4-Pro 永久降价（list 价的 1/4）",
               "from": "2026-06-01T00:00:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -802,7 +787,6 @@
               "label": "V4-Pro（正式版）峰谷定价",
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -870,7 +854,6 @@
               "label": "V4-Pro（正式版）峰谷定价（周末全天低谷）",
               "from": "2026-08-23T00:00:00+08:00",
               "to": null,
-              "timezone": "Asia/Shanghai",
               "currency": "CNY",
               "offPeak": [
                 {
@@ -950,7 +933,6 @@
               "label": "V4-Pro 预览版上线价",
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -985,7 +967,6 @@
               "label": "V4-Pro 限时 2.5 折",
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-06-01T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -1020,7 +1001,6 @@
               "label": "V4-Pro 永久降价（list 价的 1/4）",
               "from": "2026-06-01T00:00:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -1055,7 +1035,6 @@
               "label": "V4-Pro（正式版）峰谷定价",
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {
@@ -1123,7 +1102,6 @@
               "label": "V4-Pro（正式版）峰谷定价（周末全天低谷）",
               "from": "2026-08-23T00:00:00+08:00",
               "to": null,
-              "timezone": "Asia/Shanghai",
               "currency": "USD",
               "offPeak": [
                 {

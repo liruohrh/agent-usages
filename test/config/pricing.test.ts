@@ -60,7 +60,7 @@ describe('parsePricingConfig', () => {
   it('reports the path of the field that is wrong', () => {
     const document = shipped();
     firstPeriod(document)['from'] = '2026-01-01';
-    expect(() => parsePricingConfig(document)).toThrow(/providers\[0\]\.models\[0\]\.periods\[0\]\.from: 应为带时区的 ISO 时间/);
+    expect(() => parsePricingConfig(document)).toThrow(/providers\[0\]\.models\[0\]\.periods\[0\]\.from: 应为带偏移的 ISO 时间/);
   });
 
   it('rejects a rate that is not a decimal', () => {
