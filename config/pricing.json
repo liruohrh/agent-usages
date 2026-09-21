@@ -1,0 +1,1272 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-21",
+  "note": "厂商发布的价格表：中文站人民币、英文站美元各一套。改这里即可更新价格，不需要发版；提交后各端会在下一次检查时拉取。",
+  "providers": [
+    {
+      "id": "deepseek",
+      "label": "DeepSeek 官方",
+      "defaultModel": "deepseek-flash",
+      "models": [
+        {
+          "model": "deepseek-flash",
+          "aliases": [
+            "deepseek-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-vision-exp",
+            "deepseek-chat",
+            "deepseek-reasoner"
+          ],
+          "periods": [
+            {
+              "id": "2026-01-01",
+              "label": "V3.2（deepseek-chat / deepseek-reasoner）统一价",
+              "from": "2026-01-01T00:00:00+08:00",
+              "to": "2026-04-24T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.2",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "2",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "3",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260323134549/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "DeepSeek-V3.2 的 deepseek-chat / deepseek-reasoner 统一价，不分峰谷；自 2025-12-01 V3.2 上线沿用至 2026-04-24 V4 发布。"
+            },
+            {
+              "id": "2026-04-24",
+              "label": "V4-Flash 预览版上线价",
+              "from": "2026-04-24T00:00:00+08:00",
+              "to": "2026-04-26T20:15:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.2",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "1",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "2",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260424030643/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "DeepSeek API 上线 V4-Pro / V4-Flash，flat 定价。deepseek-chat / deepseek-reasoner 自此时起对应 V4-Flash 的非思考/思考模式并按此价格计费。"
+            },
+            {
+              "id": "2026-04-26",
+              "label": "V4-Flash 缓存命中降价",
+              "from": "2026-04-26T20:15:00+08:00",
+              "to": "2026-08-17T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.02",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "1",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "2",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "缓存命中价降至上线价的 1/10，未命中与输出价不变；2026-07-31 V4-Flash 转正式版（公测）时价格未变。"
+            },
+            {
+              "id": "2026-08-17",
+              "label": "V4-Flash（正式版）峰谷定价",
+              "from": "2026-08-17T00:00:00+08:00",
+              "to": "2026-08-23T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.05",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "1.5",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "4.5",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.1",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "3",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "9",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": null
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": null
+                }
+              ],
+              "source": "https://web.archive.org/web/20260816161307/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "首次启用峰谷定价，空闲价为高峰价的一半。此阶段官方只写「北京时间 9:00-12:00、14:00-18:00」，未限定工作日，因此周六周日同样按高峰计费。"
+            },
+            {
+              "id": "2026-08-23",
+              "label": "V4-Flash（正式版）峰谷定价（周末全天低谷）",
+              "from": "2026-08-23T00:00:00+08:00",
+              "to": "2026-09-10T12:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.05",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "1.5",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "4.5",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.1",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "3",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "9",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                }
+              ],
+              "source": "https://web.archive.org/web/20260822130627/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "自北京时间 2026-08-23（周日）00:00 起，周末（周六、周日）全天不再区分峰谷，统一按低谷价计费。单价本身不变。"
+            },
+            {
+              "id": "2026-09-10",
+              "label": "V4.1-Flash（deepseek-flash）峰谷定价",
+              "from": "2026-09-10T12:00:00+08:00",
+              "to": null,
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.02",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "1",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "4",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.04",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "2",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "8",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                }
+              ],
+              "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+              "note": "DeepSeek-V4.1-Flash 上线并同步降价；模型名改为 deepseek-flash，旧名 deepseek-v4-flash / deepseek-v4-flash-vision-exp 仍按 Flash 价格计费。峰谷规则沿用 2026-08-23 起的周一至周五。"
+            },
+            {
+              "id": "2026-01-01",
+              "label": "V3.2（deepseek-chat / deepseek-reasoner）统一价",
+              "from": "2026-01-01T00:00:00+08:00",
+              "to": "2026-04-24T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.028",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.28",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "0.42",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260323134549/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "V3.2 统一价（美元表）。"
+            },
+            {
+              "id": "2026-04-24",
+              "label": "V4-Flash 预览版上线价",
+              "from": "2026-04-24T00:00:00+08:00",
+              "to": "2026-04-26T20:15:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.028",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.14",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "0.28",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260424030643/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "预览版上线价（美元表）。"
+            },
+            {
+              "id": "2026-04-26",
+              "label": "V4-Flash 缓存命中降价",
+              "from": "2026-04-26T20:15:00+08:00",
+              "to": "2026-08-17T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.0028",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.14",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "0.28",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "缓存命中价降至 1/10（美元表）。"
+            },
+            {
+              "id": "2026-08-17",
+              "label": "V4-Flash（正式版）峰谷定价",
+              "from": "2026-08-17T00:00:00+08:00",
+              "to": "2026-08-23T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.007",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.22",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "0.66",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.014",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.44",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "1.32",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": null
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": null
+                }
+              ],
+              "source": "https://web.archive.org/web/20260816161307/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "首次启用峰谷定价（美元表）；此阶段高峰时段未限定工作日。"
+            },
+            {
+              "id": "2026-08-23",
+              "label": "V4-Flash（正式版）峰谷定价（周末全天低谷）",
+              "from": "2026-08-23T00:00:00+08:00",
+              "to": "2026-09-10T12:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.007",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.22",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "0.66",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.014",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.44",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "1.32",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                }
+              ],
+              "source": "https://web.archive.org/web/20260822130627/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "周末全天低谷（美元表）；单价不变。"
+            },
+            {
+              "id": "2026-09-10",
+              "label": "V4.1-Flash（deepseek-flash）峰谷定价",
+              "from": "2026-09-10T12:00:00+08:00",
+              "to": null,
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.003",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.15",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "0.6",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.006",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.3",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "1.2",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                }
+              ],
+              "source": "https://api-docs.deepseek.com/quick_start/pricing",
+              "note": "V4.1-Flash 上线并同步降价（美元表）。"
+            }
+          ]
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "aliases": [
+            "deepseek-v4-pro"
+          ],
+          "periods": [
+            {
+              "id": "2026-04-24",
+              "label": "V4-Pro 预览版上线价",
+              "from": "2026-04-24T00:00:00+08:00",
+              "to": "2026-04-26T20:15:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "1",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "12",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "24",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260424030643/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "V4-Pro 预览版上线价（list price），flat 定价。"
+            },
+            {
+              "id": "2026-04-26",
+              "label": "V4-Pro 限时 2.5 折",
+              "from": "2026-04-26T20:15:00+08:00",
+              "to": "2026-06-01T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.025",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "3",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "6",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "缓存命中价降至 1/10（1 元 → 0.1 元）并叠加 2.5 折活动价；原定 2026-05-05 结束，后延长至 2026-05-31 23:59。"
+            },
+            {
+              "id": "2026-06-01",
+              "label": "V4-Pro 永久降价（list 价的 1/4）",
+              "from": "2026-06-01T00:00:00+08:00",
+              "to": "2026-08-17T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.025",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "3",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "6",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "活动价转为常态价，数值与活动期相同，实际扣费无变化；2026-08-13 V4-Pro 转正式版（0813）时价格未变。"
+            },
+            {
+              "id": "2026-08-17",
+              "label": "V4-Pro（正式版）峰谷定价",
+              "from": "2026-08-17T00:00:00+08:00",
+              "to": "2026-08-23T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.15",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "4.5",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "13.5",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.3",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "9",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "27",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": null
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": null
+                }
+              ],
+              "source": "https://web.archive.org/web/20260816161307/https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "note": "与 V4-Flash 同时启用峰谷定价；此阶段高峰时段未限定工作日，周末同样按高峰计费。"
+            },
+            {
+              "id": "2026-08-23",
+              "label": "V4-Pro（正式版）峰谷定价（周末全天低谷）",
+              "from": "2026-08-23T00:00:00+08:00",
+              "to": null,
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "CNY",
+                "symbol": "¥"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.15",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "4.5",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "13.5",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.3",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "9",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "27",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                }
+              ],
+              "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+              "note": "沿用 2026-08-23 起的周末全天低谷规则；2026-09-10 的 Flash 降价未影响 V4-Pro，DeepSeek 已公告 2026-09-14 之后继续提供该模型且计费方式不变。"
+            },
+            {
+              "id": "2026-04-24",
+              "label": "V4-Pro 预览版上线价",
+              "from": "2026-04-24T00:00:00+08:00",
+              "to": "2026-04-26T20:15:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.145",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "1.74",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "3.48",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260424030643/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "V4-Pro 预览版上线价（美元表，list price）。"
+            },
+            {
+              "id": "2026-04-26",
+              "label": "V4-Pro 限时 2.5 折",
+              "from": "2026-04-26T20:15:00+08:00",
+              "to": "2026-06-01T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.003625",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.435",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "0.87",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "活动价（美元表）。"
+            },
+            {
+              "id": "2026-06-01",
+              "label": "V4-Pro 永久降价（list 价的 1/4）",
+              "from": "2026-06-01T00:00:00+08:00",
+              "to": "2026-08-17T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.003625",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.435",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "0.87",
+                  "per": 1000000
+                }
+              ],
+              "peak": null,
+              "peakWindows": [],
+              "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "活动价转为常态价（美元表）。"
+            },
+            {
+              "id": "2026-08-17",
+              "label": "V4-Pro（正式版）峰谷定价",
+              "from": "2026-08-17T00:00:00+08:00",
+              "to": "2026-08-23T00:00:00+08:00",
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.022",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.66",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "1.98",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.044",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "1.32",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "3.96",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": null
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": null
+                }
+              ],
+              "source": "https://web.archive.org/web/20260816161307/https://api-docs.deepseek.com/quick_start/pricing/",
+              "note": "峰谷定价（美元表）；此阶段高峰时段未限定工作日。"
+            },
+            {
+              "id": "2026-08-23",
+              "label": "V4-Pro（正式版）峰谷定价（周末全天低谷）",
+              "from": "2026-08-23T00:00:00+08:00",
+              "to": null,
+              "timezone": "Asia/Shanghai",
+              "currency": {
+                "code": "USD",
+                "symbol": "$"
+              },
+              "offPeak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.022",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.66",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "1.98",
+                  "per": 1000000
+                }
+              ],
+              "peak": [
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.044",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-miss",
+                  "label": "缓存未命中输入",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "1.32",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出",
+                  "basis": "output",
+                  "rate": "3.96",
+                  "per": 1000000
+                }
+              ],
+              "peakWindows": [
+                {
+                  "fromHour": 9,
+                  "toHour": 12,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                },
+                {
+                  "fromHour": 14,
+                  "toHour": 18,
+                  "weekdays": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ]
+                }
+              ],
+              "source": "https://api-docs.deepseek.com/quick_start/pricing",
+              "note": "沿用周末全天低谷规则（美元表）。"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

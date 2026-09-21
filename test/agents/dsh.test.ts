@@ -16,7 +16,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { dshAgent, resolveDshHome } from '../../src/agents/dsh/loader.ts';
 import { locateSessionLogs, readSessionLog } from '../../src/agents/dsh/sessionlog.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
-import { deepseekPricing } from '../../src/pricing/vendors/deepseek.ts';
+import { shippedProviders } from '../../src/config/pricing.ts';
+
+/** The vendor's yuan list, which the fixture's expectations were written from. */
+const deepseekPricing = shippedProviders()[0]!;
 import { listSessions, resolveSessionSelectors, runQuery, type UsageQuery } from '../../src/report.ts';
 
 const SID = {

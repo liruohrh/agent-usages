@@ -1,19 +1,20 @@
 /**
  * The pricing registry.
  *
- * Adding a vendor is: write a module exporting a {@link PricingProvider}, add it
- * to {@link PRICING_PROVIDERS}, done — the CLI, the accounting layer, and the
- * reports pick it up automatically and `price --provider` starts listing it.
+ * Vendors are data, not code: every provider comes from `config/pricing.json`,
+ * which ships with the tool and can be fetched at run time. Adding a vendor is a
+ * matter of adding an entry there — the CLI, the accounting layer and the reports
+ * pick it up automatically and `price --provider` starts listing it.
  */
 
+import { shippedProviders } from '../config/pricing.ts';
 import type { PricingProvider } from './contract.ts';
-import { deepseekPricing } from './vendors/deepseek.ts';
 
 /** Every pricing provider this build knows about, in display order. */
-export const PRICING_PROVIDERS: readonly PricingProvider[] = [deepseekPricing];
+export const PRICING_PROVIDERS: readonly PricingProvider[] = shippedProviders();
 
 /** Provider used when the user does not name one. */
-export const DEFAULT_PRICING_PROVIDER = deepseekPricing.id;
+export const DEFAULT_PRICING_PROVIDER = PRICING_PROVIDERS[0]?.id ?? 'deepseek';
 
 /**
  * Look up a pricing provider.

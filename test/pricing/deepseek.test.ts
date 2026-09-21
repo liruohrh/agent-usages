@@ -1,18 +1,26 @@
 /**
- * DeepSeek's published price list.
+ * DeepSeek's published price lists, as shipped in `config/pricing.json`.
  *
  * These assertions pin the facts transcribed from DeepSeek's own docs and from
- * archived snapshots of the pricing page, including the two things that are easy
- * to get wrong: the 2026-08-23 weekend exemption, and the 2026-04-26 cache-hit
- * cut. Every period must name the URL it came from, so a wrong number is
- * traceable rather than mysterious.
+ * archived snapshots of the pricing pages, including the things that are easy to
+ * get wrong: the 2026-08-23 weekend exemption, the 2026-04-26 cache-hit cut, and
+ * the two currencies DeepSeek publishes (yuan for the Chinese site, dollars for
+ * the international one, as separate numbers). Every period must name the URL it
+ * came from, so a wrong number is traceable rather than mysterious.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import { createPricingEngine, isPeak, type PricePeriod } from '../../src/pricing/index.ts';
-import { DEEPSEEK_PRICES, deepseekPricing } from '../../src/pricing/vendors/deepseek.ts';
+import { shippedProviders } from '../../src/config/pricing.ts';
+
+/**
+ * The yuan list, which these assertions were written against: the engine prices
+ * in the CNY schedule unless a reader asks for another currency.
+ */
+const deepseekPricing = shippedProviders()[0]!;
+const DEEPSEEK_PRICES = deepseekPricing.models();
 import { record } from '../support/dataset.ts';
 
 const engine = createPricingEngine(deepseekPricing);
