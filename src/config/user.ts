@@ -124,6 +124,34 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): LoadedUser
  */
 export function mergePeriods(base: readonly PricePeriod[], override: readonly PricePeriod[]): PricePeriod[] {
   if (override.length === 0) return [...base];
+  // A vendor's histories for different currencies cover the same windows, so they
+  // are merged one currency at a time: tiling both at once would let the yuan
+  // list answer for the dollar list's windows and drop it entirely.
+  const codes = [...new Set([...base.map((period) => period.currency), ...override.map((period) => period.currency)])];
+  const merged: PricePeriod[] = [];
+  for (const code of codes) {
+    const baseList = base.filter((period) => period.currency === code);
+    const overrideList = override.filter((period) => period.currency === code);
+    if (overrideList.length === 0) {
+      merged.push(...baseList);
+      continue;
+    }
+    if (baseList.length === 0) {
+      merged.push(...overrideList);
+      continue;
+    }
+    merged.push(...tile(baseList, overrideList));
+  }
+  return merged;
+}
+
+/**
+ * Lay one history over another, interval by interval.
+ *
+ * Boundaries are unioned, each interval is awarded to whichever list covers it
+ * (the override first), and periods that survive whole keep their identity.
+ */
+function tile(base: readonly PricePeriod[], override: readonly PricePeriod[]): PricePeriod[] {
   const bounds = new Set<number>();
   for (const period of [...base, ...override]) {
     bounds.add(period.from);

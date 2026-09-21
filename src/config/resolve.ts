@@ -11,7 +11,7 @@
 import type { PricingProvider } from '../pricing/contract.ts';
 import type { RateTable } from '../pricing/currency.ts';
 import { mergeProviders, readUserConfig, type UpdateSettings } from './user.ts';
-import { parsePricingConfig, providerFromConfig, shippedPricingText, type ProviderConfig } from './pricing.ts';
+import { parsePricingConfig, providerFromConfig, shippedPricingText, validateProviders, type ProviderConfig } from './pricing.ts';
 import { parseRatesConfig, shippedRatesText, type RatesConfig } from './rates.ts';
 import { cachedConfigText, runUpdates, type UpdateKind } from './update.ts';
 
@@ -104,9 +104,11 @@ export async function resolveConfig(options: ResolveOptions = {}): Promise<Resol
   const merged = user.config.pricing.length === 0 ? base : mergeProviders(base, user.config.pricing);
   let providers: ProviderConfig[];
   try {
-    // Re-validating the merged result is what guarantees an override cannot
-    // leave a hole or an overlap in the vendor's timeline.
-    providers = parsePricingConfig({ version: 1, updatedAt: 'merged', providers: merged }).providers;
+    // Re-checking the merged result with the domain rules — not the file parser,
+    // which expects ISO text where the merge works in instants — is what
+    // guarantees an override cannot leave a hole or an overlap behind.
+    validateProviders(merged);
+    providers = merged;
   } catch (error) {
     warnings.push(`用户价格配置与默认表合并失败，改用默认表：${(error as Error).message}`);
     providers = base;

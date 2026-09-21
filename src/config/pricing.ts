@@ -161,12 +161,18 @@ function period(value: unknown, path: string): PricePeriod {
   };
 }
 
-/** One model's price history. */
-function modelPrice(value: unknown, path: string): ModelPrice {
-  const node = object(value, path);
-  const aliases = array(node['aliases'] ?? [], `${path}.aliases`).map((alias, index) => text(alias, `${path}.aliases[${index}]`));
-  const model = text(node['model'], `${path}.model`);
-  const periods = array(node['periods'], `${path}.periods`).map((entry, index) => period(entry, `${path}.periods[${index}]`));
+/**
+ * Check a model's periods are usable, whatever shape they arrived in.
+ *
+ * Shared by the file parser and by the user-override merge, so a merged history
+ * is held to exactly the same rules as a published one — and so an override can
+ * never be accepted by one path and rejected by the other.
+ * @param entry - the model to check.
+ * @param path - where it came from, for the error message.
+ * @throws {ConfigError} on a duplicate id, a gap, an overlap, or a history that never ends.
+ */
+export function checkModelPeriods(entry: ModelPrice, path: string): void {
+  const periods = entry.periods;
   if (periods.length === 0) throw new ConfigError(`${path}.periods`, '至少需要一个价格区间');
   // Ids are unique within a currency, not across them: the yuan and dollar lists
   // name the same windows with the same ids, and only one list is ever priced.
@@ -195,7 +201,35 @@ function modelPrice(value: unknown, path: string): ModelPrice {
     const last = history[history.length - 1] as PricePeriod;
     if (last.to !== null) throw new ConfigError(`${path}.periods`, `${code} 的最后一段 ${last.id} 没有结束时间，之后的时间将无法计价`);
   }
-  return { model, aliases: aliases.length > 0 ? aliases : [model], periods };
+}
+
+/**
+ * Validate providers that were assembled in memory rather than parsed.
+ * @param providers - the providers to check.
+ * @throws {ConfigError} with the path of the first problem.
+ */
+export function validateProviders(providers: readonly ProviderConfig[]): void {
+  if (providers.length === 0) throw new ConfigError('providers', '至少需要一个计价来源');
+  providers.forEach((entry, index) => {
+    if (entry.models.length === 0) throw new ConfigError(`providers[${index}].models`, '至少需要一个模型');
+    if (entry.defaultModel !== null && !entry.models.some((model) => model.model === entry.defaultModel)) {
+      throw new ConfigError(`providers[${index}].defaultModel`, `默认模型 ${entry.defaultModel} 不在模型列表里`);
+    }
+    entry.models.forEach((model, at) => {
+      checkModelPeriods(model, `providers[${index}].models[${at}]`);
+    });
+  });
+}
+
+/** One model's price history, parsed from a configuration file. */
+function modelPrice(value: unknown, path: string): ModelPrice {
+  const node = object(value, path);
+  const aliases = array(node['aliases'] ?? [], `${path}.aliases`).map((alias, index) => text(alias, `${path}.aliases[${index}]`));
+  const model = text(node['model'], `${path}.model`);
+  const periods = array(node['periods'], `${path}.periods`).map((entry, index) => period(entry, `${path}.periods[${index}]`));
+  const parsed: ModelPrice = { model, aliases: aliases.length > 0 ? aliases : [model], periods };
+  checkModelPeriods(parsed, path);
+  return parsed;
 }
 
 /** One pricing provider, as a config file describes it. */
