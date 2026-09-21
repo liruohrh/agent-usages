@@ -12,6 +12,7 @@
  * lets a provider quote in any currency it likes.
  */
 
+import { shippedRates, type RatesConfig } from '../config/rates.ts';
 import { MONEY_SCALE_DIGITS, divideDecimal, formatDecimal, multiplyDecimal, parseDecimal, trimDecimal } from '../core/money.ts';
 import type { PricePeriod, PricingProvider, RateComponent } from './contract.ts';
 
@@ -146,55 +147,31 @@ export interface RateTable {
 }
 
 /**
- * The table shipped with the tool.
+ * The rate configuration shipped with the tool.
  *
- * A seed, not a source of truth: it exists so a first run with no cache and no
- * network still converts, and it says what it is so nobody mistakes it for live
- * data. Values are the rates published on {@link SEED_DATE}.
+ * Read once and cached: it is a file on disk, and every call site wants the same
+ * table. The cache is what the update layer replaces when it has something newer.
  */
-export const SEED_DATE = '2026-09-21';
-export const SEED_RATES: Readonly<Record<string, string>> = {
-  USD: '1',
-  CNY: '6.70471',
-  EUR: '0.871295',
-  JPY: '156.919',
-  GBP: '0.747411',
-  HKD: '7.84518',
-  TWD: '31.8065',
-  KRW: '1386.02',
-  SGD: '1.27661',
-  AUD: '1.40460',
-  CAD: '1.39932',
-  CHF: '0.823021',
-  INR: '96.0370',
-  BRL: '5.13800',
-  RUB: '84.2616',
-  THB: '33.3407',
-  MYR: '4.08041',
-  IDR: '17790.5',
-  VND: '25994.9',
-  PHP: '62.8882',
-  NZD: '1.74839',
-  SEK: '9.83639',
-  NOK: '9.41271',
-  DKK: '6.51623',
-  PLN: '3.80245',
-  CZK: '21.2017',
-  HUF: '317.534',
-  TRY: '48.7945',
-  ILS: '3.03239',
-  MXN: '17.2279',
-  ZAR: '16.2590',
-  AED: '3.67250',
-  SAR: '3.75000',
-};
+let shippedConfig: RatesConfig | undefined;
+
+/** The shipped rate configuration. */
+export function shippedRateConfig(): RatesConfig {
+  shippedConfig ??= shippedRates();
+  return shippedConfig;
+}
+
+/** The date the shipped table was captured, `YYYY-MM-DD`. */
+export function seedDate(): string {
+  return shippedRateConfig().updatedAt;
+}
 
 /** The shipped table, as a {@link RateTable}. */
 export function seedTable(): RateTable {
+  const config = shippedRateConfig();
   return {
-    base: 'USD',
-    rates: SEED_RATES,
-    provenance: { source: '内置种子汇率 exchangerate-api.com', date: SEED_DATE },
+    base: config.base,
+    rates: config.table,
+    provenance: { source: `内置汇率表 ${config.source}`, date: config.updatedAt },
   };
 }
 

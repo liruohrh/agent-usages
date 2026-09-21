@@ -6,13 +6,11 @@
  * - `registry.ts` — which providers this build ships.
  * - `currency.ts` — display currency, exchange-rate tables, and converting a
  *   provider's published rates into the currency the report is shown in.
- * - `vendors/`    — one module per vendor's published price list.
+ * - `../config/`  — the vendor price lists and the rate table, as data.
  */
 
 export * from './contract.ts';
 export {
-  SEED_DATE,
-  SEED_RATES,
   chooseDisplay,
   currencyOf,
   convertProvider,
@@ -21,7 +19,9 @@ export {
   providerCurrencies,
   rateFor,
   rateFrom,
+  seedDate,
   seedTable,
+  shippedRateConfig,
   selectCurrency,
   type CurrencyInfo,
   type DisplayChoice,

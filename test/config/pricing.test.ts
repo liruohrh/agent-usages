@@ -12,7 +12,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { ConfigError, parsePricingConfig, providerFromConfig, shippedProviders } from '../../src/config/pricing.ts';
-import { createPricingEngine } from '../../src/pricing/index.ts';
+import { parseRatesConfig, shippedRates } from '../../src/config/rates.ts';
+import { createPricingEngine, rateFrom, seedTable } from '../../src/pricing/index.ts';
 
 /** The shipped configuration, as a mutable copy a test can break. */
 function shipped(): Record<string, unknown> {
@@ -139,5 +140,50 @@ describe('providerFromConfig', () => {
     expect(provider.find('DeepSeek-Chat')?.model).toBe('deepseek-flash');
     expect(provider.find('  deepseek-v4-pro ')?.model).toBe('deepseek-v4-pro');
     expect(provider.find('nope')).toBeUndefined();
+  });
+});
+
+describe('rates configuration', () => {
+  it('reads the shipped rate table with its sources', () => {
+    const config = shippedRates();
+    expect(config.base).toBe('USD');
+    expect(config.table['USD']).toBe('1');
+    expect(config.table['CNY']).toBeDefined();
+    expect(config.sources.map((source) => source.id)).toEqual(['frankfurter', 'er-api']);
+    expect(config.sources[0]?.kind).toBe('frankfurter');
+  });
+
+  it('turns the table into the rate table the report uses', () => {
+    const table = seedTable();
+    const config = shippedRates();
+    expect(table.base).toBe(config.base);
+    expect(table.provenance.date).toBe(config.updatedAt);
+    expect(table.provenance.source).toContain(config.source);
+    // 1 USD = 6.70471 CNY, so 1 CNY = 1/6.70471 USD.
+    expect(Number(rateFrom(table, 'CNY', 'USD'))).toBeCloseTo(1 / 6.70471, 8);
+  });
+
+  it('rejects a table without its own base', () => {
+    const document = JSON.parse(readFileSync(new URL('../../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+    delete (document['table'] as Record<string, string>)['USD'];
+    expect(() => parseRatesConfig(document)).toThrow(/缺少基准币种 USD/);
+  });
+
+  it('rejects a base that is not 1', () => {
+    const document = JSON.parse(readFileSync(new URL('../../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+    (document['table'] as Record<string, string>)['USD'] = '1.01';
+    expect(() => parseRatesConfig(document)).toThrow(/基准币种的汇率应为 "1"/);
+  });
+
+  it('rejects an unknown source kind', () => {
+    const document = JSON.parse(readFileSync(new URL('../../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+    (document['sources'] as Record<string, unknown>[])[0]!['kind'] = 'scrape';
+    expect(() => parseRatesConfig(document)).toThrow(/未知的汇率源类型/);
+  });
+
+  it('rejects a negative rate', () => {
+    const document = JSON.parse(readFileSync(new URL('../../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+    (document['table'] as Record<string, string>)['EUR'] = '-0.8';
+    expect(() => parseRatesConfig(document)).toThrow(/汇率必须为正/);
   });
 });

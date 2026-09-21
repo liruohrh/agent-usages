@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { costOf } from '../../src/accounting.ts';
 import {
-  SEED_DATE,
+  seedDate,
   convertProvider,
   currencyOf,
   displayRate,
@@ -132,7 +132,7 @@ describe('rateFor', () => {
   it('crosses through the table otherwise', () => {
     const { rate, provenance } = rateFor({ base: 'USD', target: 'EUR' });
     expect(Number(rate)).toBeCloseTo(0.871295, 6);
-    expect(provenance.date).toBe(SEED_DATE);
+    expect(provenance.date).toBe(seedDate());
   });
 
   it('lets a manual rate win', () => {
