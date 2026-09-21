@@ -10,7 +10,7 @@
 
 import stringWidth from 'string-width';
 
-import { alignMoney, moneyBreakdown, type MoneyBreakdown } from './accounting.ts';
+import { moneyBreakdown, type MoneyBreakdown } from './accounting.ts';
 import { tokenBreakdown } from './core/buckets.ts';
 import type { CostTotals, TokenTotals } from './core/types.ts';
 import type {
@@ -281,22 +281,18 @@ function bandBlocks(bands: readonly BandSummary[], symbol: string): string[] {
  * before it was applied. This only says how that one line splits, which is what
  * tells a reader that the blended numbers came from two different price lists.
  */
-function modelLines(
-  models: readonly ModelBreakdown[],
-  level: number,
-  symbol: string,
-  parentMoney: MoneyBreakdown,
-): string[] {
+function modelLines(models: readonly ModelBreakdown[], level: number, symbol: string): string[] {
   if (models.length <= 1) return [];
-  // The model rows are parts of the node's line above them, so they are aligned
-  // to it: a reader adding the rows must land on the number they were split from.
-  const rows = alignMoney(
-    parentMoney,
-    models.map((model) => moneyBreakdown(model.cost, model.tokens)),
-  );
+  // Each row is that model's own accumulated cost: nothing is redistributed
+  // between rows, so a row always means what it says.
   return models.map(
-    (model, index) =>
-      `${indent(level)}[${model.model}]  ${metricsLine(model.tokens, rows[index]!, model.requests, symbol)}`,
+    (model) =>
+      `${indent(level)}[${model.model}]  ${metricsLine(
+        model.tokens,
+        moneyBreakdown(model.cost, model.tokens),
+        model.requests,
+        symbol,
+      )}`,
   );
 }
 
@@ -380,14 +376,14 @@ function scopeLines(
   symbol: string,
 ): string[] {
   const at = indent(level);
-  const total = moneyBreakdown(node.total.cost, node.total.tokens);
-  const [own, spawned] = alignMoney(total, [
-    moneyBreakdown(node.own.cost, node.own.tokens),
-    moneyBreakdown(node.spawned.cost, node.spawned.tokens),
-  ]) as [MoneyBreakdown, MoneyBreakdown];
-  const line = (name: string, totals: ScopeTotals, amounts: MoneyBreakdown): string =>
-    `${at}${pad(name, SCOPE_LABEL_WIDTH)}  ${metricsLine(totals.tokens, amounts, totals.requests, symbol)}`;
-  return [line('总', node.total, total), line('自身', node.own, own), line('子代理', node.spawned, spawned)];
+  const line = (name: string, totals: ScopeTotals): string =>
+    `${at}${pad(name, SCOPE_LABEL_WIDTH)}  ${metricsLine(
+      totals.tokens,
+      moneyBreakdown(totals.cost, totals.tokens),
+      totals.requests,
+      symbol,
+    )}`;
+  return [line('总', node.total), line('自身', node.own), line('子代理', node.spawned)];
 }
 
 /** One session and, recursively, everything it spawned. */
@@ -398,7 +394,6 @@ function sessionLines(
   symbol: string,
   options: FormatOptions,
   parentDate: string | undefined,
-  parentMoney: MoneyBreakdown | undefined,
 ): string[] {
   const children = childrenOf.get(session.id) ?? [];
   const badge = session.subagentCount > 0 ? `（${count(session.subagentCount)} 个子代理）` : '';
@@ -406,41 +401,30 @@ function sessionLines(
   // The date is only worth repeating when it differs from the row above.
   const suffix = end === undefined || end === parentDate ? '' : ` ${end}`;
   const lines = [`${indent(level)}${clip(session.title ?? '(无标题)', TITLE_WIDTH)}${badge}${suffix}`];
-  // This row is a part of the nearest line above it, so it is aligned to that
-  // line's amount rather than rounded on its own.
-  const own = moneyBreakdown(session.total.cost, session.total.tokens);
-  const total = parentMoney === undefined ? own : alignMoney(parentMoney, [own])[0]!;
+  const total = moneyBreakdown(session.total.cost, session.total.tokens);
   // The split is worth printing only when there is something to split off; a
   // session with no subagents says everything in one line.
   const split = session.spawned.requests > 0 || children.length > 0;
   if (options.scope === true && split) {
     lines.push(...scopeLines(session, level + 1, symbol));
-    if (options.models === true) lines.push(...modelLines(session.models, level + 1, symbol, total));
+    if (options.models === true) lines.push(...modelLines(session.models, level + 1, symbol));
     if (options.expandSubagents === true) {
-      const spawned = alignMoney(moneyBreakdown(session.total.cost, session.total.tokens), [
-        moneyBreakdown(session.spawned.cost, session.spawned.tokens),
-      ])[0]!;
-      for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 2, symbol, options, end, spawned));
+      for (const child of children) lines.push(...sessionLines(child, childrenOf, level + 2, symbol, options, end));
     }
     return lines;
   }
   lines.push(`${indent(level + 1)}${metricsLine(session.total.tokens, total, session.total.requests, symbol)}`);
-  if (options.models === true) lines.push(...modelLines(session.models, level + 1, symbol, total));
+  if (options.models === true) lines.push(...modelLines(session.models, level + 1, symbol));
   if (options.expandSubagents === true) {
     for (const child of children) {
-      lines.push(...sessionLines(child, childrenOf, level + 1, symbol, options, end, total));
+      lines.push(...sessionLines(child, childrenOf, level + 1, symbol, options, end));
     }
   }
   return lines;
 }
 
 /** One project's block: its name, its metrics, and its sessions. */
-function projectLines(
-  project: ProjectReport,
-  symbol: string,
-  options: FormatOptions,
-  parentMoney: MoneyBreakdown | undefined,
-): string[] {
+function projectLines(project: ProjectReport, symbol: string, options: FormatOptions): string[] {
   const rows = project.sessionReports ?? [];
   const known = new Set(rows.map((row) => row.id));
   const roots = rows.filter((row) => row.parentId === null || !known.has(row.parentId));
@@ -454,10 +438,8 @@ function projectLines(
   const projectStart = project.firstUsage === null ? undefined : dayText(project.firstUsage);
   const lines = [projectStart === undefined ? project.name : `${project.name} ${projectStart}`];
   // A project whose whole tree is one session repeats that session's numbers, so
-  // its own line is dropped — and then the sessions below are aligned straight to
-  // the line above the project instead.
-  const own = moneyBreakdown(project.total.cost, project.total.tokens);
-  const shown = parentMoney === undefined || rows.length === 1 ? own : alignMoney(parentMoney, [own])[0]!;
+  // its own line is dropped.
+  const shown = moneyBreakdown(project.total.cost, project.total.tokens);
   const split = project.spawned.requests > 0 || rows.some((row) => row.isSubagent);
   if (rows.length !== 1) {
     lines.push(
@@ -465,17 +447,10 @@ function projectLines(
         ? [...scopeLines(project, 1, symbol)].join('\n')
         : `${indent(1)}${metricsLine(project.total.tokens, shown, project.total.requests, symbol)}`,
     );
-    if (options.models === true) lines.push(...modelLines(project.models, 1, symbol, shown));
+    if (options.models === true) lines.push(...modelLines(project.models, 1, symbol));
   }
-  // Session rows are parts of whichever project line was printed, or of the
-  // nearest line above it when this project collapsed.
-  const rowMoney = alignMoney(
-    rows.length === 1 ? (parentMoney ?? own) : shown,
-    rows.map((row) => moneyBreakdown(row.total.cost, row.total.tokens)),
-  );
-  const byRow = new Map(rows.map((row, index) => [row.id, rowMoney[index]!]));
   for (const root of roots) {
-    lines.push(...sessionLines(root, childrenOf, 1, symbol, options, projectStart, byRow.get(root.id)));
+    lines.push(...sessionLines(root, childrenOf, 1, symbol, options, projectStart));
   }
   return lines;
 }
@@ -497,16 +472,10 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
         ? [...scopeLines({ own: result.scopeBreakdown.own, spawned: result.scopeBreakdown.subagents, total: result.scopeBreakdown.total }, 1, symbol)].join('\n')
         : `${indent(1)}${metricsLine(result.tokens, rootMoney, result.requests, symbol)}`,
     );
-    if (options.models === true) lines.push(...modelLines(result.models, 1, symbol, rootMoney));
+    if (options.models === true) lines.push(...modelLines(result.models, 1, symbol));
   }
-  // A single project prints exactly the root's numbers, so the projects are
-  // aligned to the root line when it is shown and stand alone when it is not.
-  const projectMoney = active.length === 1 ? [] : alignMoney(
-    rootMoney,
-    active.map((project) => moneyBreakdown(project.total.cost, project.total.tokens)),
-  );
-  for (const [index, project] of active.entries()) {
-    lines.push('', ...projectLines(project, symbol, options, active.length === 1 ? rootMoney : projectMoney[index]));
+  for (const project of active) {
+    lines.push('', ...projectLines(project, symbol, options));
   }
   if (options.cost === true) {
     const bands = bandBlocks(result.bands, symbol);

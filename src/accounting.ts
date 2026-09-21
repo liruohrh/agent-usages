@@ -482,42 +482,6 @@ export function moneyBreakdown(cost: CostTotals, tokens: TokenBuckets): MoneyBre
 }
 
 /**
- * Make a set of parts add up to their whole, on display.
- *
- * Every amount here is already correctly rounded for its own scope, so a parent
- * and its parts can disagree by one display unit: two parts that each round up
- * carry a hundredth of a thousandth each into the sum. The whole is the number a
- * reader checks against its parts, so the difference is moved onto the largest
- * part — the one least changed by it — and the parts then add up exactly.
- * @param parent - the whole, as displayed.
- * @param children - the parts, as displayed.
- * @returns the parts, adjusted so their sum equals the whole.
- */
-export function alignMoney(parent: MoneyBreakdown, children: readonly MoneyBreakdown[]): MoneyBreakdown[] {
-  if (children.length === 0) return [];
-  const fields = Object.keys(parent) as (keyof MoneyBreakdown)[];
-  const aligned = children.map((child) => ({ ...child }));
-  for (const field of fields) {
-    const values = children.map((child) => parseDecimal(child[field]));
-    const diff = parseDecimal(parent[field]) - values.reduce((sum, value) => sum + value, 0n);
-    if (diff === 0n) continue;
-    let target = 0;
-    for (let index = 1; index < values.length; index += 1) {
-      if (values[index]! > values[target]!) target = index;
-    }
-    // A negative correction must not push a part below zero; then the largest
-    // part that can absorb it takes it instead.
-    if (diff < 0n) {
-      const able = values.map((value, index) => ({ value, index })).filter((entry) => entry.value >= -diff);
-      if (able.length === 0) continue;
-      target = able.reduce((best, entry) => (entry.value > best.value ? entry : best)).index;
-    }
-    aligned[target]![field] = formatDecimal(values[target]! + diff, COST_DIGITS);
-  }
-  return aligned;
-}
-
-/**
  * Cross-check aggregated buckets against a second opinion.
  * @param tokens - buckets summed from the records.
  * @param projected - buckets an independent source reports.
