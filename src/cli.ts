@@ -29,6 +29,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { resolveConfig, type ResolvedConfig } from './config/resolve.ts';
+import { loadRateSeries, rateOn, type LoadedRateSeries } from './config/series.ts';
+import type { RateMode } from './config/user.ts';
 import { cachedConfigText, runUpdates, type UpdateKind } from './config/update.ts';
 import { parsePricingConfig, shippedPricingText } from './config/pricing.ts';
 import { parseRatesConfig, shippedRatesText } from './config/rates.ts';
@@ -56,7 +58,8 @@ interface GlobalOptions {
   home?: string;
   provider?: string;
   json?: boolean;
-  noUpdate?: boolean;
+  /** Commander turns `--no-update` into `update: false`; absence means updates are allowed. */
+  update?: boolean;
 }
 
 /** Options accepted by `usage`. */
@@ -70,6 +73,7 @@ interface UsageOptions extends GlobalOptions {
   range?: string;
   currency?: string;
   currencyRate?: string;
+  rateMode?: string;
   noEnrich?: boolean;
 }
 
@@ -130,18 +134,22 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
     if (entry.home !== undefined) merged.home = entry.home;
     if (entry.provider !== undefined) merged.provider = entry.provider;
     if (entry.json !== undefined) merged.json = entry.json;
+    // A negated flag defaults to `true`, so only an explicit `false` means the
+    // user asked for it — otherwise an ancestor's default would clobber the
+    // leaf's own `--no-update`.
+    if (entry.update === false) merged.update = false;
   }
   if (options.agent !== undefined) merged.agent = options.agent;
   if (options.home !== undefined) merged.home = options.home;
   if (options.provider !== undefined) merged.provider = options.provider;
   if (options.json !== undefined) merged.json = options.json;
-  if (options.noUpdate !== undefined) merged.noUpdate = options.noUpdate;
+  if (options.update === false) merged.update = false;
   return { ...options, ...merged };
 }
 
 /** Resolve the agent, read its data, and build a pricing engine for it. */
 async function loadOrExit(
-  options: GlobalOptions & Pick<UsageOptions, 'currency' | 'currencyRate'>,
+  options: GlobalOptions & Pick<UsageOptions, 'currency' | 'currencyRate' | 'rateMode'>,
   config: ResolvedConfig,
 ): Promise<Loaded | undefined> {
   try {
@@ -173,8 +181,37 @@ async function loadOrExit(
       manualRate: choice.manualRate,
       table: config.rateTable,
     });
-    const display: DisplayResolution = { currency: choice.currency, base, rate, provenance, reason: choice.reason };
-    const engine = createPricingEngine(convertProvider(selected.provider, choice.currency ?? { code: '', symbol: '', name: '' }, rate));
+    const mode: RateMode = options.rateMode === 'historical' || (options.rateMode === undefined && config.rateMode === 'historical')
+      ? 'historical'
+      : 'latest';
+    // Historical mode cannot rewrite the rates once — each record needs the rate
+    // of its own date — so the engine converts each record instead, and the price
+    // list keeps the numbers the vendor published.
+    let series: LoadedRateSeries | undefined;
+    if (mode === 'historical' && choice.currency !== null && choice.manualRate === null) {
+      series = await loadRateSeries({
+        base,
+        target: choice.currency.code,
+        from: null,
+        to: null,
+        offline: options.update === false,
+      });
+    }
+    const display: DisplayResolution = {
+      currency: choice.currency,
+      base,
+      rate,
+      provenance,
+      reason: choice.reason,
+      mode: series === undefined ? 'latest' : 'historical',
+      ...(series === undefined ? {} : { series: series.detail }),
+    };
+    const engine = createPricingEngine(
+      series === undefined
+        ? convertProvider(selected.provider, choice.currency ?? { code: '', symbol: '', name: '' }, rate)
+        : selected.provider,
+      series === undefined ? {} : { convertAt: (instant: number) => rateOn(series as LoadedRateSeries, instant) },
+    );
     return {
       dataset,
       adapter,
@@ -199,7 +236,7 @@ function emit(payload: unknown, text: string, json: boolean, requests: number): 
 
 /** The `usage` command implementation. */
 async function runUsage(options: UsageOptions): Promise<void> {
-  const config = await resolveConfig(options.noUpdate === true ? { noUpdate: true } : {});
+  const config = await resolveConfig(options.update === false ? { noUpdate: true } : {});
   const loaded = await loadOrExit(options, config);
   if (loaded === undefined) return;
   const { dataset, engine, display, symbol } = loaded;
@@ -218,6 +255,8 @@ async function runUsage(options: UsageOptions): Promise<void> {
     base: display.base,
     display: display.currency?.code ?? null,
     rate: display.rate,
+    mode: display.mode,
+    ...(display.series === undefined ? {} : { series: display.series }),
     reason: display.reason,
     source: display.provenance.source,
     date: display.provenance.date,
@@ -270,7 +309,7 @@ interface SessionListOptions extends GlobalOptions {
 
 /** The `session list` command implementation. */
 async function runSessionList(options: SessionListOptions): Promise<void> {
-  const config = await resolveConfig(options.noUpdate === true ? { noUpdate: true } : {});
+  const config = await resolveConfig(options.update === false ? { noUpdate: true } : {});
   const loaded = await loadOrExit(options, config);
   if (loaded === undefined) return;
   const filters: SessionListFilters = {
@@ -520,7 +559,8 @@ export function buildProgram(): Command {
       .option('-p, --project-filter <selector>', '只统计指定项目：id、名称或路径（支持 * 通配；可重复）', collect)
       .option('-s, --session-filter <selector>', '只统计指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；支持 * 通配；可重复）', collect)
       .option('--currency <code>', '显示货币（默认按系统语言选，中文人民币、英文美元）')
-      .option('--currency-rate <rate>', '1 单位计价货币折算为目标货币的汇率（可单独使用，此时不显示货币）', parseRateOption),
+      .option('--currency-rate <rate>', '1 单位计价货币折算为目标货币的汇率（可单独使用，此时不显示货币）', parseRateOption)
+      .option('--rate-mode <mode>', 'latest（默认，全程一个汇率）或 historical（按每条记录当天的汇率）'),
   )
     .allowExcessArguments(false)
     .action(async (options: UsageOptions, command: Command) => {

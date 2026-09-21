@@ -30,6 +30,11 @@ export function cachePath(kind: 'pricing' | 'rates', env: NodeJS.ProcessEnv = pr
   return join(configDir(env), `cache-${kind}.json`);
 }
 
+/** A cached daily rate series for one currency pair. */
+export function seriesPath(base: string, target: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(configDir(env), `cache-series-${base}-${target}.json`);
+}
+
 /** When the tool last looked for updates. */
 export function statePath(env: NodeJS.ProcessEnv = process.env): string {
   return join(configDir(env), 'state.json');

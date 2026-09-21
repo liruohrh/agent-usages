@@ -253,7 +253,7 @@ function metricsLine(tokens: TokenTotals, amounts: MoneyBreakdown, requests: num
  * session can span several models whose bands share a period and a tier — the
  * unit price alone was the only thing telling those rows apart.
  */
-function bandBlocks(bands: readonly BandSummary[], symbol: string): string[] {
+function bandBlocks(bands: readonly BandSummary[], symbol: string, historical = false): string[] {
   if (bands.length === 0) return [];
   const lines = ['计价区间:'];
   for (const band of bands) {
@@ -265,7 +265,15 @@ function bandBlocks(bands: readonly BandSummary[], symbol: string): string[] {
     const rates = band.components
       .map((component) => `${COMPONENT_METRICS[component.id] ?? component.label} ${displayRate(component.rate)}`)
       .join(' · ');
-    if (rates.length > 0) lines.push(`  P（${rateUnit(symbol)}）: ${rates}`);
+    // With one rate per day there is no single converted unit price, so the card
+    // stays as published and says so.
+    if (rates.length > 0) {
+      lines.push(
+        historical
+          ? `  P（厂商原价，按记录日期汇率折算）: ${rates}`
+          : `  P（${rateUnit(symbol)}）: ${rates}`,
+      );
+    }
   }
   return lines;
 }
@@ -475,7 +483,7 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
     lines.push('', ...projectLines(project, symbol, options));
   }
   if (options.cost === true) {
-    const bands = bandBlocks(result.bands, symbol);
+    const bands = bandBlocks(result.bands, symbol, result.rateInfo.mode === 'historical');
     if (bands.length > 0) lines.push('', ...bands);
   }
   if (result.warnings.length > 0) {
@@ -502,12 +510,20 @@ export function formatUsageReport(
   const vendor = options.pricingLabel ?? first.result.pricingProvider;
   // The vendor's own currency is the reference; a conversion adds the equation
   // that was applied, so a reader can check every amount against the price list.
+  const historical = rate.mode === 'historical';
   const source =
     rate.display === null
       ? `计价来源  ${vendor}（${rate.base}，按 1 ${rate.base} = ${displayRate(rate.rate)} 折算，未指定目标货币）`
-      : rate.rate === '1'
-        ? `计价来源  ${vendor}（${rate.base}）`
-        : `计价来源  ${vendor}（${rate.base} → ${rate.display}）`;
+      : historical
+        ? `计价来源  ${vendor}（${rate.base}，按每条记录当天的汇率折算为 ${rate.display}）`
+        : rate.rate === '1'
+          ? `计价来源  ${vendor}（${rate.base}）`
+          : `计价来源  ${vendor}（${rate.base} → ${rate.display}）`;
+  const rateLine = historical
+    ? `汇率      按记录日期 · ${rate.series ?? '日序列'}`
+    : rate.display === null || rate.rate === '1'
+      ? undefined
+      : `汇率      1 ${rate.base} = ${displayRate(rate.rate)} ${rate.display} · ${rate.source} · ${rate.date}`;
   const header = [
     'Agent 用量统计',
     `Agent     ${options.agentLabel === undefined ? first.result.agent : `${first.result.agent}（${options.agentLabel}）`}`,
@@ -516,9 +532,7 @@ export function formatUsageReport(
       ? `时间范围  ${first.range.label}`
       : `时间窗口  ${sections.map((section) => section.label).join(' / ')}`,
     source,
-    ...(rate.display === null || rate.rate === '1'
-      ? []
-      : [`汇率      1 ${rate.base} = ${displayRate(rate.rate)} ${rate.display} · ${rate.source} · ${rate.date}`]),
+    ...(rateLine === undefined ? [] : [rateLine]),
   ].join('\n');
   const blocks = [header];
   for (const section of sections) blocks.push(renderSection(section, symbol, options).join('\n'));

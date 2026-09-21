@@ -286,6 +286,7 @@ const RATE_INFO = {
   base: 'CNY',
   display: 'CNY' as string | null,
   rate: '1',
+  mode: 'latest' as const,
   reason: 'fallback-base' as const,
   source: 'test',
   date: '2026-09-21',

@@ -13,9 +13,11 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { renderRounded } from '../../src/accounting.ts';
 import { resolveConfig } from '../../src/config/resolve.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
-import { record } from '../support/dataset.ts';
+import { buckets, record } from '../support/dataset.ts';
+import { stubProvider } from '../support/stub-pricing.ts';
 
 /** An isolated config directory, optionally pre-populated. */
 function envWith(files: Record<string, unknown> = {}): NodeJS.ProcessEnv {
@@ -173,5 +175,54 @@ describe('resolveConfig', () => {
     });
     expect(config.rateTable.rates['CNY']).toBe('9.999');
     expect(config.rateTable.provenance.date).toBe('2026-09-22');
+  });
+});
+
+describe('historical rate mode', () => {
+  /** A cached daily series, so the run needs no network. */
+  function withSeries(rates: Record<string, string>): NodeJS.ProcessEnv {
+    const dates = Object.keys(rates).sort();
+    return envWith({
+      'config.json': { version: 1, currency: 'EUR', rateMode: 'historical', updates: { pricing: false, rates: false } },
+      'cache-series-USD-EUR.json': {
+        base: 'USD',
+        target: 'EUR',
+        from: dates[0],
+        to: dates[dates.length - 1],
+        requestedFrom: '2025-01-01',
+        requestedTo: '2099-01-01',
+        fetchedAt: Date.now(),
+        source: 'test',
+        rates,
+      },
+    });
+  }
+
+  it('carries the mode through the configuration', async () => {
+    const config = await resolveConfig({ noUpdate: true, env: withSeries({ '2026-09-18': '0.9' }) });
+    expect(config.currency).toBe('EUR');
+    expect(config.rateMode).toBe('historical');
+  });
+
+  it('converts each record at its own day rate', async () => {
+    const { loadRateSeries, rateOn } = await import('../../src/config/series.ts');
+    const series = await loadRateSeries({
+      base: 'USD',
+      target: 'EUR',
+      env: withSeries({ '2026-09-18': '0.9', '2026-09-21': '0.5' }),
+      offline: true,
+    });
+    expect(series).toBeDefined();
+    // A real engine over the stub list, converting per record: 1M output tokens
+    // cost 20 units, so the two days differ by exactly the two rates.
+    const engine = createPricingEngine(stubProvider(), { convertAt: (instant: number) => rateOn(series!, instant) });
+    const total = (day: string): string =>
+      renderRounded(
+        engine.costOf(record({ time: Date.parse(day), model: 'flat-model', tokens: buckets({ output: 1_000_000 }) }))!.total,
+      );
+    expect(total('2026-09-18T12:00:00Z')).toBe('18.0000');
+    expect(total('2026-09-21T12:00:00Z')).toBe('10.0000');
+    // And the weekend in between carries Friday's rate.
+    expect(total('2026-09-19T12:00:00Z')).toBe('18.0000');
   });
 });

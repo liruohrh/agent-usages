@@ -89,8 +89,9 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 | `--range <spec>` | 时间范围：`today` / `week` / `month` / `year`（支持 `week-1` 这类偏移）或 `起始..结束`（左闭右开） |
 | `--currency <code>` | 显示货币；默认按系统语言（中文 CNY、英文 USD…），可指定任意币种（用内置汇率表折算） |
 | `--currency-rate <rate>` | 1 单位计价货币 = <rate> 单位显示货币；只给汇率不给币种时照常折算但不显示货币 |
-| `--agent` / `--home` / `--provider` / `--json` | 见上 |
+| `--rate-mode <mode>` | `latest`（默认，全程一个汇率）/ `historical`（按每条记录当天的汇率） |
 | `--no-update` | 本次不检查价格表/汇率更新 |
+| `--agent` / `--home` / `--provider` / `--json` / `--no-update` | 见上 |
 
 ### `session list`
 
@@ -266,6 +267,7 @@ pnpm link --global && agent-usages usage
   "version": 1,
   "currency": "USD",              // 固定显示货币，命令行 --currency 仍然优先
   "rateSource": "er-api",         // 优先用哪个在线汇率源
+  "rateMode": "historical",       // 可选：按记录当天的汇率折算（默认 latest）
   "updates": { "pricing": true, "rates": false },   // 默认值
   "pricing": {                    // 覆盖厂商的某些价格区间，其余仍用默认表
     "version": 1, "updatedAt": "2026-09-21",
@@ -331,6 +333,7 @@ agent-usages usage --currency-rate 0.5  # 只给汇率：照常折算，但不�
 ```
 
 - **手工汇率以"你本来会看到的那套表"为基准**：中文环境下 `--currency USD --currency-rate 0.14` 就是 1 CNY = 0.14 USD；英文环境下基准是美元表。
+- **默认全程用一个汇率**（最新）。跨月跨年的报告想看"当时的钱"，加 `--rate-mode historical`：按**每条记录自己那天**的汇率折算（周末与节假日沿用上一个交易日），数据来自 ECB 日序列，缓存在本地、离线可用；报告头部会写明序列覆盖的区间。配置里也能固定 `"rateMode": "historical"`。
 - 折算在**开始计价前**一次完成：单价和金额一起换算，所以 `计价区间` 里的 `P（€ / 百万 token）` 与金额永远同币种。
 - 汇率表以美元为基准互算；内置一份带日期与来源的种子表，联网更新与缓存见后续版本。
 - `--currency-rate` 只接受正的十进制数。

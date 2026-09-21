@@ -43,6 +43,17 @@ update [all|prices|rates] [--force] [--write-config]
 | `agent-usages update rates --write-config` | 把缓存里的汇率写回 `config/rates.json`，供 review 后提交 |
 | `agent-usages check-config [--json]` | 校验两份配置（含用户配置文件） |
 | `agent-usages usage --no-update` | 本次完全不联网 |
+| `agent-usages usage --rate-mode historical` | 按每条记录当天的汇率折算 |
+
+## 历史汇率
+
+历史模式不改写单价——每天一个汇率，单价是哪个就成了无解的问题——而是在**计费时**按记录的
+时刻取系数（`PricingEngineOptions.convertAt`），所以金额、区间、合计依旧逐层相加。
+
+日序列来自 frankfurter（ECB 参考汇率，只发布交易日）：缓存文件是
+`~/.config/agent-usages/cache-series-<base>-<target>.json`，记下请求区间与来源，覆盖到位就不再请求；
+记录落在周末/节假日时用上一个交易日的汇率，早于序列起点则用最早一条。离线或抓不到时**退回单一最新
+汇率**并在头部标注模式，不会让命令失败。`--cost` 的单价在历史模式下标注为「厂商原价，按记录日期汇率折算」。
 
 ## 定时任务
 

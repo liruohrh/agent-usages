@@ -18,6 +18,7 @@
  * lists another component.
  */
 
+import { MONEY_SCALE, parseDecimal } from '../core/money.ts';
 import type { TokenBuckets, UsageRecord } from '../core/types.ts';
 import {
   type BillingBasis,
@@ -261,9 +262,19 @@ class Engine implements PricingEngine {
   /** Period lookups keyed by model + how many period boundaries precede the instant. */
   private readonly periodCache = new Map<string, { period: PricePeriod; resolution: PriceResolution }>();
 
+  private readonly convertAt: ((instant: number) => string) | undefined;
+
   constructor(provider: PricingProvider, options: PricingEngineOptions) {
     this.provider = provider;
     this.fallbackModel = options.defaultModel === undefined ? provider.defaultModel : options.defaultModel;
+    this.convertAt = options.convertAt;
+  }
+
+  /** The factor for one record, as a scaled integer, or `undefined` at 1:1. */
+  private factorFor(instant: number): bigint | undefined {
+    if (this.convertAt === undefined) return undefined;
+    const factor = parseDecimal(this.convertAt(instant));
+    return factor === MONEY_SCALE ? undefined : factor;
   }
 
   /** Find the schedule for a model name, canonical or aliased. */
@@ -341,10 +352,14 @@ class Engine implements PricingEngine {
   costOf(record: UsageRecord): RecordCost | undefined {
     const rate = this.resolve(record);
     if (rate === undefined) return undefined;
+    const factor = this.factorFor(record.time);
     const amounts = new Map<string, bigint>();
     let total = 0n;
     for (const component of rate.components) {
-      const amount = charge(basisQuantity(component.basis, record.tokens), rateOf(component), component.per);
+      const charged = charge(basisQuantity(component.basis, record.tokens), rateOf(component), component.per);
+      // Truncating at the arithmetic scale: a record is never worth less than a
+      // billionth of a currency unit, so this cannot lose a visible amount.
+      const amount = factor === undefined ? charged : (charged * factor) / MONEY_SCALE;
       amounts.set(component.id, (amounts.get(component.id) ?? 0n) + amount);
       total += amount;
     }

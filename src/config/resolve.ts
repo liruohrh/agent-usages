@@ -10,7 +10,7 @@
 
 import type { PricingProvider } from '../pricing/contract.ts';
 import type { RateTable } from '../pricing/currency.ts';
-import { mergeProviders, readUserConfig, type UpdateSettings } from './user.ts';
+import { mergeProviders, readUserConfig, type RateMode, type UpdateSettings } from './user.ts';
 import { parsePricingConfig, providerFromConfig, shippedPricingText, validateProviders, type ProviderConfig } from './pricing.ts';
 import { parseRatesConfig, shippedRatesText, type RatesConfig } from './rates.ts';
 import { cachedConfigText, runUpdates, type UpdateKind } from './update.ts';
@@ -25,6 +25,8 @@ export interface ResolvedConfig {
   rateSources: RatesConfig['sources'];
   /** Currency the user pinned, if any. */
   currency: string | undefined;
+  /** How to convert, when the user pinned a mode. */
+  rateMode: RateMode | undefined;
   /** Rate source the user prefers, if any. */
   rateSource: string | undefined;
   /** Which automatic updates are allowed. */
@@ -124,6 +126,7 @@ export async function resolveConfig(options: ResolveOptions = {}): Promise<Resol
     },
     rateSources: rates.sources,
     currency: user.config.currency,
+    rateMode: user.config.rateMode,
     rateSource: user.config.rateSource,
     updates: user.config.updates,
     warnings,

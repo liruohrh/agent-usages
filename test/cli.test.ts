@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const run = promisify(execFile);
@@ -610,5 +611,82 @@ describe('price filters', () => {
   it('lists every provider with --all', async () => {
     const { stdout } = await cli(['price', '--all', '--current']);
     expect(stdout).toContain('DeepSeek 官方');
+  });
+});
+
+describe('historical rate mode', () => {
+  /**
+   * A prepared config directory: EUR display, per-date rates, no network.
+   *
+   * The base list is CNY — a zh-CN reader's published list — even though the
+   * display currency is EUR, so the series is CNY→EUR.
+   */
+  function historicalHome(): Record<string, string> {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-usages-cli-hist-'));
+    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    writeFileSync(
+      join(dir, 'agent-usages', 'config.json'),
+      JSON.stringify({ version: 1, currency: 'EUR', rateMode: 'historical', updates: { pricing: false, rates: false } }),
+      'utf8',
+    );
+    writeFileSync(
+      join(dir, 'agent-usages', 'cache-series-CNY-EUR.json'),
+      JSON.stringify({
+        base: 'CNY',
+        target: 'EUR',
+        from: '2026-09-11',
+        to: '2026-09-11',
+        requestedFrom: '2025-01-01',
+        requestedTo: '2099-01-01',
+        fetchedAt: Date.now(),
+        source: 'frankfurter.dev（欧洲央行参考汇率）',
+        rates: { '2026-09-11': '0.5', '2026-09-12': '0.25' },
+      }),
+      'utf8',
+    );
+    return { XDG_CONFIG_HOME: dir };
+  }
+
+  it('converts at the record\'s own date and says so', async () => {
+    const env = historicalHome();
+    const parsed = JSON.parse((await cli(['usage', '--json', '--no-update'], env)).stdout) as {
+      rateInfo: { mode: string; series?: string };
+      totals: { cost: Record<string, string> };
+    };
+    expect(parsed.rateInfo.mode).toBe('historical');
+    expect(parsed.rateInfo.series).toContain('frankfurter');
+    // The fixture's request is on 2026-09-11T12:00Z and costs ¥5.02: at the
+    // prepared 0.5 that is €2.51 — the day's own rate, not today's.
+    expect(Number(parsed.totals.cost['total'])).toBeCloseTo(2.51, 2);
+
+    const text = (await cli(['usage', '--no-update'], env)).stdout;
+    expect(text).toContain('按每条记录当天的汇率折算为 EUR');
+    expect(text).toMatch(/汇率      按记录日期 · .*frankfurter/);
+  });
+
+  it('keeps the default mode when the flag does not ask for history', async () => {
+    const parsed = JSON.parse((await cli(['usage', '--json', '--no-update', '--rate-mode', 'latest'], historicalHome())).stdout) as {
+      rateInfo: { mode: string };
+      currency: string;
+    };
+    expect(parsed.rateInfo.mode).toBe('latest');
+    expect(parsed.currency).toBe('EUR');
+  });
+
+  it('falls back to one rate when no series can be had', async () => {
+    // Same config, no series cached and no network allowed: the report still runs.
+    const dir = mkdtempSync(join(tmpdir(), 'agent-usages-cli-hist-'));
+    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    writeFileSync(
+      join(dir, 'agent-usages', 'config.json'),
+      JSON.stringify({ version: 1, currency: 'EUR', rateMode: 'historical', updates: { pricing: false, rates: false } }),
+      'utf8',
+    );
+    const parsed = JSON.parse((await cli(['usage', '--json', '--no-update'], { XDG_CONFIG_HOME: dir })).stdout) as {
+      rateInfo: { mode: string };
+      totals: { cost: Record<string, string> };
+    };
+    expect(parsed.rateInfo.mode).toBe('latest');
+    expect(Number(parsed.totals.cost['total'])).toBeGreaterThan(0);
   });
 });

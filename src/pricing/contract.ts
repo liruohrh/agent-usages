@@ -210,9 +210,9 @@ export interface PricingProvider {
 
 /** Cost of one request, as charged. */
 export interface RecordCost {
-  /** Total charged, in the provider's currency. */
+  /** Total charged, in the currency the record is being reported in. */
   total: bigint;
-  /** Amount per component id, in the provider's currency. */
+  /** Amount per component id, in the currency the record is being reported in. */
   amounts: Map<string, bigint>;
   /** The rates that produced the amounts. */
   rate: ResolvedRate;
@@ -263,6 +263,17 @@ export interface PricingEngineOptions {
    * provider's own {@link PricingProvider.defaultModel}.
    */
   defaultModel?: string | null | undefined;
+  /**
+   * Currency factor to apply to one record's amounts, by its instant.
+   *
+   * The usual conversion rewrites a provider's *rates* once, which needs a single
+   * factor. A report that converts at the rate of each record's own date cannot
+   * do that, so it hands the factor in here instead: the amounts come out already
+   * converted, and everything above them — bands, totals, the tree — stays as
+   * additive as before. Returns a decimal string, units of the display currency
+   * per one unit of the price list's.
+   */
+  convertAt?: ((instant: number) => string) | undefined;
 }
 
 /** Everything a cost report exposes. */

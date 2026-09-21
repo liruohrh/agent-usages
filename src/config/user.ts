@@ -21,10 +21,15 @@ export interface UpdateSettings {
   rates: boolean;
 }
 
+/** How amounts are converted to the display currency. */
+export type RateMode = 'latest' | 'historical';
+
 /** What a user's configuration file may say. */
 export interface UserConfig {
   /** Display currency to use instead of the locale's. */
   currency: string | undefined;
+  /** Whether to convert at one current rate or at each record's own date's rate. */
+  rateMode: RateMode | undefined;
   /** Which resources may refresh themselves. */
   updates: UpdateSettings;
   /** Preferred rate source id, checked before the shipped order. */
@@ -46,7 +51,14 @@ export interface LoadedUserConfig {
 
 /** The empty configuration: everything comes from the shipped files. */
 function emptyConfig(): UserConfig {
-  return { currency: undefined, updates: { ...DEFAULT_UPDATES }, rateSource: undefined, pricing: [] };
+  return { currency: undefined, rateMode: undefined, updates: { ...DEFAULT_UPDATES }, rateSource: undefined, pricing: [] };
+}
+
+/** Read a rate mode, rejecting anything else. */
+function rateMode(value: unknown, path: string): RateMode | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'latest' || value === 'historical') return value;
+  throw new ConfigError(path, `应为 latest 或 historical，收到 ${JSON.stringify(value)}`);
 }
 
 /** Read a boolean setting, rejecting anything else. */
@@ -81,6 +93,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): LoadedUser
     const pricing = node['pricing'] === undefined ? [] : parsePricingConfig(node['pricing']).providers;
     return {
       config: {
+        rateMode: rateMode(node['rateMode'], 'rateMode'),
         currency:
           currency === undefined
             ? undefined

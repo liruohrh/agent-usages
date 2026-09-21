@@ -23,6 +23,13 @@ export interface RateInfo {
   display: string | null;
   /** Units of the display currency per 1 unit of the base currency. */
   rate: string;
+  /**
+   * Whether {@link rate} applies to the whole report or each record uses its own
+   * date's rate, in which case this is the rate in effect at the newest record.
+   */
+  mode: 'latest' | 'historical';
+  /** For historical mode: where the daily series came from, and its span. */
+  series?: string | undefined;
   /** Why this currency was chosen. */
   reason: DisplayReason;
   /** Where the rate came from. */

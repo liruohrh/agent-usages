@@ -314,6 +314,10 @@ export interface DisplayResolution {
   provenance: RateProvenance;
   /** Why this currency was picked. */
   reason: DisplayReason;
+  /** Whether one rate covers the report, or each record uses its own date's. */
+  mode: 'latest' | 'historical';
+  /** For historical mode: where the daily series came from. */
+  series?: string | undefined;
 }
 
 /**
