@@ -16,9 +16,11 @@ import {
   currencyOf,
   displayRate,
   localeCurrency,
+  rateFor,
   rateFrom,
-  resolveDisplay,
   seedTable,
+  selectCurrency,
+  chooseDisplay,
 } from '../../src/pricing/currency.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { buckets, record } from '../support/dataset.ts';
@@ -63,54 +65,102 @@ describe('rateFrom', () => {
   });
 });
 
-describe('resolveDisplay', () => {
-  it('keeps the vendor currency when the locale agrees with it', () => {
-    const choice = resolveDisplay({ base: 'CNY', locale: 'zh-CN' });
-    expect(choice.currency?.code).toBe('CNY');
-    expect(choice.rate).toBe('1');
-    expect(choice.reason).toBe('fallback-base');
+describe('chooseDisplay', () => {
+  const published = ['CNY', 'USD'];
+
+  it('uses the published list the reader currency belongs to', () => {
+    const zh = chooseDisplay({ published, locale: 'zh-CN' });
+    expect(zh.currency?.code).toBe('CNY');
+    expect(zh.reason).toBe('locale');
+    const en = chooseDisplay({ published, locale: 'en-US' });
+    expect(en.currency?.code).toBe('USD');
+    expect(en.reason).toBe('locale');
   });
 
-  it('follows the locale otherwise', () => {
-    const choice = resolveDisplay({ base: 'CNY', locale: 'en-US' });
-    expect(choice.currency?.code).toBe('USD');
-    expect(Number(choice.rate)).toBeCloseTo(1 / 6.70471, 6);
-    expect(choice.reason).toBe('locale');
-    expect(choice.provenance.date).toBe(SEED_DATE);
-  });
-
-  it('prefers the dollar when the locale says nothing useful', () => {
-    const choice = resolveDisplay({ base: 'CNY', locale: 'xx-YY' });
+  it('prefers a published currency over a conversion', () => {
+    // The locale says EUR, which DeepSeek does not publish; the documented
+    // fallback is the dollar, whose numbers are exact as published.
+    const choice = chooseDisplay({ published, locale: 'de-DE' });
     expect(choice.currency?.code).toBe('USD');
     expect(choice.reason).toBe('locale-default');
   });
 
-  it('takes --currency from the rate table', () => {
-    const choice = resolveDisplay({ base: 'CNY', currencyFlag: 'eur', locale: 'zh-CN' });
+  it('prefers the dollar when the locale says nothing useful', () => {
+    const choice = chooseDisplay({ published, locale: 'xx-YY' });
+    expect(choice.currency?.code).toBe('USD');
+    expect(choice.reason).toBe('locale-default');
+  });
+
+  it('takes --currency even when it is not published', () => {
+    const choice = chooseDisplay({ published, currencyFlag: 'eur', locale: 'zh-CN' });
     expect(choice.currency?.code).toBe('EUR');
     expect(choice.reason).toBe('flag');
-    expect(Number(choice.rate)).toBeCloseTo(0.871295 / 6.70471, 8);
   });
 
   it('converts without naming a currency when only a rate is given', () => {
-    const choice = resolveDisplay({ base: 'CNY', rateFlag: '0.5', locale: 'zh-CN' });
+    const choice = chooseDisplay({ published, rateFlag: '0.5', locale: 'zh-CN' });
     expect(choice.currency).toBeNull();
-    expect(choice.rate).toBe('0.5');
+    expect(choice.manualRate).toBe('0.5');
     expect(choice.reason).toBe('manual-rate');
-    expect(choice.provenance.source).toBe('手工指定');
+    // The rate converts from the list the reader would otherwise have seen.
+    expect(choice.baseWanted).toBe('CNY');
   });
 
-  it('lets a manual rate win over the table', () => {
-    const choice = resolveDisplay({ base: 'CNY', currencyFlag: 'USD', rateFlag: '0.2' });
-    expect(choice.currency?.code).toBe('USD');
-    expect(choice.rate).toBe('0.2');
-    expect(choice.reason).toBe('flag');
+  it('keeps the reader list as the base of a manual rate', () => {
+    // `--currency USD --currency-rate 0.14` means "1 CNY = 0.14 USD", so the
+    // yuan list is the one billed and the dollar list is not used as published.
+    const zh = chooseDisplay({ published, currencyFlag: 'USD', rateFlag: '0.14', locale: 'zh-CN' });
+    expect(zh.baseWanted).toBe('CNY');
+    const en = chooseDisplay({ published, currencyFlag: 'CNY', rateFlag: '7', locale: 'en-US' });
+    expect(en.baseWanted).toBe('USD');
   });
 
   it('rejects a rate that is not a positive decimal', () => {
     for (const bad of ['0', '-1', 'abc', '1/2']) {
-      expect(() => resolveDisplay({ base: 'CNY', rateFlag: bad })).toThrow(/汇率必须是正的十进制数/);
+      expect(() => chooseDisplay({ published, rateFlag: bad })).toThrow(/汇率必须是正的十进制数/);
     }
+  });
+});
+
+describe('rateFor', () => {
+  it('is the identity when the displayed list is the published one', () => {
+    const { rate, provenance } = rateFor({ base: 'USD', target: 'USD' });
+    expect(rate).toBe('1');
+    expect(provenance.source).toMatch(/未折算/);
+  });
+
+  it('crosses through the table otherwise', () => {
+    const { rate, provenance } = rateFor({ base: 'USD', target: 'EUR' });
+    expect(Number(rate)).toBeCloseTo(0.871295, 6);
+    expect(provenance.date).toBe(SEED_DATE);
+  });
+
+  it('lets a manual rate win', () => {
+    const { rate, provenance } = rateFor({ base: 'CNY', target: 'USD', manualRate: '0.2' });
+    expect(rate).toBe('0.2');
+    expect(provenance.source).toBe('手工指定');
+  });
+
+  it('converts without a target when a manual rate is given', () => {
+    const { rate } = rateFor({ base: 'CNY', target: null, manualRate: '0.5' });
+    expect(rate).toBe('0.5');
+  });
+});
+
+describe('selectCurrency', () => {
+  const provider = stubProvider();
+
+  it('keeps the wanted list', () => {
+    const { provider: picked, currencies } = selectCurrency(provider, 'XTS');
+    expect(currencies).toEqual(['XTS']);
+    for (const price of picked.models()) {
+      for (const period of price.periods) expect(period.currency.code).toBe('XTS');
+    }
+  });
+
+  it('falls back to the first published list when the wanted one is absent', () => {
+    const { currencies } = selectCurrency(provider, 'EUR');
+    expect(currencies).toEqual(['XTS']);
   });
 });
 
@@ -122,7 +172,7 @@ describe('convertProvider', () => {
     const converted = convertProvider(provider, target, '0.5');
     const original = provider.find('flat-model')?.periods[0]?.offPeak.find((entry) => entry.id === 'input-miss');
     const rewritten = converted.find('flat-model')?.periods[0]?.offPeak.find((entry) => entry.id === 'input-miss');
-    expect(converted.currency).toEqual({ code: 'USD', symbol: '$' });
+    expect(converted.find('flat-model')?.periods[0]?.currency).toEqual({ code: 'USD', symbol: '$' });
     expect(original?.rate).toBe('10');
     expect(rewritten?.rate).toBe('5');
   });

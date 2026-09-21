@@ -13,7 +13,7 @@
  */
 
 import { MONEY_SCALE_DIGITS, divideDecimal, formatDecimal, multiplyDecimal, parseDecimal, trimDecimal } from '../core/money.ts';
-import type { PricingProvider, RateComponent } from './contract.ts';
+import type { PricePeriod, PricingProvider, RateComponent } from './contract.ts';
 
 /** A currency this tool can display. */
 export interface CurrencyInfo {
@@ -222,14 +222,23 @@ export function rateFrom(table: RateTable, base: string, target: string): string
   return trimDecimal(divideDecimal(to, from));
 }
 
-/** What the user asked to see, and what it costs to show it. */
+/** The currency to display, before any rate is worked out. */
 export interface DisplayChoice {
   /** Currency to print, or `null` when the user gave a rate but no currency. */
   currency: CurrencyInfo | null;
-  /** Units of the display currency per 1 unit of the base currency. */
-  rate: string;
-  /** Where the rate came from; `手工指定` when the user supplied it. */
-  provenance: RateProvenance;
+  /** The rate the user typed, when they typed one. */
+  manualRate: string | null;
+  /** Why this currency was chosen. */
+  reason: DisplayReason;
+  /**
+   * Which published list to price from.
+   *
+   * Normally the list the reader's currency belongs to, so nothing is converted.
+   * A manual rate is different: it converts *from* whatever list the reader
+   * would otherwise have seen, so the base stays the locale's list and the rate
+   * carries it to the wanted currency.
+   */
+  baseWanted: string;
 }
 
 /**
@@ -237,85 +246,165 @@ export interface DisplayChoice {
  *
  * - `flag` — the user named a currency (with or without a rate);
  * - `manual-rate` — the user gave only a rate, so nothing is named;
- * - `locale` — the user's language picked it;
- * - `locale-default` — the language had no opinion, so USD did;
- * - `fallback-base` — nothing could be converted, so prices stay as published.
+ * - `locale` — the user's language picked a currency the price list publishes;
+ * - `locale-default` — the language had no publishable opinion, so USD did.
  */
 export type DisplayReason = 'flag' | 'manual-rate' | 'locale' | 'locale-default' | 'fallback-base';
 
-/** A resolved display choice plus why it was made. */
-export interface DisplayResolution extends DisplayChoice {
-  /** Why this currency was picked. */
-  reason: DisplayReason;
-  /** Currency the prices are written in. */
-  base: string;
-}
-
 /** What the caller knows about the user's choice. */
 export interface DisplayInput {
-  /** Currency the prices are written in. */
-  base: string;
+  /** Currencies the price list publishes, in the order it publishes them. */
+  published: readonly string[];
   /** `--currency`, if given. */
   currencyFlag?: string | undefined;
   /** `--currency-rate`, if given. */
   rateFlag?: string | undefined;
   /** The user's locale, e.g. `zh-CN`. */
   locale?: string | undefined;
-  /** The rate table to use; the shipped seed table by default. */
-  table?: RateTable | undefined;
 }
 
 /**
- * Work out what currency to display and at what rate.
+ * Pick the currency to display.
  *
- * `--currency` alone uses the rate table, `--currency-rate` alone converts without
- * naming a currency at all, and neither means "whatever the user's locale says" —
- * falling back to USD, then to the currency the prices are already in.
+ * The user's flag wins, then their language — but only when the price list
+ * actually publishes that currency, because a published list is exact and a
+ * conversion is not. When neither fits, dollars are the documented fallback.
  * @param input - the user's flags and the machine's locale.
- * @returns the currency, the rate, and where the rate came from.
- * @throws when a rate table lacks one of the currencies involved.
+ * @returns the currency, the manual rate if any, and why.
+ * @throws when `--currency-rate` is not a positive decimal.
  */
-export function resolveDisplay(input: DisplayInput): DisplayResolution {
-  const table = input.table ?? seedTable();
-  const manual = input.rateFlag === undefined ? undefined : trimDecimal(input.rateFlag.trim());
-  if (manual !== undefined) {
+export function chooseDisplay(input: DisplayInput): DisplayChoice {
+  const fromLocale = input.locale === undefined ? undefined : localeCurrency(input.locale);
+  const localeList = fromLocale !== undefined && input.published.includes(fromLocale) ? fromLocale : undefined;
+  const dollarList = input.published.includes('USD') ? 'USD' : undefined;
+  const firstList = input.published[0];
+  const fallback = localeList ?? dollarList ?? firstList ?? 'USD';
+
+  if (input.rateFlag !== undefined) {
+    const manual = trimDecimal(input.rateFlag.trim());
     if (!/^\d+(\.\d+)?$/.test(manual) || Number(manual) <= 0) {
       throw new Error(`汇率必须是正的十进制数，收到 ${JSON.stringify(input.rateFlag)}`);
     }
-    const currency = input.currencyFlag === undefined ? null : currencyOf(input.currencyFlag);
     return {
-      base: input.base,
-      currency,
-      rate: manual,
-      provenance: { source: '手工指定', date: new Date().toISOString().slice(0, 10) },
-      reason: currency === null ? 'manual-rate' : 'flag',
+      currency: input.currencyFlag === undefined ? null : currencyOf(input.currencyFlag),
+      manualRate: manual,
+      reason: input.currencyFlag === undefined ? 'manual-rate' : 'flag',
+      // Convert from the list the reader would have seen without the flag.
+      baseWanted: fallback,
     };
   }
-
   if (input.currencyFlag !== undefined) {
-    const currency = currencyOf(input.currencyFlag);
+    const wanted = currencyOf(input.currencyFlag);
     return {
-      base: input.base,
-      currency,
-      rate: rateFrom(table, input.base, currency.code),
-      provenance: table.provenance,
+      currency: wanted,
+      manualRate: null,
       reason: 'flag',
+      baseWanted: input.published.includes(wanted.code) ? wanted.code : fallback,
     };
   }
+  if (localeList !== undefined) {
+    return { currency: currencyOf(localeList), manualRate: null, reason: 'locale', baseWanted: localeList };
+  }
+  if (firstList === undefined) {
+    // Nothing is published at all: there is nothing to show, so show nothing.
+    return { currency: null, manualRate: null, reason: 'fallback-base', baseWanted: 'USD' };
+  }
+  return {
+    currency: currencyOf(fallback),
+    manualRate: null,
+    reason: 'locale-default',
+    baseWanted: fallback,
+  };
+}
 
-  const fromLocale = input.locale === undefined ? undefined : localeCurrency(input.locale);
-  const wanted = fromLocale ?? 'USD';
-  if (wanted !== input.base && table.rates[wanted] !== undefined) {
-    return {
-      base: input.base,
-      currency: currencyOf(wanted),
-      rate: rateFrom(table, input.base, wanted),
-      provenance: table.provenance,
-      reason: fromLocale === undefined ? 'locale-default' : 'locale',
-    };
+/** A resolved display currency, plus the rate that reaches it. */
+export interface DisplayResolution {
+  /** Currency to print, or `null` when the user gave a rate but no currency. */
+  currency: CurrencyInfo | null;
+  /** Currency the price list is written in. */
+  base: string;
+  /** Units of the display currency per 1 unit of the base currency. */
+  rate: string;
+  /** Where the rate came from. */
+  provenance: RateProvenance;
+  /** Why this currency was picked. */
+  reason: DisplayReason;
+}
+
+/**
+ * Work out the rate that turns the published currency into the display one.
+ * @param input - the base currency, the wanted one, a manual rate, and a table.
+ * @returns the rate and where it came from.
+ * @throws when the table lacks one of the currencies involved.
+ */
+export function rateFor(input: {
+  base: string;
+  target: string | null;
+  manualRate?: string | null | undefined;
+  table?: RateTable | undefined;
+}): { rate: string; provenance: RateProvenance } {
+  const table = input.table ?? seedTable();
+  if (input.manualRate !== undefined && input.manualRate !== null) {
+    return { rate: input.manualRate, provenance: { source: '手工指定', date: new Date().toISOString().slice(0, 10) } };
   }
-  const base = currencyOf(input.base);
-  return { base: input.base, currency: base, rate: '1', provenance: { source: '同种货币', date: SEED_DATE }, reason: 'fallback-base' };
+  if (input.target === null || input.target === input.base) {
+    return { rate: '1', provenance: { source: '厂商发布价，未折算', date: table.provenance.date } };
+  }
+  return { rate: rateFrom(table, input.base, input.target), provenance: table.provenance };
+}
+
+
+/**
+ * The currencies a provider publishes, in the order they appear.
+ *
+ * A vendor's list is written once per currency; this is what the CLI means when
+ * it says which currencies a provider quotes.
+ * @param provider - the price list.
+ * @returns distinct ISO codes, in period order.
+ */
+export function providerCurrencies(provider: PricingProvider): string[] {
+  const seen: string[] = [];
+  for (const model of provider.models()) {
+    for (const period of model.periods) {
+      if (!seen.includes(period.currency.code)) seen.push(period.currency.code);
+    }
+  }
+  return seen;
+}
+
+/**
+ * Keep one currency's periods per model.
+ *
+ * A model may publish parallel periods for several currencies covering the same
+ * windows; pricing uses one list per model, chosen by the reader's currency. The
+ * fallback order is the one the tool documents: the wanted currency, then USD,
+ * then whatever the model published first.
+ * @param provider - the full price list.
+ * @param wanted - currency the report will be shown in.
+ * @returns a provider carrying one list per model, and the currencies it kept.
+ */
+export function selectCurrency(
+  provider: PricingProvider,
+  wanted: string,
+): { provider: PricingProvider; currencies: string[] } {
+  const picked = new Map<string, string>();
+  const models = provider.models().map((price) => {
+    const published = [...new Set(price.periods.map((period) => period.currency.code))];
+    const chosen = published.includes(wanted) ? wanted : published.includes('USD') ? 'USD' : (published[0] ?? wanted);
+    picked.set(price.model, chosen);
+    return { ...price, periods: price.periods.filter((period) => period.currency.code === chosen) };
+  });
+  return {
+    provider: {
+      ...provider,
+      models: () => models,
+      find: (model: string) => {
+        const wantedName = model.trim().toLowerCase();
+        return models.find((price) => price.aliases.some((alias) => alias.toLowerCase() === wantedName));
+      },
+    },
+    currencies: [...new Set([...picked.values()])],
+  };
 }
 
 /**
@@ -325,7 +414,7 @@ export function resolveDisplay(input: DisplayInput): DisplayResolution {
  * report prints is already in the display currency — there is no second place
  * where money could be converted differently.
  * @param provider - the vendor's price list.
- * @param target - currency to price in.
+ * @param target - currency to price in; an empty code means "do not name one".
  * @param rate - units of `target` per 1 unit of the provider's currency.
  * @returns a provider quoting the same prices in `target`.
  */
@@ -336,13 +425,13 @@ export function convertProvider(provider: PricingProvider, target: CurrencyInfo,
     ...price,
     periods: price.periods.map((period) => ({
       ...period,
+      currency: { code: target.code, symbol: target.symbol },
       offPeak: period.offPeak.map(convert),
       peak: period.peak === null ? null : period.peak.map(convert),
     })),
   }));
   return {
     ...provider,
-    currency: { code: target.code, symbol: target.symbol },
     models: () => models,
     find: (model: string) => {
       const wanted = model.trim().toLowerCase();
@@ -350,9 +439,6 @@ export function convertProvider(provider: PricingProvider, target: CurrencyInfo,
     },
   };
 }
-
-/** Digits the arithmetic scale keeps; re-exported for callers reasoning about rates. */
-export const RATE_DIGITS = MONEY_SCALE_DIGITS;
 
 /**
  * A rate as a reader wants to see it: six decimals, no trailing zeros.
@@ -367,3 +453,6 @@ export function displayRate(rate: string): string {
   const trimmed = fraction.replace(/0+$/, '');
   return trimmed.length === 0 ? whole : `${whole}.${trimmed}`;
 }
+
+/** Digits the arithmetic scale keeps; re-exported for callers reasoning about rates. */
+export const RATE_DIGITS = MONEY_SCALE_DIGITS;

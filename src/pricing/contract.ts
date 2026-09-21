@@ -96,6 +96,16 @@ export interface PricePeriod {
   peakWindows: readonly PeakWindow[];
   /** IANA zone the peak window hours are expressed in. */
   timezone: string;
+  /**
+   * Currency these rates are quoted in.
+   *
+   * Per period, not per provider: a vendor publishes its price list once per
+   * currency (DeepSeek writes CNY for the Chinese site and USD for the
+   * international one), and the two lists are separate published numbers rather
+   * than a conversion of each other. A model may therefore carry parallel
+   * periods, one per currency, covering the same windows.
+   */
+  currency: PricingCurrency;
   /** Where these rates were published. */
   source: string;
   /** Provenance note shown by `price`. */
@@ -184,8 +194,6 @@ export interface PricingProvider {
   id: string;
   /** Human-readable name. */
   label: string;
-  /** Currency every rate is quoted in. */
-  currency: PricingCurrency;
   /**
    * Model used when a record names something this provider has no schedule for.
    * `null` disables the fallback, in which case unknown models are reported as

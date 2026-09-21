@@ -56,6 +56,7 @@ export function stubProvider(): PricingProvider {
           peak: null,
           peakWindows: [],
           timezone: 'UTC',
+          currency: TEST_CURRENCY,
           source: 'test',
           note: 'flat',
         },
@@ -74,6 +75,7 @@ export function stubProvider(): PricingProvider {
           peak: [perMillion('input-miss', 'miss', 'input', '2'), perMillion('output', 'out', 'output', '4')],
           peakWindows: [{ fromHour: 9, toHour: 12, weekdays: null }],
           timezone: 'UTC',
+          currency: TEST_CURRENCY,
           source: 'test',
           note: 'tiered early',
         },
@@ -86,6 +88,7 @@ export function stubProvider(): PricingProvider {
           peak: null,
           peakWindows: [],
           timezone: 'UTC',
+          currency: TEST_CURRENCY,
           source: 'test',
           note: 'tiered late, flat',
         },
@@ -96,7 +99,6 @@ export function stubProvider(): PricingProvider {
   return {
     id: 'stub',
     label: 'Stub Vendor',
-    currency: TEST_CURRENCY,
     defaultModel: 'flat-model',
     models: () => models,
     find: (model) => {

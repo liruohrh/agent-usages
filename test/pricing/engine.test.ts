@@ -28,8 +28,10 @@ describe('model resolution', () => {
     expect(engine.provider.find('nope')).toBeUndefined();
   });
 
-  it('reports the currency it prices in', () => {
-    expect(engine.provider.currency).toEqual(TEST_CURRENCY);
+  it('quotes every period in the stub currency', () => {
+    const periods = engine.provider.models().flatMap((price) => price.periods);
+    expect(periods.length).toBeGreaterThan(0);
+    for (const period of periods) expect(period.currency).toEqual(TEST_CURRENCY);
   });
 });
 
@@ -64,6 +66,7 @@ describe('period selection', () => {
               peak: null,
               peakWindows: [],
               timezone: 'UTC',
+              currency: TEST_CURRENCY,
               source: 'test',
               note: '',
             },

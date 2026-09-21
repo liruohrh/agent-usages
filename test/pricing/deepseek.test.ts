@@ -59,15 +59,35 @@ function ratesAt(instant: number, model = 'deepseek-flash'): { hit: string; miss
 }
 
 describe('schedule integrity', () => {
-  it('orders periods ascending with no gap or overlap', () => {
+  it('orders each currency\'s periods ascending with no gap or overlap', () => {
     for (const price of DEEPSEEK_PRICES) {
-      for (let index = 1; index < price.periods.length; index += 1) {
-        const previous = price.periods[index - 1] as PricePeriod;
-        const current = price.periods[index] as PricePeriod;
-        expect(current.from).toBeGreaterThan(previous.from);
-        expect(previous.to).toBe(current.from);
+      // A model carries one history per published currency; each is contiguous
+      // on its own, which is what period lookup relies on.
+      const currencies = [...new Set(price.periods.map((period) => period.currency.code))];
+      for (const code of currencies) {
+        const history = price.periods.filter((period) => period.currency.code === code);
+        for (let index = 1; index < history.length; index += 1) {
+          const previous = history[index - 1] as PricePeriod;
+          const current = history[index] as PricePeriod;
+          expect(current.from).toBeGreaterThan(previous.from);
+          expect(previous.to).toBe(current.from);
+        }
       }
     }
+  });
+
+  it('publishes the dollar list as its own numbers, not a conversion', () => {
+    // The two lists agree on windows but not on values: DeepSeek rounds the
+    // dollar prices to two or three significant digits, so they are recorded
+    // separately rather than derived from the yuan ones.
+    const flash = deepseekPricing.models().find((price) => price.model === 'deepseek-flash');
+    const current = (code: string): string | undefined =>
+      flash?.periods
+        .filter((period) => period.currency.code === code)
+        .find((period) => period.to === null)
+        ?.offPeak.find((component) => component.id === 'output')?.rate;
+    expect(current('CNY')).toBe('4');
+    expect(current('USD')).toBe('0.6');
   });
 
   it('gives every period a source URL and a note', () => {
@@ -212,8 +232,22 @@ describe('cost of a real request', () => {
 });
 
 describe('provider metadata', () => {
-  it('is quoted in CNY', () => {
-    expect(deepseekPricing.currency).toEqual({ code: 'CNY', symbol: '¥' });
+  it('publishes its list in both yuan and dollars', () => {
+    // DeepSeek quotes the Chinese site in CNY and the international one in USD;
+    // the two are separate published numbers, so both are kept.
+    const currencies = new Set(deepseekPricing.models().flatMap((price) => price.periods.map((period) => period.currency.code)));
+    expect([...currencies].sort()).toEqual(['CNY', 'USD']);
+    for (const price of deepseekPricing.models()) {
+      const cny = price.periods.filter((period) => period.currency.code === 'CNY');
+      const usd = price.periods.filter((period) => period.currency.code === 'USD');
+      // Every yuan period has a dollar counterpart covering the same window.
+      expect(usd).toHaveLength(cny.length);
+      for (const period of cny) {
+        const twin = usd.find((entry) => entry.id === period.id);
+        expect(twin?.from).toBe(period.from);
+        expect(twin?.to).toBe(period.to);
+      }
+    }
   });
 
   it('falls back to Flash for unknown models', () => {

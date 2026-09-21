@@ -25,7 +25,15 @@ import {
 } from './pricing/index.ts';
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
-import { convertProvider, currencyOf, resolveDisplay, type DisplayResolution } from './pricing/currency.ts';
+import {
+  chooseDisplay,
+  convertProvider,
+  currencyOf,
+  providerCurrencies,
+  rateFor,
+  selectCurrency,
+  type DisplayResolution,
+} from './pricing/currency.ts';
 import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type ReportSection } from './format.ts';
 import type { UsageDataset } from './core/types.ts';
 
@@ -129,13 +137,26 @@ async function loadOrExit(options: GlobalOptions & Pick<UsageOptions, 'currency'
     const provider = resolvePricingProvider(options.provider, adapter.id);
     // The vendor's rates are rewritten into the display currency here, once, so
     // every amount and every unit price downstream is already in it.
-    const display = resolveDisplay({
-      base: provider.currency.code,
+    const published = providerCurrencies(provider);
+    const choice = chooseDisplay({
+      published,
       ...(options.currency === undefined ? {} : { currencyFlag: options.currency }),
       ...(options.currencyRate === undefined ? {} : { rateFlag: options.currencyRate }),
       ...(systemLocale() === undefined ? {} : { locale: systemLocale() }),
     });
-    const engine = createPricingEngine(convertProvider(provider, display.currency ?? currencyOf(display.base), display.rate));
+    // One published list per model, in the currency the report will speak; the
+    // rates are then converted — so a list published in the reader's currency is
+    // used exactly as published, and anything else is converted from the list
+    // that was.
+    const selected = selectCurrency(provider, choice.baseWanted);
+    const base = selected.currencies[0] ?? choice.baseWanted;
+    const { rate, provenance } = rateFor({
+      base,
+      target: choice.currency?.code ?? null,
+      manualRate: choice.manualRate,
+    });
+    const display: DisplayResolution = { currency: choice.currency, base, rate, provenance, reason: choice.reason };
+    const engine = createPricingEngine(convertProvider(selected.provider, choice.currency ?? { code: '', symbol: '', name: '' }, rate));
     return {
       dataset,
       adapter,
@@ -256,7 +277,8 @@ function runPrice(options: PriceOptions): void {
   const lines: string[] = [];
   for (const provider of providers) {
     const engine = createPricingEngine(provider);
-    lines.push(`▸ ${provider.label}（${provider.id}，${provider.currency.code} / 百万 tokens）`);
+    const currencies = providerCurrencies(provider);
+    lines.push(`▸ ${provider.label}（${provider.id}，${currencies.join(' / ')} / 百万 tokens）`);
     lines.push(`  默认价格模型: ${provider.defaultModel ?? '（无，未知模型不计价）'}`);
     for (const price of provider.models()) {
       lines.push(`\n  ${price.model}`);
@@ -264,11 +286,11 @@ function runPrice(options: PriceOptions): void {
         lines.push(`    别名: ${price.aliases.filter((alias) => alias !== price.model).join('、')}`);
       }
       for (const period of price.periods) {
-        lines.push(`    [${period.id}] ${period.label}`);
+        lines.push(`    [${period.id}] ${period.label}（${period.currency.code}）`);
         lines.push(`      生效: ${engine.describeWindow(period)}`);
         lines.push(`      峰谷: ${engine.describeTiers(period)}`);
         const render = (components: readonly { label: string; rate: string; per: number }[]): string =>
-          components.map((component) => `${component.label} ${component.rate}`).join(' / ') + ' 元';
+          components.map((component) => `${component.label} ${component.rate}`).join(' / ') + ` ${period.currency.symbol}`;
         lines.push(`      空闲: ${render(period.offPeak)}`);
         if (period.peak !== null) lines.push(`      高峰: ${render(period.peak)}`);
         lines.push(`      来源: ${period.source}`);
@@ -277,7 +299,7 @@ function runPrice(options: PriceOptions): void {
     }
     lines.push('');
   }
-  lines.push('说明: 价格单位为「元 / 百万 tokens」；推理 token 已计入输出，不另行计费。');
+  lines.push('说明: 价格单位为「单价 / 百万 tokens」，币种见每个区间的括号；推理 token 已计入输出，不另行计费。');
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
@@ -294,7 +316,7 @@ function runAgents(options: GlobalOptions): void {
   lines.push('');
   lines.push('支持的计价来源（--provider）:');
   for (const provider of PRICING_PROVIDERS) {
-    lines.push(`  ▸ ${provider.id}  ${provider.label}（${provider.currency.code}）`);
+    lines.push(`  ▸ ${provider.id}  ${provider.label}（${providerCurrencies(provider).join(' / ')}）`);
     lines.push(`      模型: ${provider.models().map((price) => price.model).join('、')}`);
   }
   if (options.json === true) {
@@ -312,7 +334,7 @@ function runAgents(options: GlobalOptions): void {
           pricingProviders: PRICING_PROVIDERS.map((provider) => ({
             id: provider.id,
             label: provider.label,
-            currency: provider.currency,
+            currencies: providerCurrencies(provider),
             defaultModel: provider.defaultModel,
             models: provider.models().map((price) => ({
               model: price.model,

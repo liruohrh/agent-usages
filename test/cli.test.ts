@@ -261,19 +261,44 @@ describe('usage', () => {
   });
 
   it('follows the locale for its default currency', async () => {
-    // zh-CN prices in the vendor's own currency; en-US converts to dollars.
-    const zh = JSON.parse((await cli(['usage', '--json'])).stdout) as { currency: string; currencyRate: number };
+    // Each locale picks the list DeepSeek publishes for it, so both are exact as
+    // published: no conversion, no rate, only different numbers.
+    const zh = JSON.parse((await cli(['usage', '--json'])).stdout) as {
+      currency: string;
+      currencyRate: number;
+      rateInfo: { base: string; source: string };
+      totals: { cost: Record<string, string> };
+    };
     expect(zh.currency).toBe('CNY');
     expect(zh.currencyRate).toBe(1);
+    expect(zh.rateInfo.base).toBe('CNY');
+    expect(zh.totals.cost['total']).toBe('5.0200');
+
     const en = JSON.parse((await cli(['usage', '--json'], { LANG: 'en_US.UTF-8' })).stdout) as {
       currency: string;
       currencyRate: number;
+      rateInfo: { base: string };
       totals: { cost: Record<string, string> };
     };
     expect(en.currency).toBe('USD');
-    expect(en.currencyRate).toBeGreaterThan(0);
-    expect(en.currencyRate).toBeLessThan(1);
-    expect(Number(en.totals.cost['total'])).toBeLessThan(5.02);
+    expect(en.currencyRate).toBe(1);
+    expect(en.rateInfo.base).toBe('USD');
+    // The fixture's request is 1M miss + 1M hit + 1M output; DeepSeek's dollar
+    // list prices that at 0.15 + 0.003 + 0.6 = 0.753.
+    expect(Number(en.totals.cost['total'])).toBeCloseTo(0.753, 4);
+  });
+
+  it('converts when the wanted currency is not published', async () => {
+    const eur = JSON.parse((await cli(['usage', '--json', '--currency', 'EUR'])).stdout) as {
+      currency: string;
+      currencyRate: number;
+      rateInfo: { base: string; source: string };
+      totals: { cost: Record<string, string> };
+    };
+    expect(eur.currency).toBe('EUR');
+    expect(eur.rateInfo.base).toBe('CNY');
+    expect(eur.currencyRate).toBeGreaterThan(0);
+    expect(Number(eur.totals.cost['total'])).toBeLessThan(5.02);
   });
 
   it('converts without naming a currency when only a rate is given', async () => {
@@ -502,13 +527,13 @@ describe('agents', () => {
   it('emits the same inventory as JSON', async () => {
     const parsed = JSON.parse((await cli(['agents', '--json'])).stdout) as {
       agents: { id: string; envVars: string[]; notes: string[] }[];
-      pricingProviders: { id: string; currency: { code: string }; models: { model: string }[] }[];
+      pricingProviders: { id: string; currencies: string[]; models: { model: string }[] }[];
     };
     expect(parsed.agents[0]?.id).toBe('dsh');
     expect(parsed.agents[0]?.envVars).toEqual(['DSH_HOME']);
     expect(parsed.agents[0]?.notes.length).toBeGreaterThan(0);
     expect(parsed.pricingProviders[0]?.id).toBe('deepseek');
-    expect(parsed.pricingProviders[0]?.currency.code).toBe('CNY');
+    expect(parsed.pricingProviders[0]?.currencies).toEqual(['CNY', 'USD']);
     expect(parsed.pricingProviders[0]?.models.map((model) => model.model)).toContain('deepseek-flash');
   });
 });
