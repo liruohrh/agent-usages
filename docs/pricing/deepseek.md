@@ -6,11 +6,14 @@
 - 更新日志：<https://api-docs.deepseek.com/zh-cn/updates>
 - 历史价格页存档：见下表“来源”一列
 
-（抓取时间：2026-09-17）
+（人民币表抓取于 2026-09-17，美元表抓取于 2026-09-21）
 
-价格表是纯数据，唯一随官方调价更新的文件是 `src/pricing/vendors/deepseek.ts`。
+价格表是纯数据，唯一随官方调价更新的文件是 [`config/pricing.json`](../config.md)（随包发布，
+运行时也可从仓库拉取）。改价格只需要编辑这一个文件并提交，再跑一次 `agent-usages check-config`。
 
 ## 生效区间（人民币 / 百万 tokens）
+
+同一份文件里，每一段还有一套美元价格（英文站发布），区间与峰谷规则相同、数字独立。
 
 `deepseek-flash`（含其历史名 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`，以及 2026-04-24 后映射到它的 `deepseek-chat` / `deepseek-reasoner`）：
 
