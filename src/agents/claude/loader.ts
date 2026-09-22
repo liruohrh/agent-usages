@@ -1,0 +1,361 @@
+/**
+ * Claude Code adapter: reads the session logs Claude Code writes itself.
+ *
+ * Layout (verified against Claude Code 2.1.278):
+ *
+ * ```
+ * ~/.claude/projects/<escaped-cwd>/<session-uuid>.jsonl                      ← the session
+ * ~/.claude/projects/<escaped-cwd>/<session-uuid>/subagents/agent-<id>.jsonl ← a subagent
+ * ~/.claude/projects/<escaped-cwd>/<session-uuid>/subagents/agent-<id>.meta.json
+ * ```
+ *
+ * Every line is one entry; assistant entries carry the provider's `usage`
+ * (`input_tokens` / `output_tokens` / `cache_read_input_tokens` /
+ * `cache_creation_input_tokens`, with thinking tokens under
+ * `output_tokens_details`). The parent file does **not** repeat a subagent's
+ * requests — the subagent has its own file — so both are read and neither is
+ * billed twice.
+ *
+ * The project directory name escapes the working directory lossily (`/` and `-`
+ * both become `-`), so the `cwd` inside the entries is what the adapter trusts.
+ */
+
+import { readdir, readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
+
+import { repoOf } from '../../core/git.ts';
+import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRecord } from '../../core/types.ts';
+import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
+import { t } from '../../i18n/index.ts';
+import type { AdapterOptions, AgentAdapter } from '../contract.ts';
+
+/** Environment variable Claude Code honours for its config directory. */
+const ENV_CONFIG_DIR = 'CLAUDE_CONFIG_DIR';
+
+/** Parse a JSON value into a record, or `undefined`. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** Read a non-empty string, or `undefined`. */
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Read a non-negative count, defaulting to 0. */
+function asCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+/** Read an ISO timestamp as epoch milliseconds, or `null`. */
+function asInstant(value: unknown): number | null {
+  const text = asString(value);
+  if (text === undefined) return null;
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * A model id as a pricing table can match it.
+ *
+ * Claude Code passes context-window suffixes through verbatim
+ * (`deepseek-flash[1m]`), which is the same model as `deepseek-flash`.
+ */
+function priceableModel(model: string): string {
+  const bracket = model.indexOf('[');
+  return bracket === -1 ? model : model.slice(0, bracket);
+}
+
+/** Token buckets as Claude Code's `usage` block reports them. */
+function usageBuckets(usage: Record<string, unknown>): TokenBuckets {
+  const details = asRecord(usage['output_tokens_details']);
+  return {
+    input: asCount(usage['input_tokens']),
+    output: asCount(usage['output_tokens']),
+    cacheRead: asCount(usage['cache_read_input_tokens']),
+    cacheWrite: asCount(usage['cache_creation_input_tokens']),
+    // Thinking tokens are reported inside the completion count; carried for
+    // transparency, never billed beside `output`.
+    reasoning: asCount(details?.['thinking_tokens']),
+  };
+}
+
+/** One session file's facts. */
+interface ScannedSession {
+  /** Session id: the parent's file uuid, or the subagent's `sessionId`. */
+  id: string;
+  /** Working directory recorded in the entries. */
+  cwd: string | null;
+  /** First timestamp seen. */
+  createdAt: number | null;
+  /** Last `summary` entry, when Claude Code compacted the session. */
+  title: string | null;
+  /** One record per billed assistant entry, in file order. */
+  records: UsageRecord[];
+}
+
+/**
+ * Parse one session file.
+ *
+ * @param path - a session file or a subagent file.
+ * @param fallbackId - id to use when no entry carries one (the file name works).
+ * @returns what the file records.
+ */
+async function scanSession(path: string, fallbackId: string): Promise<ScannedSession | undefined> {
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch {
+    return undefined;
+  }
+  let id: string | undefined;
+  let cwd: string | null = null;
+  let createdAt: number | null = null;
+  let title: string | null = null;
+  const records: UsageRecord[] = [];
+  // One API response is written as one entry per content block, and every one of
+  // them repeats the same `usage` — counting entries would bill each request two
+  // or three times. `message.id` identifies the call, so it is the key.
+  const billed = new Set<string>();
+  let line = 0;
+  for (const raw of text.split('\n')) {
+    if (raw.trim().length === 0) continue;
+    line += 1;
+    let entry: Record<string, unknown> | undefined;
+    try {
+      entry = asRecord(JSON.parse(raw));
+    } catch {
+      continue;
+    }
+    if (entry === undefined) continue;
+    id ??= asString(entry['sessionId']);
+    cwd ??= asString(entry['cwd']) ?? null;
+    if (asString(entry['type']) === 'summary') {
+      // Compaction summaries are the closest thing to a title that the log has.
+      title = asString(entry['summary']) ?? title;
+      continue;
+    }
+    const message = asRecord(entry['message']);
+    const usage = message === undefined ? undefined : asRecord(message['usage']);
+    if (usage === undefined || message === undefined) continue;
+    if (asString(entry['type']) !== 'assistant') continue;
+    const model = asString(message['model']);
+    // Claude Code writes `<synthetic>` entries for requests it never sent (a
+    // rejected model, a login problem); they must not become billed requests.
+    if (model === undefined || model === '<synthetic>') continue;
+    const time = asInstant(entry['timestamp']);
+    if (time === null) continue;
+    const messageId = asString(message['id']) ?? asString(entry['uuid']) ?? `line${line}`;
+    if (billed.has(messageId)) continue;
+    billed.add(messageId);
+    createdAt ??= time;
+    records.push({
+      id: `${id ?? fallbackId}:${messageId}`,
+      time,
+      model: priceableModel(model),
+      modelLabel: model,
+      tokens: usageBuckets(usage),
+    });
+  }
+  if (id === undefined && cwd === null && records.length === 0) return undefined;
+  return { id: id ?? fallbackId, cwd, createdAt, title, records };
+}
+
+/** Directory entries, or an empty list when the directory cannot be read. */
+async function readdirOrEmpty(path: string): Promise<string[]> {
+  try {
+    return await readdir(path);
+  } catch {
+    return [];
+  }
+}
+
+/** One session and everything it spawned. */
+interface WalkedSession {
+  session: ScannedSession;
+  file: string;
+  parentId: string | null;
+  depth: number;
+  isSubagent: boolean;
+}
+
+/** Read a session file and the subagent files filed under it. */
+async function walk(
+  file: string,
+  id: string,
+  found: WalkedSession[],
+  warnings: Warning[],
+  source: string,
+): Promise<void> {
+  const session = await scanSession(file, id);
+  if (session === undefined || session.records.length === 0) {
+    // A session that never billed a request (an aborted run) is still a session,
+    // but only if it has anything at all to say.
+    if (session === undefined) {
+      warnings.push(new UserError('claudeSessionUnreadable', { path: relative(source, file).split(sep).join('/') }));
+      return;
+    }
+  }
+  found.push({ session, file, parentId: null, depth: 0, isSubagent: false });
+  // Subagents live one level down, in a directory named after the session file.
+  const subagents = join(file.replace(/\.jsonl$/, ''), 'subagents');
+  for (const entry of await readdirOrEmpty(subagents)) {
+    if (!entry.startsWith('agent-') || !entry.endsWith('.jsonl')) continue;
+    const metaText = await readFile(join(subagents, entry.replace(/\.jsonl$/, '.meta.json')), 'utf8').catch(() => undefined);
+    const meta = metaText === undefined ? undefined : asRecord(JSON.parse(metaText));
+    // A subagent's entries keep the *parent's* `sessionId`, so its identity has
+    // to come from the file: `agent-<agentId>.jsonl`.
+    const agentId = entry.replace(/^agent-/, '').replace(/\.jsonl$/, '');
+    const child = await scanSession(join(subagents, entry), agentId);
+    if (child === undefined) continue;
+    const depth = typeof meta?.['spawnDepth'] === 'number' ? Number(meta['spawnDepth']) : 1;
+    found.push({
+      session: { ...child, id: agentId },
+      file: join(subagents, entry),
+      parentId: session.id,
+      depth,
+      isSubagent: true,
+    });
+  }
+}
+
+/** Assemble one neutral session record. */
+function buildSession(walked: WalkedSession): SessionRecord {
+  const { session, parentId, depth, isSubagent } = walked;
+  const records = [...session.records].sort((left, right) => left.time - right.time);
+  return {
+    id: session.id,
+    title: session.title,
+    cwd: session.cwd,
+    createdAt: session.createdAt,
+    records,
+    parentId,
+    depth,
+    isSubagent,
+    archived: false,
+    childIds: [],
+    parentKnown: false,
+  };
+}
+
+/** Earliest instant a session can be attributed to. */
+function firstUsageOf(session: SessionRecord): number {
+  const first = session.records[0];
+  if (first !== undefined) return first.time;
+  if (session.createdAt !== null) return session.createdAt;
+  return Number.POSITIVE_INFINITY;
+}
+
+/** The `projects` directory under a Claude Code config directory. */
+function projectsRootOf(source: string, env: NodeJS.ProcessEnv): string {
+  return join(env[ENV_CONFIG_DIR] ?? source, 'projects');
+}
+
+/** Read a Claude Code home into the agent-neutral dataset. */
+async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
+  const env = options.env ?? process.env;
+  const source = options.home ?? defaultSource(env) ?? '';
+  const warnings: Warning[] = [];
+  if (options.home !== undefined && !isAbsolute(options.home)) {
+    throw new UserError('claudeHomeNotAbsolute', { value: JSON.stringify(options.home) });
+  }
+
+  const projectsRoot = projectsRootOf(source, env);
+  const walked = new Map<string, WalkedSession[]>();
+  for (const projectKey of await readdirOrEmpty(projectsRoot)) {
+    const projectDir = join(projectsRoot, projectKey);
+    const found: WalkedSession[] = [];
+    for (const entry of await readdirOrEmpty(projectDir)) {
+      if (!entry.endsWith('.jsonl')) continue;
+      await walk(join(projectDir, entry), entry.replace(/\.jsonl$/, ''), found, warnings, source);
+    }
+    if (found.length > 0) walked.set(projectKey, found);
+  }
+  if (walked.size === 0) {
+    throw new Error(renderDiagnostic('claudeNoData', { source }));
+  }
+
+  const sessions: SessionRecord[] = [];
+  const projectOfSession = new Map<string, string>();
+  for (const [projectKey, found] of walked) {
+    for (const entry of found) {
+      if (sessions.some((session) => session.id === entry.session.id)) continue;
+      const session = buildSession(entry);
+      sessions.push(session);
+      projectOfSession.set(session.id, projectKey);
+    }
+  }
+
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  for (const session of sessions) {
+    if (session.parentId === null) continue;
+    const parent = byId.get(session.parentId);
+    if (parent === undefined) continue;
+    parent.childIds.push(session.id);
+    session.parentKnown = true;
+  }
+  for (const session of sessions) session.childIds.sort();
+
+  const projects: ProjectRecord[] = [];
+  for (const [projectKey, found] of walked) {
+    const members = sessions.filter((session) => projectOfSession.get(session.id) === projectKey);
+    if (members.length === 0) continue;
+    members.sort((left, right) => firstUsageOf(left) - firstUsageOf(right));
+    const path = found.find((entry) => entry.session.cwd !== null)?.session.cwd ?? '';
+    projects.push({
+      id: projectKey,
+      name: path.length > 0 ? basename(path) : projectKey,
+      path,
+      sessions: members,
+    });
+  }
+  await Promise.all(
+    projects.map(async (project) => {
+      if (project.path.length === 0) return;
+      const repo = await repoOf(project.path);
+      if (repo !== undefined) project.repo = repo;
+    }),
+  );
+  projects.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+
+  return {
+    agent: 'claude',
+    source,
+    projects,
+    sessions,
+    stats: {
+      filesRead: [...walked.values()].flat().map((entry) => entry.file),
+      sessions: sessions.length,
+      records: sessions.reduce((total, session) => total + session.records.length, 0),
+    },
+    warnings,
+  };
+}
+
+/** Default data root: the Claude Code config directory. */
+function defaultSource(env: NodeJS.ProcessEnv): string | null {
+  const explicit = env[ENV_CONFIG_DIR];
+  if (explicit !== undefined && explicit.length > 0) return explicit;
+  return join(homedir(), '.claude');
+}
+
+export const claudeAgent: AgentAdapter = {
+  id: 'claude',
+  label: 'Claude Code',
+  sessionNoun: t().errors.claudeSessionNoun,
+  envVars: [ENV_CONFIG_DIR],
+  defaultSource,
+  hasData: async (source) => {
+    const root = projectsRootOf(source, process.env);
+    for (const projectKey of await readdirOrEmpty(root)) {
+      const entries = await readdirOrEmpty(join(root, projectKey));
+      if (entries.some((entry) => entry.endsWith('.jsonl'))) return true;
+    }
+    return false;
+  },
+  load,
+  notes: () => t().errors.claudeNotes(),
+};

@@ -310,6 +310,17 @@ export const en: Messages = {
     piHomeNotAbsolute: (p: { value: string }) => `the pi data directory must be an absolute path, got ${p.value}`,
     piNoData: (p: { source: string }) =>
       `no pi sessions under ${p.source}; point --home at pi's agent directory (default ~/.pi/agent) or set PI_CODING_AGENT_DIR`,
+    claudeSessionUnreadable: (p: { path: string }) => `could not read the Claude Code session file: ${p.path}`,
+    claudeHomeNotAbsolute: (p: { value: string }) => `the Claude Code config directory must be an absolute path, got ${p.value}`,
+    claudeNoData: (p: { source: string }) =>
+      `no Claude Code sessions under ${p.source}; point --home at the config directory (default ~/.claude) or set CLAUDE_CONFIG_DIR`,
+    claudeSessionNoun: 'sessions',
+    claudeNotes: (): readonly string[] => [
+      'Usage comes from Claude Code’s own session files: ~/.claude/projects/<cwd>/<session>.jsonl, where assistant entries carry that request’s usage (cache read/write and thinking tokens included).',
+      'A subagent is its own file under the session-named subagents/ directory; the parent does not repeat its usage, so each side is billed once.',
+      'A `[1m]`-style suffix on a model name is stripped before matching the price table.',
+      'See docs/agents/claude.md for the official DeepSeek wiring (ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic).',
+    ],
     piSessionNoun: 'sessions',
     piNotes: (): readonly string[] => [
       'Usage comes from pi’s own session files: ~/.pi/agent/sessions/<project>/<time>_<uuid>.jsonl, where every assistant message carries that request’s usage.',

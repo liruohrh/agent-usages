@@ -352,6 +352,17 @@ export const zh = {
     piHomeNotAbsolute: (p: { value: string }) => `pi 数据目录必须是绝对路径，收到 ${p.value}`,
     piNoData: (p: { source: string }) =>
       `在 ${p.source} 下没有找到 pi 会话；用 --home 指定 pi 的 agent 目录（默认 ~/.pi/agent），或用 PI_CODING_AGENT_DIR 覆盖`,
+    claudeSessionUnreadable: (p: { path: string }) => `Claude Code 会话文件读不出来: ${p.path}`,
+    claudeHomeNotAbsolute: (p: { value: string }) => `Claude Code 配置目录必须是绝对路径，收到 ${p.value}`,
+    claudeNoData: (p: { source: string }) =>
+      `在 ${p.source} 下没有找到 Claude Code 会话；用 --home 指定配置目录（默认 ~/.claude），或用 CLAUDE_CONFIG_DIR 覆盖`,
+    claudeSessionNoun: '会话',
+    claudeNotes: (): readonly string[] => [
+      '用量来自 Claude Code 自己写的会话文件：~/.claude/projects/<工作目录>/<会话>.jsonl，assistant 条目带该次请求的 usage（含缓存读/写与思考 token）。',
+      '子 agent 是独立文件：<会话>.jsonl/<agentId>/… 实际落在 <会话>.jsonl 同名的 subagents/ 目录里，父文件不重复记录它的用量，两边各计一次。',
+      '模型名里的 [1m] 之类后缀会去掉后再匹配价格表（Claude Code 原样透传 ANTHROPIC_MODEL）。',
+      'Claude Code 与 DeepSeek 的官方接法见 docs/agents/claude.md（ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic）。',
+    ],
     piSessionNoun: '会话',
     piNotes: (): readonly string[] => [
       '用量来自 pi 自己的会话文件：~/.pi/agent/sessions/<项目>/<时间>_<uuid>.jsonl，每个 assistant 消息都带该次请求的 usage。',
