@@ -17,6 +17,7 @@
  * endpoint can be down.
  */
 
+import { renderDiagnostic } from '../i18n/errors.ts';
 import { parsePricingConfig } from './pricing.ts';
 import { parseRatesConfig, shippedRates } from './rates.ts';
 import { cachePath, statePath } from './paths.ts';
@@ -122,7 +123,7 @@ export async function updatePricing(options: UpdateOptions = {}): Promise<Update
   const fetchImpl = options.fetchImpl ?? fetch;
   const state = readState(env, now);
   if (!isDue(state, 'pricing', now, options.force === true)) {
-    return { kind: 'pricing', status: 'skipped', detail: '今天已经检查过价格表' };
+    return { kind: 'pricing', status: 'skipped', detail: renderDiagnostic('updatePricesChecked', {}) };
   }
   state.checkedAt.pricing = now.getTime();
   const cached = readJson<CacheEntry>(cachePath('pricing', env)).value;
@@ -133,15 +134,19 @@ export async function updatePricing(options: UpdateOptions = {}): Promise<Update
   const response = await request(PRICING_URL, { headers }, fetchImpl);
   if (response === undefined) {
     writeJsonQuietly(statePath(env), state);
-    return { kind: 'pricing', status: 'failed', detail: '取价格表失败（离线或超时），沿用现有数据' };
+    return { kind: 'pricing', status: 'failed', detail: renderDiagnostic('updatePricesOffline', {}) };
   }
   if (response.status === 304) {
     writeJsonQuietly(statePath(env), state);
-    return { kind: 'pricing', status: 'unchanged', detail: '价格表没有变化' };
+    return { kind: 'pricing', status: 'unchanged', detail: renderDiagnostic('updatePricesUnchanged', {}) };
   }
   if (!response.ok) {
     writeJsonQuietly(statePath(env), state);
-    return { kind: 'pricing', status: 'failed', detail: `取价格表失败：HTTP ${response.status}` };
+    return {
+      kind: 'pricing',
+      status: 'failed',
+      detail: renderDiagnostic('updatePricesHttp', { status: String(response.status) }),
+    };
   }
   const text = await response.text();
   try {
@@ -153,10 +158,18 @@ export async function updatePricing(options: UpdateOptions = {}): Promise<Update
       text,
     } satisfies CacheEntry);
     writeJsonQuietly(statePath(env), state);
-    return { kind: 'pricing', status: 'updated', detail: `价格表已更新（文件日期 ${parsed.updatedAt}）` };
+    return {
+      kind: 'pricing',
+      status: 'updated',
+      detail: renderDiagnostic('updatePricesUpdated', { date: parsed.updatedAt }),
+    };
   } catch (error) {
     writeJsonQuietly(statePath(env), state);
-    return { kind: 'pricing', status: 'failed', detail: `拉到的价格表不可用，已忽略：${(error as Error).message}` };
+    return {
+      kind: 'pricing',
+      status: 'failed',
+      detail: renderDiagnostic('updatePricesUnusable', { reason: (error as Error).message }),
+    };
   }
 }
 
@@ -232,18 +245,18 @@ export async function updateRates(options: UpdateOptions = {}): Promise<UpdateOu
   const now = options.now ?? new Date();
   const state = readState(env, now);
   if (!isDue(state, 'rates', now, options.force === true)) {
-    return { kind: 'rates', status: 'skipped', detail: '今天已经检查过汇率' };
+    return { kind: 'rates', status: 'skipped', detail: renderDiagnostic('updateRatesChecked', {}) };
   }
   state.checkedAt.rates = now.getTime();
   const fetched = await fetchRates(options);
   if (fetched === undefined) {
     writeJsonQuietly(statePath(env), state);
-    return { kind: 'rates', status: 'failed', detail: '所有汇率源都失败，沿用现有汇率' };
+    return { kind: 'rates', status: 'failed', detail: renderDiagnostic('updateRatesFailed', {}) };
   }
   writeJsonQuietly(cachePath('rates', env), { fetchedAt: now.getTime(), text: fetched.text } satisfies CacheEntry);
   writeJsonQuietly(statePath(env), state);
   const date = parseRatesConfig(fetched.text).updatedAt;
-  return { kind: 'rates', status: 'updated', detail: `汇率已更新（${fetched.source}，${date}）` };
+  return { kind: 'rates', status: 'updated', detail: renderDiagnostic('updateRatesUpdated', { source: fetched.source, date }) };
 }
 
 /**
@@ -260,7 +273,11 @@ export async function runUpdates(
   const outcomes: UpdateOutcome[] = [];
   for (const kind of kinds) {
     if (options.force !== true && !settings[kind]) {
-      outcomes.push({ kind, status: 'skipped', detail: kind === 'pricing' ? '价格表自动更新已关闭' : '汇率自动更新已关闭' });
+      outcomes.push({
+        kind,
+        status: 'skipped',
+        detail: renderDiagnostic(kind === 'pricing' ? 'updatePricesDisabled' : 'updateRatesDisabled', {}),
+      });
       continue;
     }
     outcomes.push(kind === 'pricing' ? await updatePricing(options) : await updateRates(options));

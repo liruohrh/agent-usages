@@ -696,7 +696,9 @@ describe('title search on real data', () => {
 
   it('reports a title it cannot find rather than failing silently', async () => {
     const data = await dshAgent.load({ home });
-    expect(resolveSessionSelectors(data.sessions, ['并不存在的标题']).errors).toEqual(['找不到会话 "并不存在的标题"']);
+    expect(resolveSessionSelectors(data.sessions, ['并不存在的标题']).errors.map((warning) => warning.message)).toEqual([
+      '找不到会话 "并不存在的标题"',
+    ]);
   });
 });
 

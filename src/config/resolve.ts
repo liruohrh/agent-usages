@@ -8,6 +8,7 @@
  * degrades to the one below it instead of failing the run.
  */
 
+import { UserError, type Warning } from '../i18n/errors.ts';
 import type { Language } from '../i18n/index.ts';
 import type { PricingProvider } from '../pricing/contract.ts';
 import type { RateTable } from '../pricing/currency.ts';
@@ -35,7 +36,7 @@ export interface ResolvedConfig {
   /** Which automatic updates are allowed. */
   updates: UpdateSettings;
   /** Anything worth showing about how the configuration was put together. */
-  warnings: string[];
+  warnings: Warning[];
 }
 
 /** What the caller knows about the run. */
@@ -55,26 +56,26 @@ export interface ResolveOptions {
 }
 
 /** Parse the price configuration from whichever layer is freshest. */
-function pricingProviders(env: NodeJS.ProcessEnv, warnings: string[]): ProviderConfig[] {
+function pricingProviders(env: NodeJS.ProcessEnv, warnings: Warning[]): ProviderConfig[] {
   const cached = cachedConfigText('pricing', env);
   if (cached !== undefined) {
     try {
       return parsePricingConfig(cached).providers;
     } catch (error) {
-      warnings.push(`已缓存的价目表不可用，改用随包版本：${(error as Error).message}`);
+      warnings.push(new UserError('cachedPricesUnusable', { reason: (error as Error).message }));
     }
   }
   return parsePricingConfig(shippedPricingText()).providers;
 }
 
 /** Parse the rate configuration from whichever layer is freshest. */
-function ratesConfig(env: NodeJS.ProcessEnv, warnings: string[]): RatesConfig {
+function ratesConfig(env: NodeJS.ProcessEnv, warnings: Warning[]): RatesConfig {
   const cached = cachedConfigText('rates', env);
   if (cached !== undefined) {
     try {
       return parseRatesConfig(cached);
     } catch (error) {
-      warnings.push(`已缓存的汇率表不可用，改用随包版本：${(error as Error).message}`);
+      warnings.push(new UserError('cachedRatesUnusable', { reason: (error as Error).message }));
     }
   }
   return parseRatesConfig(shippedRatesText());
@@ -91,7 +92,7 @@ function ratesConfig(env: NodeJS.ProcessEnv, warnings: string[]): RatesConfig {
  */
 export async function resolveConfig(options: ResolveOptions = {}): Promise<ResolvedConfig> {
   const env = options.env ?? process.env;
-  const warnings: string[] = [];
+  const warnings: Warning[] = [];
   const user = readUserConfig(env);
   warnings.push(...user.warnings);
 
@@ -115,7 +116,7 @@ export async function resolveConfig(options: ResolveOptions = {}): Promise<Resol
     validateProviders(merged);
     providers = merged;
   } catch (error) {
-    warnings.push(`用户价格配置与默认表合并失败，改用默认表：${(error as Error).message}`);
+    warnings.push(new UserError('mergeFailed', { reason: (error as Error).message }));
     providers = base;
   }
 

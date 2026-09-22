@@ -10,6 +10,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_LANGUAGE, LANGUAGES, language, languageOf, resolveLanguage, setLanguage, t } from '../../src/i18n/index.ts';
+import { ConfigError } from '../../src/config/pricing.ts';
+import { UserError, rawWarning } from '../../src/i18n/errors.ts';
 import { zh } from '../../src/i18n/zh.ts';
 import { en } from '../../src/i18n/en.ts';
 
@@ -94,5 +96,33 @@ describe('t', () => {
     setLanguage('en');
     expect(t().header.dataDir).toBe('Data dir');
     expect(t().scope.total).toBe('total');
+  });
+});
+
+describe('diagnostics', () => {
+  it('renders in whichever language is active when read', () => {
+    const error = new UserError('configExpectsObject', { value: '"x"' });
+    setLanguage('zh');
+    expect(error.message).toBe('应为对象，收到 "x"');
+    setLanguage('en');
+    expect(error.message).toBe('expected an object, got "x"');
+  });
+
+  it('keeps the code, so a script does not have to read prose', () => {
+    const error = new UserError('noUsageInRange', {});
+    expect(error.code).toBe('noUsageInRange');
+    expect(error).toBeInstanceOf(Error);
+  });
+
+  it('adds the field path in front of a configuration error', () => {
+    const error = new ConfigError('providers[0].models[1]', 'configNeedsPeriod', {});
+    setLanguage('zh');
+    expect(error.message).toBe('providers[0].models[1]: 至少需要一个价格区间');
+    expect(error.path).toBe('providers[0].models[1]');
+  });
+
+  it('passes an adapter sentence through unchanged', () => {
+    setLanguage('en');
+    expect(rawWarning('会话日志损坏').message).toBe('会话日志损坏');
   });
 });

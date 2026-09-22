@@ -13,6 +13,7 @@ import { emptyBuckets } from '../../src/core/buckets.ts';
 import type { CostTotals, TokenTotals } from '../../src/core/types.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type FormatOptions, type ReportSection } from '../../src/format.ts';
+import { rawWarning } from '../../src/i18n/errors.ts';
 import type { ProjectReport, RateInfo, ScopeTotals, SessionListResult, SessionReport, UsageResult } from '../../src/report.ts';
 import { stubProvider, TEST_CURRENCY } from '../support/stub-pricing.ts';
 
@@ -402,7 +403,7 @@ describe('formatUsageReport', () => {
   });
 
   it('prints warnings under a heading', () => {
-    const text = render(report({ warnings: ['会话不存在'] }));
+    const text = render(report({ warnings: [rawWarning('会话不存在')] }));
     expect(text).toContain('提示:');
     expect(text).toContain('- 会话不存在');
   });

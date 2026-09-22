@@ -51,7 +51,7 @@ export interface RatesConfig {
 /** Read a value as a plain object. */
 function object(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new ConfigError(path, `应为对象，收到 ${JSON.stringify(value)}`);
+    throw new ConfigError(path, 'configExpectsObject', { value: JSON.stringify(value) });
   }
   return value as Record<string, unknown>;
 }
@@ -59,7 +59,7 @@ function object(value: unknown, path: string): Record<string, unknown> {
 /** Read a required string. */
 function text(value: unknown, path: string): string {
   if (typeof value !== 'string' || value.length === 0) {
-    throw new ConfigError(path, `应为非空字符串，收到 ${JSON.stringify(value)}`);
+    throw new ConfigError(path, 'configNonEmptyString', { value: JSON.stringify(value) });
   }
   return value;
 }
@@ -67,7 +67,7 @@ function text(value: unknown, path: string): string {
 /** Read an ISO currency code. */
 function code(value: unknown, path: string): string {
   const raw = text(value, path);
-  if (!/^[A-Z]{3}$/.test(raw)) throw new ConfigError(path, `应为三位大写 ISO 代码，收到 ${JSON.stringify(raw)}`);
+  if (!/^[A-Z]{3}$/.test(raw)) throw new ConfigError(path, 'configCurrencyCode', { value: JSON.stringify(raw) });
   return raw;
 }
 
@@ -80,7 +80,7 @@ function code(value: unknown, path: string): string {
 export function parseRatesConfig(value: unknown): RatesConfig {
   const document = object(typeof value === 'string' ? JSON.parse(value) : value, 'config/rates.json');
   const version = document['version'];
-  if (version !== 1) throw new ConfigError('version', `只认识版本 1，收到 ${JSON.stringify(version)}`);
+  if (version !== 1) throw new ConfigError('version', 'configUnknownVersion', { version: JSON.stringify(version) });
   const base = code(document['base'], 'base');
   const rawTable = object(document['table'], 'table');
   const table: Record<string, string> = {};
@@ -90,24 +90,24 @@ export function parseRatesConfig(value: unknown): RatesConfig {
     try {
       parseDecimal(rate);
     } catch {
-      throw new ConfigError(`table.${key}`, `不是十进制数：${JSON.stringify(rate)}`);
+      throw new ConfigError(`table.${key}`, 'configNotDecimal', { value: JSON.stringify(rate) });
     }
-    if (Number(rate) <= 0) throw new ConfigError(`table.${key}`, `汇率必须为正，收到 ${JSON.stringify(rate)}`);
+    if (Number(rate) <= 0) throw new ConfigError(`table.${key}`, 'configRateNotPositive', { value: JSON.stringify(rate) });
     table[currency] = rate;
   }
   // The base is its own unit: without it, every cross-rate would divide by zero.
-  if (table[base] === undefined) throw new ConfigError('table', `缺少基准币种 ${base} 的汇率（应为 "1"）`);
-  if (Number(table[base]) !== 1) throw new ConfigError(`table.${base}`, `基准币种的汇率应为 "1"，收到 ${JSON.stringify(table[base])}`);
+  if (table[base] === undefined) throw new ConfigError('table', 'configBaseMissing', { base });
+  if (Number(table[base]) !== 1) throw new ConfigError(`table.${base}`, 'configBaseNotOne', { value: JSON.stringify(table[base]) });
 
   const sources = (document['sources'] === undefined ? [] : (document['sources'] as unknown[])).map((entry, index) => {
     const node = object(entry, `sources[${index}]`);
     const kind = text(node['kind'], `sources[${index}].kind`);
     if (kind !== 'frankfurter' && kind !== 'er-api') {
-      throw new ConfigError(`sources[${index}].kind`, `未知的汇率源类型 ${JSON.stringify(kind)}（可用：frankfurter / er-api）`);
+      throw new ConfigError(`sources[${index}].kind`, 'configUnknownSourceKind', { kind: JSON.stringify(kind) });
     }
     const typedKind: RateSourceConfig['kind'] = kind;
     const url = text(node['url'], `sources[${index}].url`);
-    if (!/^https:\/\//.test(url)) throw new ConfigError(`sources[${index}].url`, `应为 https URL，收到 ${JSON.stringify(url)}`);
+    if (!/^https:\/\//.test(url)) throw new ConfigError(`sources[${index}].url`, 'configHttpsUrl', { value: JSON.stringify(url) });
     return {
       id: text(node['id'], `sources[${index}].id`),
       label: text(node['label'], `sources[${index}].label`),
@@ -116,9 +116,9 @@ export function parseRatesConfig(value: unknown): RatesConfig {
       publishes: text(node['publishes'], `sources[${index}].publishes`),
     };
   });
-  if (sources.length === 0) throw new ConfigError('sources', '至少需要一个汇率源');
+  if (sources.length === 0) throw new ConfigError('sources', 'configNeedsRateSource', {});
   const ids = new Set(sources.map((source) => source.id));
-  if (ids.size !== sources.length) throw new ConfigError('sources', '汇率源 id 不能重复');
+  if (ids.size !== sources.length) throw new ConfigError('sources', 'configDuplicateSourceId', {});
 
   return {
     version,

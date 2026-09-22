@@ -125,7 +125,9 @@ describe('selector resolution', () => {
     for (const selector of ['alpha', '/tmp/alpha', 'alpha']) {
       expect([...resolveProjectSelectors(projects, [selector]).keys]).toEqual(['alpha']);
     }
-    expect(resolveProjectSelectors(projects, ['nope']).errors).toEqual(['没有项目匹配 "nope"']);
+    expect(resolveProjectSelectors(projects, ['nope']).errors.map((warning) => warning.message)).toEqual([
+      '没有项目匹配 "nope"',
+    ]);
   });
 
   it('glob-matches project selectors', () => {
@@ -177,7 +179,7 @@ describe('selector resolution', () => {
     const data = fixture();
     const { ids, errors } = resolveSessionSelectors(data.sessions, ['父会']);
     expect([...ids]).toEqual([]);
-    expect(errors).toEqual(['找不到会话 "父会"']);
+    expect(errors.map((warning) => warning.message)).toEqual(['找不到会话 "父会"']);
   });
 
   it('does not match a missing or blank title', () => {
@@ -221,7 +223,7 @@ describe('selector resolution', () => {
     const collection = [session({ id: 'same-1' }), session({ id: 'same-2' })];
     const { ids, errors } = resolveSessionSelectors(collection, ['same']);
     expect([...ids]).toEqual([]);
-    expect(errors[0]).toMatch(/有 2 个候选/);
+    expect(errors[0]?.message).toMatch(/有 2 个候选/);
     // A glob is a deliberate multi-match, so it selects both without complaint.
     const glob = resolveSessionSelectors(collection, ['same-*']);
     expect(glob.errors).toEqual([]);
@@ -547,7 +549,7 @@ describe('time ranges', () => {
   it('flags an empty result', () => {
     const result = runQuery(fixture(), query({ range: { from: Date.parse('2030-01-01T00:00:00Z'), to: null, label: 'future' } }), context);
     expect(result.requests).toBe(0);
-    expect(result.warnings.join('\n')).toMatch(/没有任何用量记录/);
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toMatch(/没有任何用量记录/);
   });
 });
 
@@ -580,7 +582,7 @@ describe('unpriced records', () => {
     expect(result.unpriced).toBe(1);
     expect(result.requests).toBe(1);
     expect(result.cost.total).toBe('0.0000');
-    expect(result.warnings.join('\n')).toMatch(/没有可用价格/);
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toMatch(/没有可用价格/);
   });
 });
 

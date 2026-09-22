@@ -198,6 +198,88 @@ export const zh = {
     /** `3 个子代理` under a session row. */
     subagentCount: (count: string) => count,
   },
+
+  /** Every diagnostic, keyed by code, so a caller can throw one and translate it later. */
+  errors: {
+    /* ---- configuration files ---- */
+    configExpectsObject: (p: { value: string }) => `应为对象，收到 ${p.value}`,
+    configExpectsArray: (p: { value: string }) => `应为数组，收到 ${p.value}`,
+    configNonEmptyString: (p: { value: string }) => `应为非空字符串，收到 ${p.value}`,
+    configStringOrNull: (p: { value: string }) => `应为字符串或 null，收到 ${p.value}`,
+    configExpectsNumber: (p: { value: string }) => `应为数字，收到 ${p.value}`,
+    configExpectsBoolean: (p: { value: string }) => `应为布尔值，收到 ${p.value}`,
+    configIsoWithOffset: (p: { value: string }) =>
+      `应为带偏移的 ISO 时间（如 2026-09-10T12:00:00+08:00），收到 ${p.value}`,
+    configInvalidInstant: (p: { value: string }) => `不是有效时间：${p.value}`,
+    configOffsetTooLarge: (p: { value: string }) => `偏移超出 ±14:00：${p.value}`,
+    configUnknownBasis: (p: { basis: string; known: string }) => `未知的计费基准 ${p.basis}（可用：${p.known}）`,
+    configNotDecimal: (p: { value: string }) => `不是十进制数：${p.value}`,
+    configPositiveInteger: (p: { value: string }) => `应为正整数，收到 ${p.value}`,
+    configWindowHours: (p: { from: number; to: number }) =>
+      `时间窗应为 0 ≤ fromHour < toHour ≤ 24，收到 ${p.from}-${p.to}`,
+    configWeekday: (p: { value: string }) => `应为 0-6（周日=0），收到 ${p.value}`,
+    configPeakWithoutWindows: '有高峰价却没有高峰时段',
+    configWindowsWithoutPeak: '没有高峰价却写了高峰时段',
+    configToNotAfterFrom: '结束时间必须晚于开始时间',
+    configSourceUrl: (p: { value: string }) => `应为来源 URL，收到 ${p.value}`,
+    configHttpsUrl: (p: { value: string }) => `应为 https URL，收到 ${p.value}`,
+    configCurrencyCode: (p: { value: string }) => `应为三位大写 ISO 代码，收到 ${p.value}`,
+    configDuplicatePeriodId: (p: { key: string }) => `区间 id 重复：${p.key}`,
+    configPeriodsUnsorted: (p: { currency: string; previous: string; current: string }) =>
+      `${p.currency} 的区间未按时间升序：${p.previous} 在 ${p.current} 之后`,
+    configPeriodsDiscontinuous: (p: {
+      currency: string;
+      previous: string;
+      previousTo: string;
+      current: string;
+      currentFrom: string;
+    }) => `${p.currency} 的区间不连续：${p.previous} 结束于 ${p.previousTo}，${p.current} 开始于 ${p.currentFrom}`,
+    configNoOpenEnd: (p: { currency: string; id: string }) =>
+      `${p.currency} 的最后一段 ${p.id} 没有结束时间，之后的时间将无法计价`,
+    configNeedsPeriod: '至少需要一个价格区间',
+    configNeedsModel: '至少需要一个模型',
+    configNeedsProvider: '至少需要一个计价来源',
+    configNeedsRateSource: '至少需要一个汇率源',
+    configDuplicateSourceId: '汇率源 id 不能重复',
+    configUnknownSourceKind: (p: { kind: string }) => `未知的汇率源类型 ${p.kind}（可用：frankfurter / er-api）`,
+    configDefaultModelMissing: (p: { model: string }) => `默认模型 ${p.model} 不在模型列表里`,
+    configUnknownVersion: (p: { version: string }) => `只认识版本 1，收到 ${p.version}`,
+    configBaseMissing: (p: { base: string }) => `缺少基准币种 ${p.base} 的汇率（应为 "1"）`,
+    configBaseNotOne: (p: { value: string }) => `基准币种的汇率应为 "1"，收到 ${p.value}`,
+    configRateNotPositive: (p: { value: string }) => `汇率必须为正，收到 ${p.value}`,
+    configUnknownLanguage: (p: { known: string; value: string }) => `应为 ${p.known} 之一，收到 ${p.value}`,
+    configUnknownRateMode: (p: { value: string }) => `应为 latest 或 historical，收到 ${p.value}`,
+    configRateSourceId: (p: { value: string }) => `应为汇率源 id，收到 ${p.value}`,
+    configIgnored: (p: { path: string; reason: string }) => `忽略用户配置 ${p.path}：${p.reason}`,
+    cachedPricesUnusable: (p: { reason: string }) => `已缓存的价目表不可用，改用随包版本：${p.reason}`,
+    cachedRatesUnusable: (p: { reason: string }) => `已缓存的汇率表不可用，改用随包版本：${p.reason}`,
+    mergeFailed: (p: { reason: string }) => `用户价格配置与默认表合并失败，改用默认表：${p.reason}`,
+    storeNotJson: (p: { reason: string }) => `不是合法 JSON：${p.reason}`,
+    /* ---- messages that arrive already written ---- */
+    adapterMessage: (p: { message: string }) => p.message,
+
+    /* ---- report warnings ---- */
+    noProjectMatch: (p: { selector: string }) => `没有项目匹配 "${p.selector}"`,
+    noSessionMatch: (p: { selector: string }) => `没有会话匹配 "${p.selector}"`,
+    sessionNotFound: (p: { selector: string }) => `找不到会话 "${p.selector}"`,
+    sessionAmbiguous: (p: { selector: string; count: number; candidates: string }) =>
+      `会话 "${p.selector}" 有 ${p.count} 个候选，请提供更长的前缀：${p.candidates}`,
+    noUsageInRange: '当前筛选条件下没有任何用量记录',
+    unpricedRecords: (p: { count: string }) => `有 ${p.count} 条记录没有可用价格，未计入费用（可用 \`price\` 查看已收录的模型）`,
+    projectionMismatch: (p: { diffs: string }) => `会话用量与投影缓存不一致：${p.diffs}`,
+    /* ---- update status ---- */
+    updatePricesChecked: '今天已经检查过价格表',
+    updateRatesChecked: '今天已经检查过汇率',
+    updatePricesUnchanged: '价格表没有变化',
+    updatePricesUpdated: (p: { date: string }) => `价格表已更新（文件日期 ${p.date}）`,
+    updatePricesOffline: '取价格表失败（离线或超时），沿用现有数据',
+    updatePricesHttp: (p: { status: string }) => `取价格表失败：HTTP ${p.status}`,
+    updatePricesUnusable: (p: { reason: string }) => `拉到的价格表不可用，已忽略：${p.reason}`,
+    updateRatesUpdated: (p: { source: string; date: string }) => `汇率已更新（${p.source}，${p.date}）`,
+    updateRatesFailed: '所有汇率源都失败，沿用现有汇率',
+    updatePricesDisabled: '价格表自动更新已关闭',
+    updateRatesDisabled: '汇率自动更新已关闭',
+  },
 };
 
 /**

@@ -500,7 +500,7 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
     if (bands.length > 0) lines.push('', ...bands);
   }
   if (result.warnings.length > 0) {
-    lines.push('', t().section.tips, ...result.warnings.map((warning) => `  - ${warning}`));
+    lines.push('', t().section.tips, ...result.warnings.map((warning) => `  - ${warning.message}`));
   }
   return lines;
 }
@@ -613,7 +613,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
     );
   }
   if (result.warnings.length > 0) {
-    sections.push([labels.section.tips, ...result.warnings.map((warning) => `  - ${warning}`)].join('\n'));
+    sections.push([labels.section.tips, ...result.warnings.map((warning) => `  - ${warning.message}`)].join('\n'));
   }
   return `${sections.join('\n\n')}\n`;
 }
@@ -715,7 +715,9 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
             })),
           }),
     })),
-    warnings: result.warnings,
+    // Structured on purpose: a script can branch on `code`, while a human reads
+    // the sentence, which is rendered in the language this run is using.
+    warnings: result.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
   };
 }
 
@@ -793,6 +795,8 @@ export function sessionListToJson(result: SessionListResult): unknown {
         nested: session.nested,
       })),
     })),
-    warnings: result.warnings,
+    // Structured on purpose: a script can branch on `code`, while a human reads
+    // the sentence, which is rendered in the language this run is using.
+    warnings: result.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
   };
 }

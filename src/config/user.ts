@@ -8,6 +8,7 @@
  * drops the rest of the vendor's history.
  */
 
+import { UserError, type Warning } from '../i18n/errors.ts';
 import { LANGUAGES, type Language } from '../i18n/index.ts';
 import type { PricePeriod } from '../pricing/contract.ts';
 import { ConfigError, parsePricingConfig, type ProviderConfig } from './pricing.ts';
@@ -49,7 +50,7 @@ export interface LoadedUserConfig {
   /** What was read, with defaults filled in. */
   config: UserConfig;
   /** Problems found while reading the file. */
-  warnings: string[];
+  warnings: Warning[];
 }
 
 /** The empty configuration: everything comes from the shipped files. */
@@ -68,20 +69,20 @@ function emptyConfig(): UserConfig {
 function languageSetting(value: unknown, path: string): Language | undefined {
   if (value === undefined) return undefined;
   if (typeof value === 'string' && (LANGUAGES as readonly string[]).includes(value)) return value as Language;
-  throw new ConfigError(path, `应为 ${LANGUAGES.join(' / ')} 之一，收到 ${JSON.stringify(value)}`);
+  throw new ConfigError(path, 'configUnknownLanguage', { known: LANGUAGES.join(' / '), value: JSON.stringify(value) });
 }
 
 /** Read a rate mode, rejecting anything else. */
 function rateMode(value: unknown, path: string): RateMode | undefined {
   if (value === undefined) return undefined;
   if (value === 'latest' || value === 'historical') return value;
-  throw new ConfigError(path, `应为 latest 或 historical，收到 ${JSON.stringify(value)}`);
+  throw new ConfigError(path, 'configUnknownRateMode', { value: JSON.stringify(value) });
 }
 
 /** Read a boolean setting, rejecting anything else. */
 function setting(value: unknown, path: string, fallback: boolean): boolean {
   if (value === undefined) return fallback;
-  if (typeof value !== 'boolean') throw new ConfigError(path, `应为布尔值，收到 ${JSON.stringify(value)}`);
+  if (typeof value !== 'boolean') throw new ConfigError(path, 'configExpectsBoolean', { value: JSON.stringify(value) });
   return value;
 }
 
@@ -97,13 +98,18 @@ function setting(value: unknown, path: string, fallback: boolean): boolean {
 export function readUserConfig(env: NodeJS.ProcessEnv = process.env): LoadedUserConfig {
   const path = userConfigPath(env);
   const { value, failure } = readJson<unknown>(path);
-  const warnings: string[] = [];
-  if (failure !== undefined) return { config: emptyConfig(), warnings: [`忽略用户配置 ${failure.path}：${failure.reason}`] };
+  const warnings: Warning[] = [];
+  if (failure !== undefined) {
+    return {
+      config: emptyConfig(),
+      warnings: [new UserError('configIgnored', { path: failure.path, reason: failure.reason })],
+    };
+  }
   if (value === undefined) return { config: emptyConfig(), warnings: [] };
   try {
     const node = value as Record<string, unknown>;
     const version = node['version'] ?? 1;
-    if (version !== 1) throw new ConfigError('version', `只认识版本 1，收到 ${JSON.stringify(version)}`);
+    if (version !== 1) throw new ConfigError('version', 'configUnknownVersion', { version: JSON.stringify(version) });
     const updates = (node['updates'] ?? {}) as Record<string, unknown>;
     const currency = node['currency'];
     const rateSource = node['rateSource'];
@@ -118,7 +124,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): LoadedUser
             : typeof currency === 'string' && /^[A-Za-z]{3}$/.test(currency.trim())
               ? currency.trim().toUpperCase()
               : (() => {
-                  throw new ConfigError('currency', `应为三位货币代码，收到 ${JSON.stringify(currency)}`);
+                  throw new ConfigError('currency', 'configCurrencyCode', { value: JSON.stringify(currency) });
                 })(),
         updates: {
           pricing: setting(updates['pricing'], 'updates.pricing', DEFAULT_UPDATES.pricing),
@@ -130,14 +136,14 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): LoadedUser
             : typeof rateSource === 'string' && rateSource.trim().length > 0
               ? rateSource.trim()
               : (() => {
-                  throw new ConfigError('rateSource', `应为汇率源 id，收到 ${JSON.stringify(rateSource)}`);
+                  throw new ConfigError('rateSource', 'configRateSourceId', { value: JSON.stringify(rateSource) });
                 })(),
         pricing,
       },
       warnings,
     };
   } catch (error) {
-    warnings.push(`忽略用户配置 ${path}：${(error as Error).message}`);
+    warnings.push(new UserError('configIgnored', { path, reason: (error as Error).message }));
     return { config: emptyConfig(), warnings };
   }
 }

@@ -152,7 +152,7 @@ describe('resolveConfig', () => {
       env: envWith({ 'cache-pricing.json': { fetchedAt: 1, text: '{"version":1}' } }),
     });
     expect(config.providers[0]?.defaultModel).toBe('deepseek-flash');
-    expect(config.warnings.join('\n')).toMatch(/已缓存的价目表不可用/);
+    expect(config.warnings.map((warning) => warning.message).join('\n')).toMatch(/已缓存的价目表不可用/);
   });
 
   it('keeps running when the user file is broken, and says so', async () => {
@@ -160,7 +160,7 @@ describe('resolveConfig', () => {
       noUpdate: true,
       env: envWith({ 'config.json': { version: 1, currency: 'dollars' } }),
     });
-    expect(config.warnings.join('\n')).toMatch(/忽略用户配置/);
+    expect(config.warnings.map((warning) => warning.message).join('\n')).toMatch(/忽略用户配置/);
     expect(config.providers[0]!.find('deepseek-flash')).toBeDefined();
     expect(config.currency).toBeUndefined();
   });

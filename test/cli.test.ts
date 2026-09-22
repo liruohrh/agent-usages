@@ -181,10 +181,10 @@ describe('usage', () => {
     expect(hit.totals.requests).toBe(1);
     const miss = JSON.parse((await cli(['usage', '--json', '-p', 'other'])).stdout) as {
       totals: { requests: number };
-      warnings: string[];
+      warnings: { code: string; message: string }[];
     };
     expect(miss.totals.requests).toBe(0);
-    expect(miss.warnings.join('\n')).toMatch(/没有项目匹配/);
+    expect(miss.warnings.map((warning) => warning.message).join('\n')).toMatch(/没有项目匹配/);
   });
 
   it('filters by session title, trimming whitespace', async () => {
@@ -199,10 +199,10 @@ describe('usage', () => {
   it('keeps a title match exact', async () => {
     const parsed = JSON.parse((await cli(['usage', '--json', '-s', '演示'])).stdout) as {
       totals: { requests: number };
-      warnings: string[];
+      warnings: { code: string; message: string }[];
     };
     expect(parsed.totals.requests).toBe(0);
-    expect(parsed.warnings.join('\n')).toMatch(/找不到会话 "演示"/);
+    expect(parsed.warnings.map((warning) => warning.message).join('\n')).toMatch(/找不到会话 "演示"/);
   });
 
   it('scopes by time range', async () => {

@@ -15,20 +15,26 @@
 import { readFileSync } from 'node:fs';
 
 import { parseDecimal } from '../core/money.ts';
+import { UserError, renderDiagnostic, type ErrorCode, type ErrorParams } from '../i18n/errors.ts';
 import type { BillingBasis, ModelPrice, PeakWindow, PricePeriod, PricingProvider, RateComponent } from '../pricing/contract.ts';
 
 /** Where the shipped configuration lives, relative to this module. */
 const SHIPPED_PATH = new URL('../../config/pricing.json', import.meta.url);
 
 /** A problem found while reading a configuration file. */
-export class ConfigError extends Error {
+export class ConfigError<C extends ErrorCode = ErrorCode> extends UserError<C> {
   /** Dotted path to the offending field, e.g. `providers[0].models[1]`. */
   readonly path: string;
 
-  constructor(path: string, message: string) {
-    super(`${path}: ${message}`);
+  constructor(path: string, code: C, params: ErrorParams<C>) {
+    super(code, params);
     this.name = 'ConfigError';
     this.path = path;
+  }
+
+  /** `path: sentence` — the path first, so a reader can jump straight to the field. */
+  override get message(): string {
+    return `${this.path}: ${renderDiagnostic(this.code, this.params)}`;
   }
 }
 
@@ -38,21 +44,21 @@ const BASES: readonly BillingBasis[] = ['input', 'inputAndCacheWrite', 'cacheRea
 /** Read a value as a plain object. */
 function object(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new ConfigError(path, `应为对象，收到 ${JSON.stringify(value)}`);
+    throw new ConfigError(path, 'configExpectsObject', { value: JSON.stringify(value) });
   }
   return value as Record<string, unknown>;
 }
 
 /** Read a value as an array. */
 function array(value: unknown, path: string): unknown[] {
-  if (!Array.isArray(value)) throw new ConfigError(path, `应为数组，收到 ${JSON.stringify(value)}`);
+  if (!Array.isArray(value)) throw new ConfigError(path, 'configExpectsArray', { value: JSON.stringify(value) });
   return value;
 }
 
 /** Read a required string. */
 function text(value: unknown, path: string): string {
   if (typeof value !== 'string' || value.length === 0) {
-    throw new ConfigError(path, `应为非空字符串，收到 ${JSON.stringify(value)}`);
+    throw new ConfigError(path, 'configNonEmptyString', { value: JSON.stringify(value) });
   }
   return value;
 }
@@ -60,21 +66,21 @@ function text(value: unknown, path: string): string {
 /** Read an optional string. */
 function optionalText(value: unknown, path: string): string | null {
   if (value === null || value === undefined) return null;
-  if (typeof value !== 'string') throw new ConfigError(path, `应为字符串或 null，收到 ${JSON.stringify(value)}`);
+  if (typeof value !== 'string') throw new ConfigError(path, 'configStringOrNull', { value: JSON.stringify(value) });
   return value;
 }
 
 /** Read a required number. */
 function number(value: unknown, path: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new ConfigError(path, `应为数字，收到 ${JSON.stringify(value)}`);
+    throw new ConfigError(path, 'configExpectsNumber', { value: JSON.stringify(value) });
   }
   return value;
 }
 
 /** Read a required boolean. */
 function boolean(value: unknown, path: string): boolean {
-  if (typeof value !== 'boolean') throw new ConfigError(path, `应为布尔值，收到 ${JSON.stringify(value)}`);
+  if (typeof value !== 'boolean') throw new ConfigError(path, 'configExpectsBoolean', { value: JSON.stringify(value) });
   return value;
 }
 
@@ -96,14 +102,14 @@ function stamped(value: unknown, path: string): Stamped {
   const raw = text(value, path);
   const match = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.exec(raw);
   if (match === null) {
-    throw new ConfigError(path, `应为带偏移的 ISO 时间（如 2026-09-10T12:00:00+08:00），收到 ${JSON.stringify(raw)}`);
+    throw new ConfigError(path, 'configIsoWithOffset', { value: JSON.stringify(raw) });
   }
   const parsed = Date.parse(raw);
-  if (Number.isNaN(parsed)) throw new ConfigError(path, `不是有效时间：${JSON.stringify(raw)}`);
+  if (Number.isNaN(parsed)) throw new ConfigError(path, 'configInvalidInstant', { value: JSON.stringify(raw) });
   const zone = match[1] as string;
   const utcOffset =
     zone === 'Z' ? 0 : (zone.startsWith('-') ? -1 : 1) * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(4, 6)));
-  if (Math.abs(utcOffset) > 14 * 60) throw new ConfigError(path, `偏移超出 ±14:00：${JSON.stringify(raw)}`);
+  if (Math.abs(utcOffset) > 14 * 60) throw new ConfigError(path, 'configOffsetTooLarge', { value: JSON.stringify(raw) });
   return { instant: parsed, utcOffset };
 }
 
@@ -113,16 +119,16 @@ function component(value: unknown, path: string): RateComponent {
   const id = text(node['id'], `${path}.id`);
   const basis = text(node['basis'], `${path}.basis`);
   if (!BASES.includes(basis as BillingBasis)) {
-    throw new ConfigError(`${path}.basis`, `未知的计费基准 ${JSON.stringify(basis)}（可用：${BASES.join(' / ')}）`);
+    throw new ConfigError(`${path}.basis`, 'configUnknownBasis', { basis: JSON.stringify(basis), known: BASES.join(' / ') });
   }
   const rate = text(node['rate'], `${path}.rate`);
   try {
     parseDecimal(rate);
   } catch {
-    throw new ConfigError(`${path}.rate`, `不是十进制数：${JSON.stringify(rate)}`);
+    throw new ConfigError(`${path}.rate`, 'configNotDecimal', { value: JSON.stringify(rate) });
   }
   const per = number(node['per'], `${path}.per`);
-  if (!Number.isSafeInteger(per) || per <= 0) throw new ConfigError(`${path}.per`, `应为正整数，收到 ${String(per)}`);
+  if (!Number.isSafeInteger(per) || per <= 0) throw new ConfigError(`${path}.per`, 'configPositiveInteger', { value: String(per) });
   return { id, label: text(node['label'], `${path}.label`), basis: basis as BillingBasis, rate, per };
 }
 
@@ -132,14 +138,14 @@ function peakWindow(value: unknown, path: string): PeakWindow {
   const fromHour = number(node['fromHour'], `${path}.fromHour`);
   const toHour = number(node['toHour'], `${path}.toHour`);
   if (fromHour < 0 || fromHour > 23 || toHour < 1 || toHour > 24 || toHour <= fromHour) {
-    throw new ConfigError(path, `时间窗应为 0 ≤ fromHour < toHour ≤ 24，收到 ${fromHour}-${toHour}`);
+    throw new ConfigError(path, 'configWindowHours', { from: fromHour, to: toHour });
   }
   const weekdays = node['weekdays'];
   if (weekdays === null || weekdays === undefined) return { fromHour, toHour, weekdays: null };
   const days = array(weekdays, `${path}.weekdays`).map((day, index) => {
     const value = number(day, `${path}.weekdays[${index}]`);
     if (!Number.isInteger(value) || value < 0 || value > 6) {
-      throw new ConfigError(`${path}.weekdays[${index}]`, `应为 0-6（周日=0），收到 ${String(value)}`);
+      throw new ConfigError(`${path}.weekdays[${index}]`, 'configWeekday', { value: String(value) });
     }
     return value;
   });
@@ -151,19 +157,19 @@ function period(value: unknown, path: string): PricePeriod {
   const node = object(value, path);
   const currency = text(node['currency'], `${path}.currency`);
   if (!/^[A-Z]{3}$/.test(currency)) {
-    throw new ConfigError(`${path}.currency`, `应为三位大写 ISO 代码，收到 ${JSON.stringify(currency)}`);
+    throw new ConfigError(`${path}.currency`, 'configCurrencyCode', { value: JSON.stringify(currency) });
   }
   const peak = node['peak'] === null || node['peak'] === undefined ? null : array(node['peak'], `${path}.peak`).map((entry, index) => component(entry, `${path}.peak[${index}]`));
   const peakWindows = array(node['peakWindows'] ?? [], `${path}.peakWindows`).map((entry, index) => peakWindow(entry, `${path}.peakWindows[${index}]`));
   // A tiered period needs windows to decide the tier, and a flat one must not
   // carry them: otherwise a rate card would silently never apply.
-  if (peak === null && peakWindows.length > 0) throw new ConfigError(`${path}.peakWindows`, '没有高峰价却写了高峰时段');
-  if (peak !== null && peakWindows.length === 0) throw new ConfigError(`${path}.peak`, '有高峰价却没有高峰时段');
+  if (peak === null && peakWindows.length > 0) throw new ConfigError(`${path}.peakWindows`, 'configWindowsWithoutPeak', {});
+  if (peak !== null && peakWindows.length === 0) throw new ConfigError(`${path}.peak`, 'configPeakWithoutWindows', {});
   const from = stamped(node['from'], `${path}.from`);
   const to = node['to'] === null || node['to'] === undefined ? null : stamped(node['to'], `${path}.to`);
-  if (to !== null && to.instant <= from.instant) throw new ConfigError(`${path}.to`, '结束时间必须晚于开始时间');
+  if (to !== null && to.instant <= from.instant) throw new ConfigError(`${path}.to`, 'configToNotAfterFrom', {});
   const source = text(node['source'], `${path}.source`);
-  if (!/^https?:\/\//.test(source)) throw new ConfigError(`${path}.source`, `应为来源 URL，收到 ${JSON.stringify(source)}`);
+  if (!/^https?:\/\//.test(source)) throw new ConfigError(`${path}.source`, 'configSourceUrl', { value: JSON.stringify(source) });
   return {
     id: text(node['id'], `${path}.id`),
     label: text(node['label'], `${path}.label`),
@@ -192,13 +198,13 @@ function period(value: unknown, path: string): PricePeriod {
  */
 export function checkModelPeriods(entry: ModelPrice, path: string): void {
   const periods = entry.periods;
-  if (periods.length === 0) throw new ConfigError(`${path}.periods`, '至少需要一个价格区间');
+  if (periods.length === 0) throw new ConfigError(`${path}.periods`, 'configNeedsPeriod', {});
   // Ids are unique within a currency, not across them: the yuan and dollar lists
   // name the same windows with the same ids, and only one list is ever priced.
   const ids = new Set<string>();
   for (const entry of periods) {
     const key = `${entry.currency}/${entry.id}`;
-    if (ids.has(key)) throw new ConfigError(`${path}.periods`, `区间 id 重复：${key}`);
+    if (ids.has(key)) throw new ConfigError(`${path}.periods`, 'configDuplicatePeriodId', { key });
     ids.add(key);
   }
   // Each currency is its own history, so contiguity is checked per currency.
@@ -208,17 +214,24 @@ export function checkModelPeriods(entry: ModelPrice, path: string): void {
       const previous = history[index - 1] as PricePeriod;
       const current = history[index] as PricePeriod;
       if (current.from < previous.from) {
-        throw new ConfigError(`${path}.periods`, `${code} 的区间未按时间升序：${previous.id} 在 ${current.id} 之后`);
+        throw new ConfigError(`${path}.periods`, 'configPeriodsUnsorted', {
+          currency: code,
+          previous: previous.id,
+          current: current.id,
+        });
       }
       if (previous.to !== current.from) {
-        throw new ConfigError(
-          `${path}.periods`,
-          `${code} 的区间不连续：${previous.id} 结束于 ${new Date(previous.to ?? 0).toISOString()}，${current.id} 开始于 ${new Date(current.from).toISOString()}`,
-        );
+        throw new ConfigError(`${path}.periods`, 'configPeriodsDiscontinuous', {
+          currency: code,
+          previous: previous.id,
+          previousTo: new Date(previous.to ?? 0).toISOString(),
+          current: current.id,
+          currentFrom: new Date(current.from).toISOString(),
+        });
       }
     }
     const last = history[history.length - 1] as PricePeriod;
-    if (last.to !== null) throw new ConfigError(`${path}.periods`, `${code} 的最后一段 ${last.id} 没有结束时间，之后的时间将无法计价`);
+    if (last.to !== null) throw new ConfigError(`${path}.periods`, 'configNoOpenEnd', { currency: code, id: last.id });
   }
 }
 
@@ -228,11 +241,11 @@ export function checkModelPeriods(entry: ModelPrice, path: string): void {
  * @throws {ConfigError} with the path of the first problem.
  */
 export function validateProviders(providers: readonly ProviderConfig[]): void {
-  if (providers.length === 0) throw new ConfigError('providers', '至少需要一个计价来源');
+  if (providers.length === 0) throw new ConfigError('providers', 'configNeedsProvider', {});
   providers.forEach((entry, index) => {
-    if (entry.models.length === 0) throw new ConfigError(`providers[${index}].models`, '至少需要一个模型');
+    if (entry.models.length === 0) throw new ConfigError(`providers[${index}].models`, 'configNeedsModel', {});
     if (entry.defaultModel !== null && !entry.models.some((model) => model.model === entry.defaultModel)) {
-      throw new ConfigError(`providers[${index}].defaultModel`, `默认模型 ${entry.defaultModel} 不在模型列表里`);
+      throw new ConfigError(`providers[${index}].defaultModel`, 'configDefaultModelMissing', { model: entry.defaultModel });
     }
     entry.models.forEach((model, at) => {
       checkModelPeriods(model, `providers[${index}].models[${at}]`);
@@ -284,16 +297,16 @@ export interface PricingConfig {
 export function parsePricingConfig(value: unknown): PricingConfig {
   const document = object(typeof value === 'string' ? JSON.parse(value) : value, 'config/pricing.json');
   const version = number(document['version'], 'version');
-  if (version !== 1) throw new ConfigError('version', `只认识版本 1，收到 ${String(version)}`);
+  if (version !== 1) throw new ConfigError('version', 'configUnknownVersion', { version: String(version) });
   const providers = array(document['providers'], 'providers').map((entry, index) => {
     const node = object(entry, `providers[${index}]`);
     const models = array(node['models'], `providers[${index}].models`).map((model, at) =>
       modelPrice(model, `providers[${index}].models[${at}]`),
     );
-    if (models.length === 0) throw new ConfigError(`providers[${index}].models`, '至少需要一个模型');
+    if (models.length === 0) throw new ConfigError(`providers[${index}].models`, 'configNeedsModel', {});
     const defaultModel = optionalText(node['defaultModel'], `providers[${index}].defaultModel`);
     if (defaultModel !== null && !models.some((entry) => entry.model === defaultModel)) {
-      throw new ConfigError(`providers[${index}].defaultModel`, `默认模型 ${defaultModel} 不在模型列表里`);
+      throw new ConfigError(`providers[${index}].defaultModel`, 'configDefaultModelMissing', { model: defaultModel });
     }
     return {
       id: text(node['id'], `providers[${index}].id`),
@@ -302,7 +315,7 @@ export function parsePricingConfig(value: unknown): PricingConfig {
       models,
     };
   });
-  if (providers.length === 0) throw new ConfigError('providers', '至少需要一个计价来源');
+  if (providers.length === 0) throw new ConfigError('providers', 'configNeedsProvider', {});
   return { version, updatedAt: text(document['updatedAt'], 'updatedAt'), note: optionalText(document['note'], 'note'), providers };
 }
 

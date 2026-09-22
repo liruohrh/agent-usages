@@ -164,4 +164,85 @@ export const en: Messages = {
     span: (latest: string, earliest: string) => `last ${latest}  first ${earliest}`,
     subagentCount: (count: string) => count,
   },
+
+  errors: {
+    configExpectsObject: (p: { value: string }) => `expected an object, got ${p.value}`,
+    configExpectsArray: (p: { value: string }) => `expected an array, got ${p.value}`,
+    configNonEmptyString: (p: { value: string }) => `expected a non-empty string, got ${p.value}`,
+    configStringOrNull: (p: { value: string }) => `expected a string or null, got ${p.value}`,
+    configExpectsNumber: (p: { value: string }) => `expected a number, got ${p.value}`,
+    configExpectsBoolean: (p: { value: string }) => `expected a boolean, got ${p.value}`,
+    configIsoWithOffset: (p: { value: string }) =>
+      `expected an ISO datetime with an offset (e.g. 2026-09-10T12:00:00+08:00), got ${p.value}`,
+    configInvalidInstant: (p: { value: string }) => `not a valid instant: ${p.value}`,
+    configOffsetTooLarge: (p: { value: string }) => `offset beyond ±14:00: ${p.value}`,
+    configUnknownBasis: (p: { basis: string; known: string }) => `unknown billing basis ${p.basis} (available: ${p.known})`,
+    configNotDecimal: (p: { value: string }) => `not a decimal number: ${p.value}`,
+    configPositiveInteger: (p: { value: string }) => `expected a positive integer, got ${p.value}`,
+    configWindowHours: (p: { from: number; to: number }) =>
+      `a window must satisfy 0 ≤ fromHour < toHour ≤ 24, got ${p.from}-${p.to}`,
+    configWeekday: (p: { value: string }) => `expected 0-6 (Sunday = 0), got ${p.value}`,
+    configPeakWithoutWindows: 'a peak rate card without peak hours',
+    configWindowsWithoutPeak: 'peak hours without a peak rate card',
+    configToNotAfterFrom: 'the end must be later than the start',
+    configSourceUrl: (p: { value: string }) => `expected a source URL, got ${p.value}`,
+    configHttpsUrl: (p: { value: string }) => `expected an https URL, got ${p.value}`,
+    configCurrencyCode: (p: { value: string }) => `expected a three-letter uppercase ISO code, got ${p.value}`,
+    configDuplicatePeriodId: (p: { key: string }) => `duplicate period id: ${p.key}`,
+    configPeriodsUnsorted: (p: { currency: string; previous: string; current: string }) =>
+      `${p.currency} periods are out of order: ${p.previous} comes after ${p.current}`,
+    configPeriodsDiscontinuous: (p: {
+      currency: string;
+      previous: string;
+      previousTo: string;
+      current: string;
+      currentFrom: string;
+    }) => `${p.currency} periods are not contiguous: ${p.previous} ends at ${p.previousTo}, ${p.current} starts at ${p.currentFrom}`,
+    configNoOpenEnd: (p: { currency: string; id: string }) =>
+      `${p.currency} ends with ${p.id}, which has no end; nothing after it could be priced`,
+    configNeedsPeriod: 'at least one price period is required',
+    configNeedsModel: 'at least one model is required',
+    configNeedsProvider: 'at least one pricing provider is required',
+    configNeedsRateSource: 'at least one rate source is required',
+    configDuplicateSourceId: 'rate source ids must be unique',
+    configUnknownSourceKind: (p: { kind: string }) => `unknown rate source kind ${p.kind} (available: frankfurter / er-api)`,
+    configDefaultModelMissing: (p: { model: string }) => `default model ${p.model} is not in the model list`,
+    configUnknownVersion: (p: { version: string }) => `only version 1 is understood, got ${p.version}`,
+    configBaseMissing: (p: { base: string }) => `no rate for the base currency ${p.base} (it should be "1")`,
+    configBaseNotOne: (p: { value: string }) => `the base currency's rate should be "1", got ${p.value}`,
+    configRateNotPositive: (p: { value: string }) => `a rate must be positive, got ${p.value}`,
+    configUnknownLanguage: (p: { known: string; value: string }) => `expected one of ${p.known}, got ${p.value}`,
+    configUnknownRateMode: (p: { value: string }) => `expected latest or historical, got ${p.value}`,
+    configRateSourceId: (p: { value: string }) => `expected a rate source id, got ${p.value}`,
+    configIgnored: (p: { path: string; reason: string }) => `ignoring user config ${p.path}: ${p.reason}`,
+    cachedPricesUnusable: (p: { reason: string }) => `the cached price list is unusable; falling back to the shipped one: ${p.reason}`,
+    cachedRatesUnusable: (p: { reason: string }) => `the cached rate table is unusable; falling back to the shipped one: ${p.reason}`,
+    mergeFailed: (p: { reason: string }) => `merging the user's prices with the shipped table failed; using the shipped table: ${p.reason}`,
+    storeNotJson: (p: { reason: string }) => `not valid JSON: ${p.reason}`,
+    /* ---- messages that arrive already written ---- */
+    adapterMessage: (p: { message: string }) => p.message,
+
+    /* ---- report warnings ---- */
+    noProjectMatch: (p: { selector: string }) => `no project matches "${p.selector}"`,
+    noSessionMatch: (p: { selector: string }) => `no session matches "${p.selector}"`,
+    sessionNotFound: (p: { selector: string }) => `no session found for "${p.selector}"`,
+    sessionAmbiguous: (p: { selector: string; count: number; candidates: string }) =>
+      `"${p.selector}" has ${p.count} candidates; use a longer prefix: ${p.candidates}`,
+    noUsageInRange: 'no usage matches the current filters',
+    unpricedRecords: (p: { count: string }) =>
+      `${p.count} records have no usable price and are not counted in the cost (see \`price\` for the models on file)`,
+    projectionMismatch: (p: { diffs: string }) => `session usage disagrees with the projection cache: ${p.diffs}`,
+    /* ---- update status ---- */
+    updatePricesChecked: 'already checked the price list today',
+    updateRatesChecked: 'already checked the rates today',
+    updatePricesUnchanged: 'the price list has not changed',
+    updatePricesUpdated: (p: { date: string }) => `price list updated (file dated ${p.date})`,
+    updatePricesOffline: 'could not fetch the price list (offline or timed out); keeping what we have',
+    updatePricesHttp: (p: { status: string }) => `could not fetch the price list: HTTP ${p.status}`,
+    updatePricesUnusable: (p: { reason: string }) => `the fetched price list is unusable and was ignored: ${p.reason}`,
+    updateRatesUpdated: (p: { source: string; date: string }) => `rates updated (${p.source}, ${p.date})`,
+    updateRatesFailed: 'every rate source failed; keeping the rates we have',
+    updatePricesDisabled: 'automatic price updates are off',
+    updateRatesDisabled: 'automatic rate updates are off',
+  },
 };

@@ -26,6 +26,7 @@ import {
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
 import { resolveLanguage, setLanguage, t } from './i18n/index.ts';
+import { renderDiagnostic, type Warning } from './i18n/errors.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -88,7 +89,7 @@ interface Loaded {
   /** Symbol to print, empty when the user named no currency. */
   symbol: string;
   /** Anything the configuration layer wants the user to know. */
-  warnings: string[];
+  warnings: Warning[];
 }
 
 /** Validate `--currency-rate`: a positive decimal, taken literally. */
@@ -453,7 +454,7 @@ function runCheckConfig(json: boolean): void {
     }
   }
   const user = readUserConfig();
-  for (const warning of user.warnings) results.push({ file: userConfigPath(), ok: false, detail: warning });
+  for (const warning of user.warnings) results.push({ file: userConfigPath(), ok: false, detail: warning.message });
   if (json) {
     process.stdout.write(`${JSON.stringify({ results }, null, 2)}\n`);
   } else {

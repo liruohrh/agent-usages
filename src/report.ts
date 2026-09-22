@@ -12,6 +12,7 @@
 import { addBuckets, emptyBuckets } from './core/buckets.ts';
 import type { CostTotals, ProjectRecord, SessionRecord, TokenTotals, UsageDataset, UsageRecord } from './core/types.ts';
 import { addCostTotals, addSummaries, costOf, zeroCostTotals, type CostSummary } from './accounting.ts';
+import { UserError, rawWarning, type Warning } from './i18n/errors.ts';
 import type { PricingEngine, DisplayReason } from './pricing/index.ts';
 import { inRange, type TimeRange } from './timerange.ts';
 
@@ -292,7 +293,7 @@ export interface UsageResult {
   /** Per-project rows. */
   projects: ProjectReport[];
   /** Non-fatal problems worth showing. */
-  warnings: string[];
+  warnings: Warning[];
 }
 
 /** Glob matching where `*` matches any run of characters and `?` matches one. */
@@ -388,9 +389,9 @@ export function collectDescendantIds(dataset: UsageDataset, sessionId: string): 
 export function resolveSessionSelectors(
   sessions: readonly SessionRecord[],
   selectors: readonly string[],
-): { ids: Set<string>; errors: string[] } {
+): { ids: Set<string>; errors: Warning[] } {
   const ids = new Set<string>();
-  const errors: string[] = [];
+  const errors: Warning[] = [];
   for (const selector of selectors) {
     const trimmed = selector.trim();
     if (trimmed.length === 0) continue;
@@ -400,7 +401,7 @@ export function resolveSessionSelectors(
           .filter((key) => key.length > 0)
           .some((key) => matchesAny(key, [trimmed])),
       );
-      if (matched.length === 0) errors.push(`没有会话匹配 "${trimmed}"`);
+      if (matched.length === 0) errors.push(new UserError('noSessionMatch', { selector: trimmed }));
       for (const session of matched) ids.add(session.id);
       continue;
     }
@@ -418,10 +419,14 @@ export function resolveSessionSelectors(
       sessionIdKeys(session).some((key) => key.toLowerCase().startsWith(lowered)),
     );
     if (byPrefix.length === 0) {
-      errors.push(`找不到会话 "${trimmed}"`);
+      errors.push(new UserError('sessionNotFound', { selector: trimmed }));
     } else if (byPrefix.length > 1) {
       errors.push(
-        `会话 "${trimmed}" 有 ${byPrefix.length} 个候选，请提供更长的前缀：${byPrefix.slice(0, 5).map((session) => session.id).join('、')}`,
+        new UserError('sessionAmbiguous', {
+          selector: trimmed,
+          count: byPrefix.length,
+          candidates: byPrefix.slice(0, 5).map((session) => session.id).join('、'),
+        }),
       );
     } else {
       ids.add((byPrefix[0] as SessionRecord).id);
@@ -434,14 +439,14 @@ export function resolveSessionSelectors(
 export function resolveProjectSelectors(
   projects: readonly ProjectRecord[],
   selectors: readonly string[],
-): { keys: Set<string>; errors: string[] } {
+): { keys: Set<string>; errors: Warning[] } {
   const keys = new Set<string>();
-  const errors: string[] = [];
+  const errors: Warning[] = [];
   for (const selector of selectors) {
     const trimmed = selector.trim();
     if (trimmed.length === 0) continue;
     const matched = projects.filter((project) => projectKeys(project).some((key) => matchesAny(key, [trimmed])));
-    if (matched.length === 0) errors.push(`没有项目匹配 "${trimmed}"`);
+    if (matched.length === 0) errors.push(new UserError('noProjectMatch', { selector: trimmed }));
     for (const project of matched) keys.add(project.id);
   }
   return { keys, errors };
@@ -711,7 +716,9 @@ export interface ReportContext {
  */
 export function runQuery(dataset: UsageDataset, query: UsageQuery, context: ReportContext): UsageResult {
   const { engine } = context;
-  const warnings = [...dataset.warnings];
+  // Adapter diagnostics arrive as sentences; they keep their wording until the
+  // adapters themselves report codes.
+  const warnings: Warning[] = dataset.warnings.map((message) => rawWarning(message));
   const projectSelection = query.projects === undefined || query.projects.length === 0
     ? undefined
     : resolveProjectSelectors(dataset.projects, query.projects);
@@ -916,9 +923,9 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
     projects: projectRows,
     warnings,
   };
-  if (result.requests === 0) warnings.push('当前筛选条件下没有任何用量记录');
+  if (result.requests === 0) warnings.push(new UserError('noUsageInRange', {}));
   if (result.unpriced > 0) {
-    warnings.push(`有 ${result.unpriced} 条记录没有可用价格，未计入费用（可用 \`price\` 查看已收录的模型）`);
+    warnings.push(new UserError('unpricedRecords', { count: String(result.unpriced) }));
   }
   return result;
 }
@@ -1020,7 +1027,7 @@ export interface SessionListResult {
   /** Sessions listed. */
   totalSessions: number;
   /** Non-fatal problems worth showing. */
-  warnings: string[];
+  warnings: Warning[];
 }
 
 /** Filters accepted by {@link listSessions}. */
@@ -1055,7 +1062,9 @@ function sortInstantOf(session: SessionListEntry): number {
  * @returns the ordered inventory.
  */
 export function listSessions(dataset: UsageDataset, filters: SessionListFilters = {}): SessionListResult {
-  const warnings = [...dataset.warnings];
+  // Adapter diagnostics arrive as sentences; they keep their wording until the
+  // adapters themselves report codes.
+  const warnings: Warning[] = dataset.warnings.map((message) => rawWarning(message));
   const includeSubagents = filters.includeSubagents ?? false;
   const projectSelection = filters.projects === undefined || filters.projects.length === 0
     ? undefined

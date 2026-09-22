@@ -119,7 +119,7 @@ describe('readUserConfig', () => {
   it('warns and ignores a broken file instead of failing the command', () => {
     const { config, warnings } = readUserConfig(withConfig({ version: 1, currency: 'dollars' }));
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatch(/忽略用户配置.*currency/);
+    expect(warnings[0]?.message).toMatch(/忽略用户配置.*currency/);
     expect(config.currency).toBeUndefined();
     expect(config.updates).toEqual({ pricing: true, rates: false });
   });
@@ -129,7 +129,7 @@ describe('readUserConfig', () => {
     mkdirSync(join(dir, 'agent-usages'), { recursive: true });
     writeFileSync(join(dir, 'agent-usages', 'config.json'), '{oops', 'utf8');
     const { warnings } = readUserConfig({ ...process.env, XDG_CONFIG_HOME: dir });
-    expect(warnings[0]).toMatch(/不是合法 JSON/);
+    expect(warnings[0]?.message).toMatch(/不是合法 JSON/);
   });
 });
 
