@@ -26,7 +26,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
 import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRecord } from '../../core/types.ts';
@@ -90,6 +90,10 @@ interface ScannedSession {
   title: string | null;
   /** One record per billed assistant message, in file order. */
   records: UsageRecord[];
+  /** Message ids behind {@link records}, in the same order. */
+  messageIds: string[];
+  /** Absolute path of the session this one was forked from, when it was. */
+  parentSessionPath: string | null;
 }
 
 /**
@@ -109,7 +113,9 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
   let cwd: string | null = null;
   let createdAt: number | null = null;
   let title: string | null = null;
+  let parentSessionPath: string | null = null;
   const records: UsageRecord[] = [];
+  const messageIds: string[] = [];
   let line = 0;
   for (const raw of text.split('\n')) {
     if (raw.trim().length === 0) continue;
@@ -126,6 +132,12 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
       id ??= asString(event['id']);
       cwd ??= asString(event['cwd']) ?? null;
       createdAt ??= asInstant(event['timestamp']);
+      // A forked session copies its source's messages verbatim; the path is how
+      // pi says where they came from.
+      const origin = asString(event['parentSession']);
+      if (origin !== null && origin !== undefined) {
+        parentSessionPath = isAbsolute(origin) ? origin : join(dirname(path), origin);
+      }
       continue;
     }
     if (type === 'session_info') {
@@ -141,10 +153,12 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
     if (asString(message['role']) !== 'assistant') continue;
     const model = asString(message['model']) ?? 'unknown';
     const provider = asString(message['provider']);
+    const messageId = asString(event['id']) ?? `line${line}`;
+    messageIds.push(messageId);
     records.push({
       // A message id is unique inside its file (the log is a parent chain), and
       // the session id keeps two files from ever colliding.
-      id: `${id ?? 'session'}:msg:${asString(event['id']) ?? `line${line}`}`,
+      id: `${id ?? 'session'}:msg:${messageId}`,
       time,
       model,
       modelLabel: provider === undefined ? model : `${provider} / ${model}`,
@@ -152,7 +166,7 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
     });
   }
   if (id === undefined) return undefined;
-  return { id, cwd, createdAt, title, records };
+  return { id, cwd, createdAt, title, records, messageIds, parentSessionPath };
 }
 
 /** Where pi keeps a session's subagent runs: the file's own name, sans suffix. */
@@ -196,6 +210,8 @@ interface WalkedSession {
   session: ScannedSession;
   parentId: string | null;
   depth: number;
+  /** A fork of another session: a continuation, not a subagent it spawned. */
+  continuation: boolean;
 }
 
 /** Walk one session file and everything it spawned. */
@@ -207,14 +223,32 @@ async function walk(
   warnings: Warning[],
   source: string,
 ): Promise<void> {
-  const session = await scanSession(file);
+  let session = await scanSession(file);
   if (session === undefined) {
     warnings.push(
       new UserError('piSessionUnreadable', { path: relative(source, file).split(sep).join('/') }),
     );
     return;
   }
-  found.push({ session, parentId, depth });
+  // A fork copies the source's messages (same ids) and gives no boundary, so the
+  // inherited records are exactly the ones the source already billed. Dropping
+  // them keeps a fork from paying twice for the same tokens; when the source is
+  // gone they are kept, because then this file is the only copy left.
+  let continuation = false;
+  let forkParentId: string | null = null;
+  if (session.parentSessionPath !== null) {
+    const origin = await scanSession(session.parentSessionPath);
+    if (origin !== undefined) {
+      const scanned = session;
+      const inherited = new Set(origin.messageIds);
+      const kept = scanned.records.filter((_, index) => !inherited.has(scanned.messageIds[index] as string));
+      const keptIds = scanned.messageIds.filter((messageId) => !inherited.has(messageId));
+      session = { ...scanned, records: kept, messageIds: keptIds };
+      forkParentId = origin.id;
+      continuation = true;
+    }
+  }
+  found.push({ session, parentId: forkParentId ?? parentId, depth, continuation });
   for (const run of await childRuns(file)) {
     await walk(run, session.id, depth + 1, found, warnings, source);
   }
@@ -236,7 +270,7 @@ function sessionsRootOf(source: string, env: NodeJS.ProcessEnv): string {
 
 /** Assemble one neutral session record from a walk result. */
 function buildSession(walked: WalkedSession): SessionRecord {
-  const { session, parentId, depth } = walked;
+  const { session, parentId, depth, continuation } = walked;
   const records = [...session.records].sort((left, right) =>
     left.time === right.time ? 0 : left.time - right.time,
   );
@@ -248,7 +282,7 @@ function buildSession(walked: WalkedSession): SessionRecord {
     records,
     parentId,
     depth,
-    isSubagent: depth > 0,
+    isSubagent: depth > 0 && !continuation,
     archived: false,
     childIds: [],
     parentKnown: false,
@@ -298,7 +332,9 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     if (session.parentId === null) continue;
     const parent = byId.get(session.parentId);
     if (parent === undefined) continue;
-    parent.childIds.push(session.id);
+    // Only a session the parent *spawned* is one of its children; a fork is a
+    // continuation of it, and folding it in as a subagent would be wrong.
+    if (session.isSubagent) parent.childIds.push(session.id);
     session.parentKnown = true;
   }
   for (const session of sessions) session.childIds.sort();

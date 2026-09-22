@@ -49,6 +49,10 @@ sessions/<项目>/2026-08-02T10-35-20-835Z_019fc20a-…/d3131b6a/run-0/session.j
 
 pi 用 `session_info` 事件给会话命名，并且会随进展改名，所以取**最后一个** `name`；从未命名的会话显示 `(无标题)`。
 
+## 续用与 fork
+
+`pi --fork <会话>` 会把源会话的消息**逐条复制**（连 `id` 一起），且不像 DSH 那样给 `seedLength` 边界；但 fork 头部写着来源 `parentSession`（源会话文件的绝对路径）。因此工具按「源会话已计费的 message id 集合」精确剔除继承段：fork 只计它自己新产生的请求；源文件已被删除时全部保留。这类会话按**续用**处理——`parentId` 指向源会话、不算子代理、也不进入源的 `childIds`。
+
 ## 与 DSH 的关系
 
 `~/.dsh` 里会出现同名 uuid 的 `pi-<uuid>/session.jsonl.zstd`（DSH 格式的镜像），**它们没有 usage**——pi 的用量在 pi 自己的 JSONL 里。两个适配器因此互不重叠：`--agent dsh` 看到的是镜像的空账，`--agent pi` 才是真实用量。

@@ -113,6 +113,34 @@ describe('reading a pi home', () => {
     expect(data.warnings).toEqual([]);
   });
 
+  it('drops the messages a fork copied from its source', async () => {
+    const project = join(home, 'sessions', '--home-user-ws-demo--');
+    const forkId = '019fc20a-e183-76cd-af73-8a96cf233659';
+    const fork = [
+      JSON.stringify({
+        type: 'session',
+        version: 3,
+        id: forkId,
+        timestamp: '2026-08-02T11:00:00.000Z',
+        cwd: '/home/user/ws/demo',
+        parentSession: join(project, `${PARENT_STEM}.jsonl`),
+      }),
+      message('m1', 'h1', '2026-08-02T10:36:01.000Z', 1_000_000, 100),
+      message('m2', 'm1', '2026-08-02T10:37:02.000Z', 2_000_000, 200),
+      message('m3', 'm2', '2026-08-02T11:00:01.000Z', 300_000, 30),
+    ].join('\n');
+    await writeFile(join(project, `2026-08-02T11-00-00-000Z_${forkId}.jsonl`), `${fork}\n`);
+
+    const data = await piAgent.load({ home });
+    const forked = data.sessions.find((session) => session.id === forkId);
+    const parent = data.sessions.find((session) => session.id === PARENT_ID);
+    // Only the request the fork produced itself is billed here.
+    expect(forked?.records.map((record) => record.id)).toEqual([`${forkId}:msg:m3`]);
+    expect(forked?.parentId).toBe(PARENT_ID);
+    expect(forked?.isSubagent).toBe(false);
+    expect(parent?.childIds).toEqual([CHILD_ID]);
+  });
+
   it('recognises a pi home and honours its agent-directory variable', async () => {
     expect(await piAgent.hasData(home)).toBe(true);
     expect(await piAgent.hasData(join(home, 'nope'))).toBe(false);
