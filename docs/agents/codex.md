@@ -33,6 +33,26 @@
 - CLI 打印的 `tokens used` 是 `total − cached`，不是账；`state_5.sqlite.threads.tokens_used` 也只是同一笔账的线程级累计。
 - 模型取 `turn_context.model`（会话中途换模型时按当前值计）。
 
+## 已知盲区：`/btw`
+
+Codex 0.155.1 实测：`/btw <问题>` **不写 rollout**，那一轮的 token 磁盘上不存在。
+
+- 输入只在 `~/.codex/history.jsonl`（`session_id` / `ts` / `text`，**无用量字段**）；
+- 全天 rollout 目录里**没有**该 thread 的 `rollout-*.jsonl`（按 id 与正文 grep 都是 0 命中）；
+- 内部日志 `~/.codex/logs_2.sqlite` 只留下 `app_server.request{otel.name="thread/fork"} → session_loop{thread_id=…}: op: TurnInput` 这样的轨迹，**整表没有 token 数字**。
+
+机制上它是「fork 一个临时 thread 跑一轮」，与 Claude Code 的 `/btw` 属同一类盲区：本工具（以及任何基于 rollout 的统计）都无法计入。若你要精确统计，只能避免用 `/btw` 提问，或向 Codex 侧反馈让临时 thread 也落盘。
+
+## 已知坑：`multi_agent_version` 记为 `v2` 时子 agent 收不到任务
+
+详见 [`.agents/drafts/codex-subagent-task-not-delivered.md`](../../.agents/drafts/codex-subagent-task-not-delivered.md)（本机调查记录）：
+
+- `~/.codex/models.json` 每个模型下的 `multi_agent_version` 若为 `v2`，`spawn_agent` 的**任务正文送不进子会话**（子 agent 只看到 AGENTS.md 与环境上下文，回一句「没有收到任务」）；
+- 改成 `v1` 即可，但配置在**进程启动时读一次**，必须重启 Codex（或开新会话）才生效；
+- 实测：02:17:43 的父会话仍是 v2（子 agent 收不到任务）；02:22:25 改 models.json、02:26:56 重启后的会话读到 v1，同一测试通过，任务正文送达。
+
+这条与我们的适配器无关（是 Codex 侧行为），但会影响你观察到的子 agent 数据：v2 期间的子会话虽然落盘、也有用量，但内容是空的。
+
 ## fork / resume
 
 - **`codex exec fork`**：新建 rollout 并带 `forked_from_id`、`history_base.end_byte_offset`；它**不复制父的事件，却继承父的累计**（实测 fork 内唯一一次调用报 `total=29,376 = 19,530(父) + 9,846(自己)`）。**按增量求和天然不会重复计费**——继承的那部分根本没有对应事件。实测 8 个 rollout：Σ增量 = 406,582（真值），而 Σ末次累计 = 426,112，差额 19,530 正是继承量；本工具取前者，与独立核对**逐位相等**。
