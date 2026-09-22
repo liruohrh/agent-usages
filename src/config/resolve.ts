@@ -8,7 +8,7 @@
  * degrades to the one below it instead of failing the run.
  */
 
-import { UserError, type Warning } from '../i18n/errors.ts';
+import { UserError, renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import type { Language } from '../i18n/index.ts';
 import type { PricingProvider } from '../pricing/contract.ts';
 import type { RateTable } from '../pricing/currency.ts';
@@ -126,7 +126,10 @@ export async function resolveConfig(options: ResolveOptions = {}): Promise<Resol
     rateTable: {
       base: rates.base,
       rates: rates.table,
-      provenance: { source: `内置汇率表 ${rates.source}`, date: rates.updatedAt },
+      provenance: {
+        source: renderDiagnostic('rateSourceBuiltin', { source: rates.source }),
+        date: rates.updatedAt,
+      },
     },
     rateSources: rates.sources,
     language: user.config.language,

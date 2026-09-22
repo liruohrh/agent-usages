@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_LANGUAGE, LANGUAGES, language, languageOf, resolveLanguage, setLanguage, t } from '../../src/i18n/index.ts';
 import { ConfigError } from '../../src/config/pricing.ts';
-import { UserError, rawWarning } from '../../src/i18n/errors.ts';
+import { UserError } from '../../src/i18n/errors.ts';
 import { zh } from '../../src/i18n/zh.ts';
 import { en } from '../../src/i18n/en.ts';
 
@@ -121,8 +121,11 @@ describe('diagnostics', () => {
     expect(error.path).toBe('providers[0].models[1]');
   });
 
-  it('passes an adapter sentence through unchanged', () => {
+  it('renders an adapter diagnostic in the active language too', () => {
+    const warning = new UserError('dshReadFailed', { path: '/x/session.jsonl', reason: 'boom' });
+    setLanguage('zh');
+    expect(warning.message).toBe('无法读取 /x/session.jsonl: boom');
     setLanguage('en');
-    expect(rawWarning('会话日志损坏').message).toBe('会话日志损坏');
+    expect(warning.message).toBe('could not read /x/session.jsonl: boom');
   });
 });

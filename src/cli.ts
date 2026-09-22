@@ -95,7 +95,7 @@ interface Loaded {
 /** Validate `--currency-rate`: a positive decimal, taken literally. */
 function parseRateOption(value: string): string {
   if (!/^\d+(\.\d+)?$/.test(value.trim()) || Number(value) <= 0) {
-    throw new InvalidArgumentError(`汇率必须是正的十进制数，收到 ${JSON.stringify(value)}`);
+    throw new InvalidArgumentError(renderDiagnostic('rateNotPositiveDecimal', { value: JSON.stringify(value) }));
   }
   return value.trim();
 }
@@ -577,8 +577,8 @@ export function buildProgram(): Command {
       .command('list')
       .description(t().help.sessionList)
       .option('--subagents', t().help.sessionListSubagents)
-      .option('-p, --project-filter <selector>', '只列出指定项目（可重复）', collect)
-      .option('-s, --session-filter <selector>', '只列出指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；可重复）', collect),
+      .option('-p, --project-filter <selector>', t().help.sessionListProjectFilter, collect)
+      .option('-s, --session-filter <selector>', t().help.sessionListSessionFilter, collect),
   ).action(async (options: SessionListOptions, command: Command) => {
     await runSessionList(withGlobals(command, options));
   });

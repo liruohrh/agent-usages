@@ -9,6 +9,7 @@
  */
 
 import { UserError, type Warning } from '../i18n/errors.ts';
+import { t } from '../i18n/index.ts';
 import { LANGUAGES, type Language } from '../i18n/index.ts';
 import type { PricePeriod } from '../pricing/contract.ts';
 import { ConfigError, parsePricingConfig, type ProviderConfig } from './pricing.ts';
@@ -211,7 +212,7 @@ function tile(base: readonly PricePeriod[], override: readonly PricePeriod[]): P
       merged.push(
         chosen.from === from
           ? { ...chosen }
-          : { ...chosen, id: `${chosen.id}#${from}`, from, to: null, note: `${chosen.note}（与用户配置合并出的片段）` },
+          : { ...chosen, id: `${chosen.id}#${from}`, from, to: null, note: `${chosen.note}${t().errors.mergedFragment}` },
       );
       continue;
     }
@@ -220,7 +221,7 @@ function tile(base: readonly PricePeriod[], override: readonly PricePeriod[]): P
     merged.push(
       whole
         ? { ...chosen }
-        : { ...chosen, id: `${chosen.id}#${from}`, from, to: next, note: `${chosen.note}（与用户配置合并出的片段）` },
+        : { ...chosen, id: `${chosen.id}#${from}`, from, to: next, note: `${chosen.note}${t().errors.mergedFragment}` },
     );
   }
   return merged;

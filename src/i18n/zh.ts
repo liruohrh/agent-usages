@@ -168,6 +168,8 @@ export const zh = {
     sessionCommand: '会话相关操作',
     sessionList: '列出所有项目与会话（项目按首个会话时间降序，会话按时间降序）',
     sessionListSubagents: '将子代理单独列出（默认并入其父会话）',
+    sessionListProjectFilter: '只列出指定项目（可重复）',
+    sessionListSessionFilter: '只列出指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；可重复）',
     price: '显示价格表与生效区间（不读取任何数据）',
     priceAll: '列出全部计价来源',
     priceCurrency: '只看某个币种的价格表，如 CNY / USD',
@@ -255,9 +257,6 @@ export const zh = {
     cachedRatesUnusable: (p: { reason: string }) => `已缓存的汇率表不可用，改用随包版本：${p.reason}`,
     mergeFailed: (p: { reason: string }) => `用户价格配置与默认表合并失败，改用默认表：${p.reason}`,
     storeNotJson: (p: { reason: string }) => `不是合法 JSON：${p.reason}`,
-    /* ---- messages that arrive already written ---- */
-    adapterMessage: (p: { message: string }) => p.message,
-
     /* ---- report warnings ---- */
     noProjectMatch: (p: { selector: string }) => `没有项目匹配 "${p.selector}"`,
     noSessionMatch: (p: { selector: string }) => `没有会话匹配 "${p.selector}"`,
@@ -279,6 +278,71 @@ export const zh = {
     updateRatesFailed: '所有汇率源都失败，沿用现有汇率',
     updatePricesDisabled: '价格表自动更新已关闭',
     updateRatesDisabled: '汇率自动更新已关闭',
+    /* ---- time ranges ---- */
+    timeEmpty: '时间不能为空',
+    timeInvalid: (p: { value: string }) => `无效的日期时间: ${p.value}`,
+    timeUnrecognized: (p: { value: string }) =>
+      `无法识别的时间: ${p.value}（支持 2026-09-01、2026-09-01T10:30:00、2026-09-01T10:30:00+08:00）`,
+    rangeTooManyParts: (p: { value: string }) => `无法识别的时间范围: ${p.value}（至多一个 ".."）`,
+    rangeInverted: '时间范围的起始时间不能晚于结束时间',
+    /* ---- exact decimal arithmetic ---- */
+    moneyNotDecimal: (p: { value: string }) => `parseDecimal: 不是合法的十进制字面量: ${p.value}`,
+    moneyTooManyDigits: (p: { value: string }) => `parseDecimal: 小数位超过 9 位: ${p.value}`,
+    moneyTokenNotInteger: (p: { value: string }) => `scalePerMillion: token 数必须是非负安全整数，收到 ${p.value}`,
+    moneyDigitsRange: (p: { value: string }) => `formatDecimal: digits 必须是 0-9 的整数，收到 ${p.value}`,
+    moneyDivideByZero: 'divideDecimal: 除数不能为 0',
+    priceNotDecimal: (p: { value: string }) => `价格: 不是合法的十进制字面量: ${p.value}`,
+    priceTooManyDigits: (p: { value: string }) => `价格: 小数位超过 9 位: ${p.value}`,
+    chargeTokenNotInteger: (p: { value: string }) => `计费: token 数必须是非负安全整数，收到 ${p.value}`,
+    /* ---- currency ---- */
+    rateInvalid: (p: { value: string }) => `汇率必须是非负有限数字，收到 ${p.value}`,
+    rateNotPositiveDecimal: (p: { value: string }) => `汇率必须是正的十进制数，收到 ${p.value}`,
+    rateTableMissing: (p: { base: string; code: string }) => `汇率表（${p.base} 基准）里没有 ${p.code} 的汇率`,
+    rateSourceBuiltin: (p: { source: string }) => `内置汇率表 ${p.source}`,
+    rateSourceManual: '手工指定',
+    rateSourcePublished: '厂商发布价，未折算',
+    rateSeriesSource: 'frankfurter.dev（欧洲央行参考汇率）',
+    seriesDetail: (p: { source: string; from: string; to: string; days: number }) =>
+      `${p.source} ${p.from} ~ ${p.to}（${p.days} 个交易日）`,
+    /* ---- agents and providers ---- */
+    unknownAgent: (p: { id: string; known: string }) => `未知的 agent "${p.id}"；当前支持：${p.known}`,
+    unknownProvider: (p: { id: string; known: string }) => `未知的计价来源 "${p.id}"；当前支持：${p.known}`,
+    multipleAgents: (p: { home: string; named: string }) => `在 ${p.home} 同时匹配到多个 agent（${p.named}），请用 --agent 指定`,
+    noUsageData: (p: { home: string; known: string }) =>
+      `在 ${p.home} 没有找到可统计的用量数据；可用 --agent / --home 指定（当前支持：${p.known}）`,
+    defaultLocation: '默认位置',
+    /* ---- billed components ---- */
+    basisInput: '缓存未命中输入',
+    basisOutput: '输出',
+    basisCacheRead: '缓存命中输入',
+    basisCacheWrite: '缓存写入',
+    basisInputAndCacheWrite: '未命中输入 + 缓存写入',
+    basisPrompt: '全部输入',
+    metricInputMiss: '未命中输入',
+    metricOutput: '输出',
+    metricCacheRead: '缓存命中输入',
+    metricCacheWrite: '缓存写入',
+    metricJoin: '；',
+    /* ---- the DSH adapter ---- */
+    dshReadFailed: (p: { path: string; reason: string }) => `无法读取 ${p.path}: ${p.reason}`,
+    dshLogReadFailed: (p: { path: string; reason: string }) => `无法读取会话日志 ${p.path}: ${p.reason}`,
+    dshHomeNotAbsolute: (p: { value: string }) => `数据目录必须是绝对路径，收到 ${p.value}`,
+    dshHomeUnresolved: '无法确定 DSH 主目录：请设置 DSH_HOME 或用 --home 指定',
+    dshHomeUnresolvedPath: (p: { value: string }) => `DSH 主目录必须是绝对路径，收到 ${p.value}`,
+    dshNoData: (p: { source: string }) =>
+      `在 ${p.source} 下没有找到 DSH 用量数据：sessions/ 下没有会话日志，也没有 storages/session_projcache.json（可用 --home 指定，或设置 DSH_HOME）`,
+    dshSessionHeaderMissing: (p: { path: string }) => `无法在 ${p.path} 中找到会话头（session 事件）`,
+    dshSessionHeaderNoId: (p: { path: string }) => `${p.path} 的会话头缺少 id 字段`,
+    dshSessionNoun: '会话',
+    dshNotes: (): readonly string[] => [
+      '逐请求用量来自 harness 自己写的会话日志：每个 assistant/message 事件都带该步的 usage，因此不需要安装任何插件。',
+      'reasoningTokens 是可选字段：新版 DSH 默认的 messages 协议不带它，此时思考 token 计 0，工具不会估算。',
+      '会话日志是追加写的多帧 zstd；正在写入的会话最后几帧可能读不全，重跑即可补齐。',
+      '会话标题与创建时间优先取 storages/session_projcache.json，子代理关系只在会话日志首帧。',
+      '本工具不读取任何第三方插件的落盘数据。',
+    ],
+    mergedFragment: '（与用户配置合并出的片段）',
+    projectionDiff: (p: { label: string; left: string; right: string }) => `${p.label} 日志 ${p.left} vs 投影缓存 ${p.right}`,
   },
 };
 

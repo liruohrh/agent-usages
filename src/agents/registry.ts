@@ -6,6 +6,8 @@
  * them pick it up automatically.
  */
 
+import { UserError, renderDiagnostic } from '../i18n/errors.ts';
+import { t } from '../i18n/index.ts';
 import type { AgentAdapter } from './contract.ts';
 import { dshAgent } from './dsh/loader.ts';
 
@@ -35,7 +37,7 @@ export function requireAgent(id: string): AgentAdapter {
   const adapter = findAgent(id);
   if (adapter === undefined) {
     const known = AGENT_ADAPTERS.map((candidate) => candidate.id).join('、');
-    throw new Error(`未知的 agent "${id}"；当前支持：${known}`);
+    throw new UserError('unknownAgent', { id, known });
   }
   return adapter;
 }
@@ -69,10 +71,10 @@ export async function resolveAgent(
   if (candidates.length === 1 && only !== undefined) return only;
   if (candidates.length > 1) {
     const named = candidates.map((adapter) => adapter.id).join('、');
-    throw new Error(`在 ${home ?? '默认位置'} 同时匹配到多个 agent（${named}），请用 --agent 指定`);
+    throw new UserError('multipleAgents', { home: home ?? t().errors.defaultLocation, named });
   }
   const known = AGENT_ADAPTERS.map((adapter) => adapter.id).join('、');
   throw new Error(
-    `在 ${home ?? '默认位置'} 没有找到可统计的用量数据；可用 --agent / --home 指定（当前支持：${known}）`,
+    renderDiagnostic('noUsageData', { home: home ?? t().errors.defaultLocation, known }),
   );
 }

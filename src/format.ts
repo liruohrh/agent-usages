@@ -592,7 +592,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
         [labels.list.sessionId, labels.list.title, labels.list.firstUsage, labels.list.lastUsage, labels.list.subagents, labels.list.requests],
         project.sessions.map((session) => [
           `${session.nested ? '  ↳ ' : ''}${session.id}`,
-          `${session.nested ? '  ' : ''}${session.title ?? '(无标题)'}`,
+          `${session.nested ? '  ' : ''}${session.title ?? labels.tree.untitled}`,
           dayLabel(session.firstUsage),
           dayLabel(session.lastUsage),
           session.subagentCount > 0 && !session.isSubagent ? count(session.subagentCount) : '—',
@@ -630,7 +630,9 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
     pricingProvider: result.pricingProvider,
     dimension: result.dimension,
     range: {
+      // `preset` is the stable identifier; `label` is the localised prose.
       label: result.range.label,
+      preset: result.range.preset ?? null,
       from: result.range.from,
       to: result.range.to,
       fromIso: iso(result.range.from),

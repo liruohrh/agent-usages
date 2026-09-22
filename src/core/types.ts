@@ -13,6 +13,8 @@
  * can be recomputed at any time from the records alone.
  */
 
+import type { Warning } from '../i18n/errors.ts';
+
 /**
  * Tokens a provider counted for one request.
  *
@@ -106,7 +108,7 @@ export interface UsageDataset {
   /** Counters of what the adapter read, for diagnostics. */
   stats: DatasetStats;
   /** Non-fatal problems worth surfacing to the user. */
-  warnings: string[];
+  warnings: Warning[];
 }
 
 /** What an adapter read, and where it read it from. */

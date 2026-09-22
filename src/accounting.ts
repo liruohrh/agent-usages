@@ -16,6 +16,8 @@
  */
 
 import { emptyBuckets, tokenBreakdown } from './core/buckets.ts';
+import { UserError, renderDiagnostic } from './i18n/errors.ts';
+import { t } from './i18n/index.ts';
 import { formatDecimal, parseDecimal } from './core/money.ts';
 import type { CostTotals, TokenBuckets, TokenTotals, UsageRecord } from './core/types.ts';
 import { counterForBasis, type CostBreakdown, type PricingEngine, type RateComponent, type RecordCost } from './pricing/index.ts';
@@ -446,7 +448,7 @@ export function addSummaries(sets: readonly CostSummary[]): CostSummary {
 /** Convert a JavaScript number into the scaled decimal representation. */
 function decimalFromNumber(value: number): bigint {
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`汇率必须是非负有限数字，收到 ${String(value)}`);
+    throw new UserError('rateInvalid', { value: String(value) });
   }
   const text = value.toString();
   if (text.includes('e') || text.includes('E')) return BigInt(Math.round(value * 1e9));
@@ -576,9 +578,10 @@ export function reconcile(tokens: TokenTotals, projected: TokenBuckets): string 
   const compare = (label: string, left: number, right: number): void => {
     if (left !== right) diffs.push(`${label} ${left} vs ${right}`);
   };
-  compare('未命中输入', tokens.input, projected.input);
-  compare('输出', tokens.output, projected.output);
-  compare('缓存命中输入', tokens.cacheRead, projected.cacheRead);
-  compare('缓存写入', tokens.cacheWrite, projected.cacheWrite);
-  return diffs.length === 0 ? undefined : `用量与投影缓存不一致：${diffs.join('；')}`;
+  compare(t().errors.metricInputMiss, tokens.input, projected.input);
+  compare(t().errors.metricOutput, tokens.output, projected.output);
+  compare(t().errors.metricCacheRead, tokens.cacheRead, projected.cacheRead);
+  compare(t().errors.metricCacheWrite, tokens.cacheWrite, projected.cacheWrite);
+  if (diffs.length === 0) return undefined;
+  return renderDiagnostic('projectionMismatch', { diffs: diffs.join(t().errors.metricJoin) });
 }

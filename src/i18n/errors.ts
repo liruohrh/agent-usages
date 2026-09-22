@@ -57,19 +57,6 @@ export function renderDiagnostic<C extends ErrorCode>(code: C, params: ErrorPara
 export type Warning = UserError;
 
 /**
- * A warning whose sentence was written elsewhere.
- *
- * Adapters and libraries report their own diagnostics; passing them through the
- * same shape keeps text and JSON uniform while those messages are still to be
- * coded.
- * @param message - the sentence to show as-is.
- * @returns a warning carrying it.
- */
-export function rawWarning(message: string): Warning {
-  return new UserError('adapterMessage', { message });
-}
-
-/**
  * An error the user is meant to read.
  *
  * `message` is a getter, not a stored string: the language is settled before any

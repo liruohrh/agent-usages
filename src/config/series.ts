@@ -12,6 +12,7 @@
  * recent published rate, which is what "the rate that day" means.
  */
 
+import { renderDiagnostic } from '../i18n/errors.ts';
 import { readJson, writeJsonQuietly } from './store.ts';
 import { seriesPath } from './paths.ts';
 import { shippedRates } from './rates.ts';
@@ -127,7 +128,7 @@ async function fetchSeries(
       requestedFrom: from,
       requestedTo: to,
       fetchedAt: Date.now(),
-      source: 'frankfurter.dev（欧洲央行参考汇率）',
+      source: renderDiagnostic('rateSeriesSource', {}),
       rates,
     };
   } catch {
@@ -188,7 +189,12 @@ function describe(series: RateSeries, fromCache: boolean): LoadedRateSeries {
     rates: series.rates,
     dates,
     source: series.source,
-    detail: `${series.source} ${series.from} ~ ${series.to}（${dates.length} 个交易日）`,
+    detail: renderDiagnostic('seriesDetail', {
+      source: series.source,
+      from: series.from,
+      to: series.to,
+      days: dates.length,
+    }),
     fromCache,
   };
 }

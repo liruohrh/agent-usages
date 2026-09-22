@@ -11,6 +11,7 @@
  * an explicit offset is honoured exactly as written.
  */
 
+import { UserError } from './i18n/errors.ts';
 import { t } from './i18n/index.ts';
 
 /** Resolved half-open instant range. */
@@ -19,8 +20,15 @@ export interface TimeRange {
   from: number | null;
   /** Exclusive upper bound, or `null` for unbounded. */
   to: number | null;
-  /** How the range was requested, for display. */
+  /** How the range was requested, for display — prose, so it is localised. */
   label: string;
+  /**
+   * The preset this range came from, when one was used.
+   *
+   * The label is prose and changes with the language; this is the identifier a
+   * consumer should read instead.
+   */
+  preset?: RangePreset | undefined;
 }
 
 /** Built-in relative presets. */
@@ -89,7 +97,7 @@ function assertRealDate(parts: LocalParts, source: string): void {
     probe.getUTCMinutes() === parts.minute &&
     probe.getUTCSeconds() === parts.second;
   if (!matches) {
-    throw new Error(`无效的日期时间: ${JSON.stringify(source)}`);
+    throw new UserError('timeInvalid', { value: JSON.stringify(source) });
   }
 }
 
@@ -117,7 +125,7 @@ function localInstant(parts: LocalParts): number {
  */
 export function parseInstant(text: string): { instant: number; explicitOffset: boolean } {
   const trimmed = text.trim();
-  if (trimmed.length === 0) throw new Error('时间不能为空');
+  if (trimmed.length === 0) throw new UserError('timeEmpty', {});
 
   const dateOnly = parseDate(trimmed);
   if (dateOnly !== undefined) {
@@ -137,13 +145,11 @@ export function parseInstant(text: string): { instant: number; explicitOffset: b
     const parts = partsOf(offset);
     assertRealDate(parts, trimmed);
     const instant = Date.parse(trimmed);
-    if (Number.isNaN(instant)) throw new Error(`无效的日期时间: ${JSON.stringify(text)}`);
+    if (Number.isNaN(instant)) throw new UserError('timeInvalid', { value: JSON.stringify(text) });
     return { instant, explicitOffset: true };
   }
 
-  throw new Error(
-    `无法识别的时间: ${JSON.stringify(text)}（支持 2026-09-01、2026-09-01T10:30:00、2026-09-01T10:30:00+08:00）`,
-  );
+  throw new UserError('timeUnrecognized', { value: JSON.stringify(text) });
 }
 
 const PRESET_ALIASES: Readonly<Record<string, RangePreset>> = {
@@ -180,7 +186,7 @@ function shiftAnchor(anchor: Date, preset: RangePreset, amount: number): Date {
 export function presetRange(preset: RangePreset, now: Date = new Date()): TimeRange {
   const start = shiftAnchor(now, preset, 0);
   const end = shiftAnchor(now, preset, 1);
-  return { from: start.getTime(), to: end.getTime(), label: t().range.presets[preset] };
+  return { from: start.getTime(), to: end.getTime(), label: t().range.presets[preset], preset };
 }
 
 /**
@@ -232,7 +238,7 @@ export function resolveRange(input: RangeInput = {}): TimeRange {
 
   const parts = spec.split('..');
   if (parts.length > 2) {
-    throw new Error(`无法识别的时间范围: ${JSON.stringify(spec)}（至多一个 ".."）`);
+    throw new UserError('rangeTooManyParts', { value: JSON.stringify(spec) });
   }
   if (parts.length === 1) {
     // A single instant is a lower bound: "from here on".
@@ -244,7 +250,7 @@ export function resolveRange(input: RangeInput = {}): TimeRange {
   const from = lower.length > 0 ? parseInstant(lower).instant : null;
   const to = upper.length > 0 ? parseInstant(upper).instant : null;
   if (from !== null && to !== null && from > to) {
-    throw new Error('时间范围的起始时间不能晚于结束时间');
+    throw new UserError('rangeInverted', {});
   }
   // Equal bounds are a legal, empty range: the same instant twice excludes it.
   return {

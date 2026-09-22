@@ -20,6 +20,9 @@
  * Nothing here writes to the DSH home; the adapter is strictly read-only.
  */
 
+import type { Warning } from '../../i18n/errors.ts';
+import { UserError, renderDiagnostic } from '../../i18n/errors.ts';
+import { t } from '../../i18n/index.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
@@ -65,7 +68,7 @@ interface SessionMeta {
 }
 
 /** Read the projection cache into a flat session-id → metadata map. */
-async function readSessionMeta(home: string, warnings: string[]): Promise<Map<string, SessionMeta>> {
+async function readSessionMeta(home: string, warnings: Warning[]): Promise<Map<string, SessionMeta>> {
   const result = new Map<string, SessionMeta>();
   const path = join(home, 'storages', 'session_projcache.json');
   let parsed: unknown;
@@ -73,7 +76,7 @@ async function readSessionMeta(home: string, warnings: string[]): Promise<Map<st
     parsed = JSON.parse(await readFile(path, 'utf8'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      warnings.push(`无法读取 ${path}: ${(error as Error).message}`);
+      warnings.push(new UserError('dshReadFailed', { path, reason: (error as Error).message }));
     }
     return result;
   }
@@ -115,14 +118,14 @@ interface WorkspaceMeta {
 }
 
 /** Read the workspace registry. */
-async function readWorkspaces(home: string, warnings: string[]): Promise<WorkspaceMeta[]> {
+async function readWorkspaces(home: string, warnings: Warning[]): Promise<WorkspaceMeta[]> {
   const path = join(home, 'storages', 'workspace.json');
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(path, 'utf8'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      warnings.push(`无法读取 ${path}: ${(error as Error).message}`);
+      warnings.push(new UserError('dshReadFailed', { path, reason: (error as Error).message }));
     }
     return [];
   }
@@ -200,9 +203,9 @@ function resolveProjectKey(
  */
 async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const source = resolve(options.home ?? defaultSource(options.env ?? process.env) ?? '');
-  const warnings: string[] = [];
+  const warnings: Warning[] = [];
   if (options.home !== undefined && !isAbsolute(options.home)) {
-    throw new Error(`数据目录必须是绝对路径，收到 ${JSON.stringify(options.home)}`);
+    throw new UserError('dshHomeNotAbsolute', { value: JSON.stringify(options.home) });
   }
 
   const enrich = options.enrich !== false;
@@ -218,7 +221,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
 
   if (logIndex.files.length === 0 && meta.size === 0) {
     throw new Error(
-      `在 ${source} 下没有找到 DSH 用量数据：sessions/ 下没有会话日志，也没有 storages/session_projcache.json（可用 --home 指定，或设置 DSH_HOME）`,
+      renderDiagnostic('dshNoData', { source }),
     );
   }
 
@@ -412,10 +415,10 @@ function defaultSource(env: NodeJS.ProcessEnv): string | null {
 export function resolveDshHome(configured?: string, env: NodeJS.ProcessEnv = process.env): string {
   const candidate = configured ?? defaultSource(env);
   if (candidate === null || candidate === undefined || candidate.trim().length === 0) {
-    throw new Error('无法确定 DSH 主目录：请设置 DSH_HOME 或用 --home 指定');
+    throw new UserError('dshHomeUnresolved', {});
   }
   if (!isAbsolute(candidate)) {
-    throw new Error(`DSH 主目录必须是绝对路径，收到 ${JSON.stringify(candidate)}`);
+    throw new UserError('dshHomeUnresolvedPath', { value: JSON.stringify(candidate) });
   }
   return resolve(candidate);
 }
@@ -424,7 +427,7 @@ export function resolveDshHome(configured?: string, env: NodeJS.ProcessEnv = pro
 export const dshAgent: AgentAdapter = {
   id: 'dsh',
   label: 'DeepSeek Harness (DSH)',
-  sessionNoun: '会话',
+  sessionNoun: t().errors.dshSessionNoun,
   envVars: ['DSH_HOME'],
   defaultSource,
   hasData: async (source) => {
@@ -441,11 +444,5 @@ export const dshAgent: AgentAdapter = {
     }
   },
   load,
-  notes: () => [
-    '逐请求用量来自 harness 自己写的会话日志：每个 assistant/message 事件都带该步的 usage，因此不需要安装任何插件。',
-    'reasoningTokens 是可选字段：新版 DSH 默认的 messages 协议不带它，此时思考 token 计 0，工具不会估算。',
-    '会话日志是追加写的多帧 zstd；正在写入的会话最后几帧可能读不全，重跑即可补齐。',
-    '会话标题与创建时间优先取 storages/session_projcache.json，子代理关系只在会话日志首帧。',
-    '本工具不读取任何第三方插件的落盘数据。',
-  ],
+  notes: () => t().errors.dshNotes(),
 };

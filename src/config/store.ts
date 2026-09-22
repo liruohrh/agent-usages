@@ -7,6 +7,7 @@
  * never be left half-written by an interrupted process.
  */
 
+import { renderDiagnostic } from '../i18n/errors.ts';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -44,7 +45,10 @@ export function readJson<T>(path: string): ReadResult<T> {
   try {
     return { value: JSON.parse(text) as T, failure: undefined };
   } catch (error) {
-    return { value: undefined, failure: { path, reason: `不是合法 JSON：${(error as Error).message}` } };
+    return {
+      value: undefined,
+      failure: { path, reason: renderDiagnostic('storeNotJson', { reason: (error as Error).message }) },
+    };
   }
 }
 

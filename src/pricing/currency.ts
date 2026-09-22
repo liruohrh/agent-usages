@@ -13,6 +13,7 @@
  */
 
 import { shippedRates, type RatesConfig } from '../config/rates.ts';
+import { UserError, renderDiagnostic } from '../i18n/errors.ts';
 import { MONEY_SCALE_DIGITS, divideDecimal, formatDecimal, multiplyDecimal, parseDecimal, trimDecimal } from '../core/money.ts';
 import type { PricePeriod, PricingProvider, RateComponent } from './contract.ts';
 
@@ -171,7 +172,7 @@ export function seedTable(): RateTable {
   return {
     base: config.base,
     rates: config.table,
-    provenance: { source: `内置汇率表 ${config.source}`, date: config.updatedAt },
+    provenance: { source: renderDiagnostic('rateSourceBuiltin', { source: config.source }), date: config.updatedAt },
   };
 }
 
@@ -202,7 +203,7 @@ export function rateFrom(table: RateTable, base: string, target: string): string
   const from = table.rates[base];
   const to = table.rates[target];
   if (from === undefined || to === undefined) {
-    throw new Error(`汇率表（${table.base} 基准）里没有 ${from === undefined ? base : target} 的汇率`);
+    throw new UserError('rateTableMissing', { base: table.base, code: from === undefined ? base : target });
   }
   return trimDecimal(divideDecimal(to, from));
 }
@@ -268,7 +269,7 @@ export function chooseDisplay(input: DisplayInput): DisplayChoice {
   if (input.rateFlag !== undefined) {
     const manual = trimDecimal(input.rateFlag.trim());
     if (!/^\d+(\.\d+)?$/.test(manual) || Number(manual) <= 0) {
-      throw new Error(`汇率必须是正的十进制数，收到 ${JSON.stringify(input.rateFlag)}`);
+      throw new UserError('rateNotPositiveDecimal', { value: JSON.stringify(input.rateFlag) });
     }
     return {
       currency: input.currencyFlag === undefined ? null : currencyOf(input.currencyFlag),
@@ -334,10 +335,16 @@ export function rateFor(input: {
 }): { rate: string; provenance: RateProvenance } {
   const table = input.table ?? seedTable();
   if (input.manualRate !== undefined && input.manualRate !== null) {
-    return { rate: input.manualRate, provenance: { source: '手工指定', date: new Date().toISOString().slice(0, 10) } };
+    return {
+      rate: input.manualRate,
+      provenance: { source: renderDiagnostic('rateSourceManual', {}), date: new Date().toISOString().slice(0, 10) },
+    };
   }
   if (input.target === null || input.target === input.base) {
-    return { rate: '1', provenance: { source: '厂商发布价，未折算', date: table.provenance.date } };
+    return {
+      rate: '1',
+      provenance: { source: renderDiagnostic('rateSourcePublished', {}), date: table.provenance.date },
+    };
   }
   return { rate: rateFrom(table, input.base, input.target), provenance: table.provenance };
 }

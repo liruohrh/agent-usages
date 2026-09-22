@@ -20,6 +20,8 @@
  * continues to the end of the file when per-request usage is wanted.
  */
 
+import type { Warning } from '../../i18n/errors.ts';
+import { UserError } from '../../i18n/errors.ts';
 import { open, readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
@@ -279,11 +281,11 @@ export async function readSessionLog(
   }
 
   if (state.header === undefined) {
-    throw new Error(`无法在 ${path} 中找到会话头（session 事件）`);
+    throw new UserError('dshSessionHeaderMissing', { path });
   }
   const sessionId = asString(state.header['id']);
   if (sessionId === undefined) {
-    throw new Error(`${path} 的会话头缺少 id 字段`);
+    throw new UserError('dshSessionHeaderNoId', { path });
   }
   const parentRaw = asString(state.header['parentSession']);
   const depth = asInteger(state.header['delegationDepth']) ?? (parentRaw === undefined ? 0 : 1);
@@ -393,14 +395,14 @@ export async function readSessionLogIndex(
   byId: Map<string, SessionLogInfo>;
   records: Map<string, UsageRecord[]>;
   files: string[];
-  warnings: string[];
+  warnings: Warning[];
 }> {
   const collectUsage = options.collectUsage === true;
   const logs = await locateSessionLogs(home);
   const byId = new Map<string, SessionLogInfo>();
   const records = new Map<string, UsageRecord[]>();
   const files: string[] = [];
-  const warnings: string[] = [];
+  const warnings: Warning[] = [];
   type Result = { log: LocatedSessionLog; scan: SessionLogScan } | { log: LocatedSessionLog; error: Error };
   const results = await Promise.all(
     logs.map(async (log): Promise<Result> => {
@@ -413,7 +415,12 @@ export async function readSessionLogIndex(
   );
   for (const result of results) {
     if ('error' in result) {
-      warnings.push(`无法读取会话日志 ${relative(home, result.log.path).split(sep).join('/')}: ${result.error.message}`);
+      warnings.push(
+        new UserError('dshLogReadFailed', {
+          path: relative(home, result.log.path).split(sep).join('/'),
+          reason: result.error.message,
+        }),
+      );
       continue;
     }
     const { scan } = result;

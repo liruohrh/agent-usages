@@ -19,6 +19,8 @@
  */
 
 import { MONEY_SCALE, parseDecimal } from '../core/money.ts';
+import { UserError } from '../i18n/errors.ts';
+import type { Messages } from '../i18n/zh.ts';
 import { t } from '../i18n/index.ts';
 import type { TokenBuckets, UsageRecord } from '../core/types.ts';
 import {
@@ -195,12 +197,12 @@ export function counterForBasis(basis: BillingBasis): TokenCounter {
 
 /** Display text for a billing basis. */
 const BASIS_LABELS: Readonly<Record<BillingBasis, string>> = {
-  input: '缓存未命中输入',
-  output: '输出',
-  cacheRead: '缓存命中输入',
-  cacheWrite: '缓存写入',
-  inputAndCacheWrite: '未命中输入 + 缓存写入',
-  prompt: '全部输入',
+  input: 'basisInput',
+  output: 'basisOutput',
+  cacheRead: 'basisCacheRead',
+  cacheWrite: 'basisCacheWrite',
+  inputAndCacheWrite: 'basisInputAndCacheWrite',
+  prompt: 'basisPrompt',
 };
 
 /**
@@ -216,13 +218,13 @@ const BASIS_LABELS: Readonly<Record<BillingBasis, string>> = {
 export function parseRate(text: string): bigint {
   const trimmed = text.trim();
   if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed)) {
-    throw new Error(`价格: 不是合法的十进制字面量: ${JSON.stringify(text)}`);
+    throw new UserError('priceNotDecimal', { value: JSON.stringify(text) });
   }
   const negative = trimmed.startsWith('-');
   const unsigned = trimmed.replace(/^[+-]/, '');
   const [whole = '0', fraction = ''] = unsigned.split('.');
   if (fraction.length > 9) {
-    throw new Error(`价格: 小数位超过 9 位: ${JSON.stringify(text)}`);
+    throw new UserError('priceTooManyDigits', { value: JSON.stringify(text) });
   }
   const value = BigInt(`${whole}${fraction.padEnd(9, '0')}`);
   return negative ? -value : value;
@@ -237,7 +239,7 @@ export function parseRate(text: string): bigint {
  */
 export function charge(tokens: number, rate: bigint, per: number): bigint {
   if (!Number.isSafeInteger(tokens) || tokens < 0) {
-    throw new Error(`计费: token 数必须是非负安全整数，收到 ${String(tokens)}`);
+    throw new UserError('chargeTokenNotInteger', { value: String(tokens) });
   }
   if (tokens === 0 || rate === 0n) return 0n;
   return (BigInt(tokens) * rate) / BigInt(per);
@@ -392,7 +394,9 @@ class Engine implements PricingEngine {
   }
 
   describeBasis(basis: BillingBasis): string {
-    return BASIS_LABELS[basis];
+    // The catalogue's labels, so a basis reads in the reader's language.
+    const messages = t().errors as unknown as Record<string, string>;
+    return messages[BASIS_LABELS[basis]] ?? basis;
   }
 
   quantityOf(component: RateComponent, tokens: TokenBuckets): number {

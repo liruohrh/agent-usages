@@ -7,6 +7,7 @@
  * pick it up automatically and `price --provider` starts listing it.
  */
 
+import { UserError } from '../i18n/errors.ts';
 import { shippedProviders } from '../config/pricing.ts';
 import type { PricingProvider } from './contract.ts';
 
@@ -36,7 +37,7 @@ export function requirePricingProvider(id: string, providers: readonly PricingPr
   const provider = findPricingProvider(id, providers);
   if (provider === undefined) {
     const known = providers.map((candidate) => candidate.id).join('、');
-    throw new Error(`未知的计价来源 "${id}"；当前支持：${known}`);
+    throw new UserError('unknownProvider', { id, known });
   }
   return provider;
 }

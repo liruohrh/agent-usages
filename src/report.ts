@@ -12,7 +12,8 @@
 import { addBuckets, emptyBuckets } from './core/buckets.ts';
 import type { CostTotals, ProjectRecord, SessionRecord, TokenTotals, UsageDataset, UsageRecord } from './core/types.ts';
 import { addCostTotals, addSummaries, costOf, zeroCostTotals, type CostSummary } from './accounting.ts';
-import { UserError, rawWarning, type Warning } from './i18n/errors.ts';
+import { UserError, renderDiagnostic, type Warning } from './i18n/errors.ts';
+import { t } from './i18n/index.ts';
 import type { PricingEngine, DisplayReason } from './pricing/index.ts';
 import { inRange, type TimeRange } from './timerange.ts';
 
@@ -718,7 +719,7 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   const { engine } = context;
   // Adapter diagnostics arrive as sentences; they keep their wording until the
   // adapters themselves report codes.
-  const warnings: Warning[] = dataset.warnings.map((message) => rawWarning(message));
+  const warnings: Warning[] = [...dataset.warnings];
   const projectSelection = query.projects === undefined || query.projects.length === 0
     ? undefined
     : resolveProjectSelectors(dataset.projects, query.projects);
@@ -942,13 +943,16 @@ function adapterWarning(session: SessionRecord, records: readonly UsageRecord[])
   const totals = sumOf(records);
   const diffs: string[] = [];
   const compare = (label: string, left: number, right: number): void => {
-    if (left !== right) diffs.push(`${label} 日志 ${left} vs 投影缓存 ${right}`);
+    if (left !== right) {
+      diffs.push(renderDiagnostic('projectionDiff', { label, left: String(left), right: String(right) }));
+    }
   };
-  compare('未命中输入', totals.input, projected.input);
-  compare('输出', totals.output, projected.output);
-  compare('缓存命中输入', totals.cacheRead, projected.cacheRead);
-  compare('缓存写入', totals.cacheWrite, projected.cacheWrite);
-  return diffs.length === 0 ? undefined : `会话用量与投影缓存不一致：${diffs.join('；')}`;
+  compare(t().errors.metricInputMiss, totals.input, projected.input);
+  compare(t().errors.metricOutput, totals.output, projected.output);
+  compare(t().errors.metricCacheRead, totals.cacheRead, projected.cacheRead);
+  compare(t().errors.metricCacheWrite, totals.cacheWrite, projected.cacheWrite);
+  if (diffs.length === 0) return undefined;
+  return renderDiagnostic('projectionMismatch', { diffs: diffs.join(t().errors.metricJoin) });
 }
 
 /** Narrow an `unknown` to a token bucket set. */
@@ -1064,7 +1068,7 @@ function sortInstantOf(session: SessionListEntry): number {
 export function listSessions(dataset: UsageDataset, filters: SessionListFilters = {}): SessionListResult {
   // Adapter diagnostics arrive as sentences; they keep their wording until the
   // adapters themselves report codes.
-  const warnings: Warning[] = dataset.warnings.map((message) => rawWarning(message));
+  const warnings: Warning[] = [...dataset.warnings];
   const includeSubagents = filters.includeSubagents ?? false;
   const projectSelection = filters.projects === undefined || filters.projects.length === 0
     ? undefined

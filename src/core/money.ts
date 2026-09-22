@@ -9,6 +9,8 @@
  */
 
 /** Fixed-point scale: one unit is 1e-9 of the currency unit. */
+import { UserError } from '../i18n/errors.ts';
+
 export const MONEY_SCALE_DIGITS = 9;
 
 const SCALE_FACTOR = 10n ** BigInt(MONEY_SCALE_DIGITS);
@@ -24,13 +26,13 @@ const DECIMAL_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 export function parseDecimal(text: string): bigint {
   const trimmed = text.trim();
   if (!DECIMAL_PATTERN.test(trimmed)) {
-    throw new Error(`parseDecimal: 不是合法的十进制字面量: ${JSON.stringify(text)}`);
+    throw new UserError('moneyNotDecimal', { value: JSON.stringify(text) });
   }
   const negative = trimmed.startsWith('-');
   const unsigned = trimmed.replace(/^[+-]/, '');
   const [whole = '0', fraction = ''] = unsigned.split('.');
   if (fraction.length > MONEY_SCALE_DIGITS) {
-    throw new Error(`parseDecimal: 小数位超过 ${MONEY_SCALE_DIGITS} 位: ${JSON.stringify(text)}`);
+    throw new UserError('moneyTooManyDigits', { value: JSON.stringify(text) });
   }
   const value = BigInt(`${whole}${fraction.padEnd(MONEY_SCALE_DIGITS, '0')}`);
   return negative ? -value : value;
@@ -45,7 +47,7 @@ export function parseDecimal(text: string): bigint {
  */
 export function scalePerMillion(tokens: number, amount: bigint): bigint {
   if (!Number.isSafeInteger(tokens) || tokens < 0) {
-    throw new Error(`scalePerMillion: token 数必须是非负安全整数，收到 ${String(tokens)}`);
+    throw new UserError('moneyTokenNotInteger', { value: String(tokens) });
   }
   if (tokens === 0 || amount === 0n) return 0n;
   return (BigInt(tokens) * amount) / 1_000_000n;
@@ -60,7 +62,7 @@ export function scalePerMillion(tokens: number, amount: bigint): bigint {
  */
 export function formatDecimal(value: bigint, digits: number): string {
   if (!Number.isInteger(digits) || digits < 0 || digits > MONEY_SCALE_DIGITS) {
-    throw new Error(`formatDecimal: digits 必须是 0-${MONEY_SCALE_DIGITS} 的整数，收到 ${String(digits)}`);
+    throw new UserError('moneyDigitsRange', { value: String(digits) });
   }
   const negative = value < 0n;
   const magnitude = negative ? -value : value;
@@ -112,7 +114,7 @@ export function multiplyDecimal(left: string, right: string): string {
  */
 export function divideDecimal(left: string, right: string): string {
   const divisor = parseDecimal(right);
-  if (divisor === 0n) throw new Error('divideDecimal: 除数不能为 0');
+  if (divisor === 0n) throw new UserError('moneyDivideByZero', {});
   return formatDecimal((parseDecimal(left) * SCALE_FACTOR) / divisor, MONEY_SCALE_DIGITS);
 }
 

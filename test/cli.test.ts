@@ -726,21 +726,28 @@ describe('language', () => {
   });
 
   it('keeps the numbers and identifiers identical across languages', async () => {
-    // The point of the separation: only prose changes. Labels inside JSON that
-    // are still prose (the range label, warnings) are excluded on purpose.
+    // The point of the separation: only prose changes. What still is prose inside
+    // JSON — the range label and a warning's sentence — is excluded on purpose;
+    // everything else, codes included, must match exactly.
     const pick = (body: string): Record<string, unknown> => {
       const parsed = JSON.parse(body) as Record<string, unknown>;
+      const rate = parsed['rateInfo'] as Record<string, unknown>;
+      const range = parsed['range'] as Record<string, unknown>;
+      const warnings = (parsed['warnings'] as { code: string }[]).map((warning) => warning.code);
       return {
         totals: parsed['totals'],
         currency: parsed['currency'],
-        rateInfo: parsed['rateInfo'],
+        rate: { base: rate['base'], display: rate['display'], rate: rate['rate'], mode: rate['mode'] },
+        range: { preset: range['preset'], from: range['from'], to: range['to'] },
         models: parsed['models'],
         subagents: parsed['subagents'],
+        warnings,
       };
     };
-    const zh = pick((await cli(['usage', '--json'], homeWith('zh'))).stdout);
-    const en = pick((await cli(['usage', '--json'], homeWith('en'))).stdout);
+    const zh = pick((await cli(['usage', '--range', 'today', '--json'], homeWith('zh'))).stdout);
+    const en = pick((await cli(['usage', '--range', 'today', '--json'], homeWith('en'))).stdout);
     expect(en).toEqual(zh);
+    expect(zh.range).toMatchObject({ preset: 'today' });
   });
 
   it('falls back to Chinese when the locale has no opinion', async () => {
