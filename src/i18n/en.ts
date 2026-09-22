@@ -318,6 +318,8 @@ export const en: Messages = {
     codexHomeNotAbsolute: (p: { value: string }) => `the Codex home must be an absolute path, got ${p.value}`,
     codexNoData: (p: { source: string }) =>
       `no Codex rollouts under ${p.source}; point --home at the Codex home (default ~/.codex) or set CODEX_HOME`,
+    sideQuestionsUncounted: (p: { count: string; agent: string }) =>
+      `${p.count} side interaction(s) cannot be counted (${p.agent}): /btw questions run in a throwaway session that never reaches a session log, so their tokens stay out of every report`,
     codexSessionNoun: 'sessions',
     codexNotes: (): readonly string[] => [
       'Usage comes from Codex’s own rollouts: the token_count events in ~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl.',

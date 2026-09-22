@@ -104,6 +104,13 @@ interface ScannedSession {
   parentId: string | null;
   depth: number;
   isSubagent: boolean;
+  /** Session this one was forked from (`forked_from_id`). */
+  forkedFrom: string | null;
+  /** Subagent identity, straight from `thread_spawn`. */
+  agentPath: string | null;
+  agentNickname: string | null;
+  /** Tokens the fork inherited as a running total, with no events behind them. */
+  inheritedTokens: number;
 }
 
 /**
@@ -121,6 +128,10 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     return undefined;
   }
   let id: string | undefined;
+  let forkedFrom: string | null = null;
+  let agentPath: string | null = null;
+  let agentNickname: string | null = null;
+  let inheritedTokens = 0;
   let parentId: string | null = null;
   let depth = 0;
   let isSubagent = false;
@@ -151,7 +162,13 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
         isSubagent = true;
         depth = asNumber(spawn['depth']) ?? 1;
         parentId = asString(spawn['parent_thread_id']) ?? null;
+        agentPath = asString(spawn['agent_path']) ?? null;
+        agentNickname = asString(spawn['agent_nickname']) ?? null;
       }
+      // A fork names its source and inherits its running total without copying
+      // any event; the difference is what must never be billed here.
+      const forkSource = asString(payload['forked_from_id']);
+      if (forkSource !== undefined) forkedFrom ??= forkSource;
       continue;
     }
     if (type === 'turn_context' && payload !== undefined) {
@@ -167,6 +184,12 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     const delta = asRecord(asRecord(payload['info'])?.['last_token_usage']);
     const time = asInstant(entry['timestamp']);
     if (delta === undefined || time === null) continue;
+    if (records.length === 0) {
+      const info = asRecord(payload['info']);
+      const running = info === undefined ? undefined : asRecord(info['total_token_usage']);
+      const total = asNumber(running?.['total_tokens']) ?? 0;
+      inheritedTokens = Math.max(0, total - (asNumber(delta['total_tokens']) ?? 0));
+    }
     createdAt ??= time;
     records.push({
       id: `${id ?? fallbackId}:tok:${String(entry['ordinal'] ?? line)}`,
@@ -177,7 +200,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     });
   }
   if (id === undefined && records.length === 0 && cwd === null) return undefined;
-  return { id: id ?? fallbackId, cwd, createdAt, records, parentId, depth, isSubagent };
+  return { id: id ?? fallbackId, cwd, createdAt, records, parentId, depth, isSubagent, forkedFrom, agentPath, agentNickname, inheritedTokens };
 }
 
 /** Every `rollout-*.jsonl` under a directory tree, sorted for stable runs. */
@@ -203,18 +226,30 @@ async function findRollouts(root: string): Promise<string[]> {
 /** Assemble one neutral session record. */
 function buildSession(scanned: ScannedSession): SessionRecord {
   const records = [...scanned.records].sort((left, right) => left.time - right.time);
+  const extra: Record<string, unknown> = {};
+  // A fork is a continuation of its source, not a subagent it spawned: it keeps
+  // `depth = 0` and only names where it came from.
+  if (scanned.forkedFrom !== null) {
+    extra['forkedFrom'] = scanned.forkedFrom;
+    extra['inheritedTokens'] = scanned.inheritedTokens;
+  }
+  if (scanned.isSubagent) {
+    if (scanned.agentPath !== null) extra['agentPath'] = scanned.agentPath;
+    if (scanned.agentNickname !== null) extra['agentNickname'] = scanned.agentNickname;
+  }
   return {
     id: scanned.id,
     title: null,
     cwd: scanned.cwd,
     createdAt: scanned.createdAt,
     records,
-    parentId: scanned.parentId,
+    parentId: scanned.parentId ?? scanned.forkedFrom,
     depth: scanned.depth,
     isSubagent: scanned.isSubagent,
     archived: false,
     childIds: [],
     parentKnown: false,
+    ...(Object.keys(extra).length === 0 ? {} : { extra }),
   };
 }
 
@@ -255,13 +290,16 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   if (sessions.length === 0) {
     throw new Error(renderDiagnostic('codexNoData', { source }));
   }
+  const btw = await countUnpersistedSessions(join(source, 'history.jsonl'), new Set(sessions.map((s) => s.id)));
+  if (btw > 0) warnings.push(new UserError('sideQuestionsUncounted', { count: String(btw), agent: 'Codex' }));
 
   const byId = new Map(sessions.map((session) => [session.id, session]));
   for (const session of sessions) {
     if (session.parentId === null) continue;
     const parent = byId.get(session.parentId);
     if (parent === undefined) continue;
-    parent.childIds.push(session.id);
+    // A fork is a continuation of its source, not one of its children.
+    if (session.isSubagent) parent.childIds.push(session.id);
     session.parentKnown = true;
   }
   for (const session of sessions) session.childIds.sort();
@@ -305,6 +343,39 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     },
     warnings,
   };
+}
+
+/**
+ * Count prompts that belong to no rollout.
+ *
+ * Codex runs `/btw` in a throwaway thread: the prompt reaches
+ * `history.jsonl`, no `rollout-*.jsonl` is ever written, and no usage event
+ * exists anywhere. A history entry whose session id has no rollout is that
+ * case, and the reader deserves to know the total is incomplete.
+ *
+ * @param path - `history.jsonl`.
+ * @param known - session ids that do have a rollout.
+ * @returns how many distinct history sessions never persisted.
+ */
+async function countUnpersistedSessions(path: string, known: ReadonlySet<string>): Promise<number> {
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch {
+    return 0;
+  }
+  const unpersisted = new Set<string>();
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = asRecord(JSON.parse(line));
+      const id = asString(entry?.['session_id']);
+      if (id !== undefined && !known.has(id)) unpersisted.add(id);
+    } catch {
+      continue;
+    }
+  }
+  return unpersisted.size;
 }
 
 /** Default data root: `~/.codex`. */

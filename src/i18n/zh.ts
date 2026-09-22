@@ -360,6 +360,8 @@ export const zh = {
     codexHomeNotAbsolute: (p: { value: string }) => `Codex 数据目录必须是绝对路径，收到 ${p.value}`,
     codexNoData: (p: { source: string }) =>
       `在 ${p.source} 下没有找到 Codex rollout；用 --home 指定 Codex 主目录（默认 ~/.codex），或用 CODEX_HOME 覆盖`,
+    sideQuestionsUncounted: (p: { count: string; agent: string }) =>
+      `检测到 ${p.count} 处旁路交互无法统计（${p.agent}）：/btw 这类提问在临时会话里完成，不写进任何会话日志，其 token 进不了报表`,
     codexSessionNoun: '会话',
     codexNotes: (): readonly string[] => [
       '用量来自 Codex 自己写的 rollout：~/.codex/sessions/年/月/日/rollout-*.jsonl 的 token_count 事件。',

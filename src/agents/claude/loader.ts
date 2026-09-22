@@ -97,6 +97,8 @@ interface ScannedSession {
   records: UsageRecord[];
   /** `message.id` behind each record, in the same order. */
   messageIds: string[];
+  /** Message-tree branch points: uuids with more than one child. */
+  branchPoints: number;
 }
 
 /**
@@ -119,6 +121,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   let title: string | null = null;
   const records: UsageRecord[] = [];
   const messageIds: string[] = [];
+  const children = new Map<string, number>();
   // One API response is written as one entry per content block, and every one of
   // them repeats the same `usage` — counting entries would bill each request two
   // or three times. `message.id` identifies the call, so it is the key.
@@ -134,6 +137,10 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       continue;
     }
     if (entry === undefined) continue;
+    // A branch (`--resume-session-at`) leaves the log append-only and shows up
+    // as one message in the tree with two children.
+    const treeParent = asString(entry['parentUuid']);
+    if (treeParent !== undefined) children.set(treeParent, (children.get(treeParent) ?? 0) + 1);
     id ??= asString(entry['sessionId']);
     cwd ??= asString(entry['cwd']) ?? null;
     if (asString(entry['type']) === 'summary') {
@@ -165,7 +172,10 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     });
   }
   if (id === undefined && cwd === null && records.length === 0) return undefined;
-  return { id: id ?? fallbackId, cwd, createdAt, title, records, messageIds };
+  // `--resume-session-at` branches in place: the log stays append-only and the
+  // branch shows up as a message with two children.
+  const branchPoints = [...children.values()].filter((count) => count > 1).length;
+  return { id: id ?? fallbackId, cwd, createdAt, title, records, messageIds, branchPoints };
 }
 
 /** Directory entries, or an empty list when the directory cannot be read. */
@@ -281,6 +291,8 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   if (walked.size === 0) {
     throw new Error(renderDiagnostic('claudeNoData', { source }));
   }
+  const btw = await countSideQuestions(join(env[ENV_CONFIG_DIR] ?? source, 'history.jsonl'));
+  if (btw > 0) warnings.push(new UserError('sideQuestionsUncounted', { count: String(btw), agent: 'Claude Code' }));
 
   const sessions: SessionRecord[] = [];
   const projectOfSession = new Map<string, string>();
@@ -312,11 +324,18 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
         records.push(record);
         messageIds.push(messageId);
       });
+      const extra: Record<string, unknown> = {};
+      if (inheritedFrom !== null) {
+        extra['forkedFrom'] = inheritedFrom;
+        extra['inheritedRequests'] = entry.session.records.length - records.length;
+      }
+      if (entry.session.branchPoints > 0) extra['branchPoints'] = entry.session.branchPoints;
       const session = buildSession({
         ...entry,
         session: { ...entry.session, records, messageIds },
         parentId: inheritedFrom ?? entry.parentId,
       });
+      if (Object.keys(extra).length > 0) session.extra = extra;
       sessions.push(session);
       projectOfSession.set(session.id, projectKey);
     }
@@ -366,6 +385,36 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     },
     warnings,
   };
+}
+
+/**
+ * Count `/btw` side questions in an agent's prompt history.
+ *
+ * `/btw` runs in a throwaway session that never reaches a session log, so its
+ * tokens cannot be counted; the prompt history is the only place it shows up
+ * (Claude Code keeps the `/btw` prefix there, which makes the count exact).
+ *
+ * @param path - the agent's `history.jsonl`.
+ * @returns how many prompts are `/btw` invocations.
+ */
+async function countSideQuestions(path: string): Promise<number> {
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = asRecord(JSON.parse(line));
+      if ((asString(entry?.['display']) ?? '').startsWith('/btw')) count += 1;
+    } catch {
+      continue;
+    }
+  }
+  return count;
 }
 
 /** Default data root: the Claude Code config directory. */

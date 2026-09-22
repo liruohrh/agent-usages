@@ -120,7 +120,13 @@ describe('reading a Codex home', () => {
   it('bills nothing for a fork that only inherited a running total', async () => {
     const data = await codexAgent.load({ home });
     const fork = data.sessions.find((candidate) => candidate.id === 'fork-1');
+    const parent = data.sessions.find((candidate) => candidate.id === PARENT);
     expect(fork?.records).toEqual([]);
+    // It is identified as a continuation of its source, not as a child.
+    expect(fork?.parentId).toBe(PARENT);
+    expect(fork?.isSubagent).toBe(false);
+    expect(fork?.extra?.['forkedFrom']).toBe(PARENT);
+    expect(parent?.childIds).toEqual([CHILD]);
   });
 
   it('attaches a subagent through thread_spawn, not through session_id', async () => {

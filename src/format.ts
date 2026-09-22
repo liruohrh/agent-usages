@@ -874,6 +874,7 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
               pricingBands: session.bands,
               models: session.models,
               ...(session.warning === undefined ? {} : { warning: session.warning }),
+              ...(session.extra === undefined ? {} : { extra: session.extra }),
             })),
           }),
     })),

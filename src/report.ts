@@ -187,6 +187,14 @@ export interface SessionReport {
   models: ModelBreakdown[];
   /** Set when the adapter's own totals disagree with the records. */
   warning?: string | undefined;
+  /**
+   * Adapter-specific facts about this session, passed through untouched.
+   *
+   * Codex and Claude Code mark forked sessions and subagents in ways the neutral
+   * model has no field for; those markers ride here rather than being flattened
+   * into something every agent would have to pretend to have.
+   */
+  extra?: Readonly<Record<string, unknown>> | undefined;
 }
 
 /** One project's aggregate. */
@@ -740,6 +748,7 @@ function sessionReport(input: SessionRowInput): SessionReport {
     models: modelsOf(records, summary),
   };
   if (warning !== undefined) row.warning = warning;
+  if (session.extra !== undefined) row.extra = session.extra;
   return row;
 }
 

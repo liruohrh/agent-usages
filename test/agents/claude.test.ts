@@ -129,7 +129,33 @@ describe('reading a Claude Code home', () => {
     expect(forked?.records.map((record) => record.id)).toEqual([`${forkId}:msg-new`]);
     expect(forked?.parentId).toBe(SESSION);
     expect(forked?.isSubagent).toBe(false);
+    expect(forked?.extra?.['forkedFrom']).toBe(SESSION);
+    expect(forked?.extra?.['inheritedRequests']).toBe(1);
     expect(source?.childIds).toEqual([AGENT]);
+  });
+
+  it('reports where a session branched', async () => {
+    // `--resume-session-at` branches in place: the log only grows, and the
+    // branch appears as one message with two children.
+    const project = join(home, 'projects', '-tmp-demo');
+    const branchId = 'eeeeeeee-0000-4000-8000-00000000000e';
+    const shared = (uuid: string, timestamp: string, id: string): string =>
+      JSON.stringify({
+        type: 'assistant',
+        uuid,
+        parentUuid: 'branch-root',
+        sessionId: branchId,
+        timestamp,
+        cwd: '/tmp/demo',
+        message: { id, model: 'deepseek-flash', usage: { input_tokens: 10, output_tokens: 1 } },
+      });
+    await writeFile(
+      join(project, `${branchId}.jsonl`),
+      `${[shared('c1', '2026-09-23T00:20:01.000Z', 'b1'), shared('c2', '2026-09-23T00:20:02.000Z', 'b2')].join('\n')}\n`,
+    );
+    const data = await claudeAgent.load({ home });
+    const branched = data.sessions.find((session) => session.id === branchId);
+    expect(branched?.extra?.['branchPoints']).toBe(1);
   });
 
   it('groups sessions under the project their cwd names', async () => {

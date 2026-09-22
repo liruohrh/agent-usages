@@ -44,6 +44,14 @@ export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-flash
 - `hasUnknownModelCost: true` 时 `cost-state.totalCostUSD` 不可信（token 仍可信）；金额一律由本工具按价格表重算。
 - `cache_creation` 是对象（`ephemeral_1h/5m_input_tokens`）而非数字；DeepSeek 侧 `cache_creation_input_tokens` 恒为 0。
 
+## 怎么识别 fork / 子 agent / branch（`--json` 里）
+
+| 现象 | 判据 | 输出 |
+| --- | --- | --- |
+| **fork**（`--fork-session`） | 同一项目里 message.id 与更早文件重叠 | `parentId` 指向源会话、`isSubagent=false`、`extra = { "forkedFrom": "<源 id>", "inheritedRequests": 4 }` |
+| **子 agent** | `<会话>/subagents/agent-<id>.jsonl` | `isSubagent=true`、`parentId` 指向父会话、进入父的 `childIds` |
+| **branch**（`--resume-session-at`） | 消息树里某个 `parentUuid` 有 ≥2 个子节点 | `extra = { "branchPoints": 1 }` |
+
 ## 已知盲区：`/btw`（以及同类本地命令）
 
 Claude Code 2.1.278 实测：用 `/btw <问题>` 提问**不会在会话 JSONL 里留下任何可计量的条目**。
