@@ -66,7 +66,7 @@ agent-usages usage --home /path/to/.dsh  # 显式指定数据目录
 agent-usages agents                      # 看每个 agent 认哪些环境变量、默认目录在哪
 ```
 
-`--home` 也可用各 agent 自己的环境变量替代（DSH 用 `DSH_HOME`，默认 `~/.dsh`）。`--agent` / `--home` / `--provider` / `--json` 都是全局选项，放在子命令前后都可以。
+`--home` 也可用各 agent 自己的环境变量替代：DSH 用 `DSH_HOME`（默认 `~/.dsh`），pi 用 `PI_CODING_AGENT_DIR`（默认 `~/.pi/agent`）。`--agent` / `--home` / `--provider` / `--json` 都是全局选项，放在子命令前后都可以。
 
 ---
 
@@ -513,6 +513,7 @@ agent-usages usage --range 2026-09-01         # 只给一个时间 = 从这时�
 | --- | --- |
 | [docs/README.md](docs/README.md) | 文档索引 |
 | [DSH 适配器](docs/agents/dsh.md) | 用量从哪些文件来、日志格式与去重、项目归组、委派识别 |
+| [pi 适配器](docs/agents/pi.md) | pi 的会话 JSONL、子 agent 的落盘位置、标题来源 |
 | [DeepSeek 价格表](docs/pricing/deepseek.md) | 生效区间、峰谷时段、选取规则、计费口径与来源链接 |
 | [输出与格式](docs/output.md) | 各表的列、token 统计口径、对齐规则、合计行 |
 | [架构与扩展](docs/architecture.md) | 中立模型、新增 agent / 计价来源、目录结构、开发与测试 |

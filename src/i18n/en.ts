@@ -306,6 +306,17 @@ export const en: Messages = {
       `no DSH usage data under ${p.source}: sessions/ holds no session logs and storages/session_projcache.json is missing (pass --home, or set DSH_HOME)`,
     dshSessionHeaderMissing: (p: { path: string }) => `no session header (a session event) in ${p.path}`,
     dshSessionHeaderNoId: (p: { path: string }) => `the session header in ${p.path} has no id`,
+    piSessionUnreadable: (p: { path: string }) => `could not read the pi session file (no session header): ${p.path}`,
+    piHomeNotAbsolute: (p: { value: string }) => `the pi data directory must be an absolute path, got ${p.value}`,
+    piNoData: (p: { source: string }) =>
+      `no pi sessions under ${p.source}; point --home at pi's agent directory (default ~/.pi/agent) or set PI_CODING_AGENT_DIR`,
+    piSessionNoun: 'sessions',
+    piNotes: (): readonly string[] => [
+      'Usage comes from pi’s own session files: ~/.pi/agent/sessions/<project>/<time>_<uuid>.jsonl, where every assistant message carries that request’s usage.',
+      'A subagent is a session of its own: pi stores it under a directory named after the parent session (<parent>.jsonl/<child>/run-<n>/session.jsonl), so each side is billed once.',
+      'The title is the last session_info name, because pi renames a session as the work moves on.',
+      'Only these files are read; extension data is not.',
+    ],
     dshSessionNoun: 'sessions',
     dshNotes: (): readonly string[] => [
       'Per-request usage comes from the session logs the harness writes itself: every assistant/message event carries that step’s usage, so no plugin has to be installed.',

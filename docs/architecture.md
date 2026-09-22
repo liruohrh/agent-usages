@@ -102,6 +102,7 @@ pnpm typecheck   # tsc --noEmit
 | `test/unit/format.test.ts` | 呈现层：项目/会话树的缩进与折叠、指标行、附加表开关、JSON 字段 |
 | `test/unit/money.test.ts`、`test/unit/timerange.test.ts` | 精确十进制、时间范围解析（含时区与日期边界） |
 | `test/unit/git.test.ts` | 仓库识别：主工作区、worktree、子模块、仓库内子目录、相对 `gitdir`、detached HEAD、不在仓库里 |
+| `test/agents/pi.test.ts` | pi 适配器：消息级用量、标题取最后一个 `session_info`、子 agent 目录识别 |
 | `test/agents/dsh.test.ts` | DSH 适配器：逐请求用量提取、项目归组、委派树重建、多帧 zstd 日志读取、无 storages 时的合成项目、归档标记、仓库归属 |
 | `test/cli.test.ts` | 端到端：真正拉起进程，校验 JSON 结构、退出码、`--agent`/`--provider` 选择 |
 
@@ -121,9 +122,11 @@ src/
 ├── agents/                维度一：从哪里读用量
 │   ├── contract.ts        AgentAdapter 接口
 │   ├── registry.ts        注册表与自动探测
-│   └── dsh/               DSH 适配器
-│       ├── loader.ts        会话日志 / 项目注册表 / 投影缓存 → 中立模型
-│       └── sessionlog.ts    会话日志（多帧 zstd）→ 委派树与逐请求用量
+│   ├── dsh/               DSH 适配器
+│   │   ├── loader.ts        会话日志 / 项目注册表 / 投影缓存 → 中立模型
+│   │   └── sessionlog.ts    会话日志（多帧 zstd）→ 委派树与逐请求用量
+│   └── pi/                pi 适配器
+│       └── loader.ts        会话 JSONL → 逐请求用量；子 agent 按目录识别委派
 ├── pricing/               维度二：怎么算钱
 │   ├── contract.ts        PricingProvider / PricePeriod / RateComponent
 │   ├── engine.ts          与厂商无关的区间选取、峰谷判定、按组件计费

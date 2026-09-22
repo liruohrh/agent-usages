@@ -10,9 +10,10 @@ import { UserError, renderDiagnostic } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
 import type { AgentAdapter } from './contract.ts';
 import { dshAgent } from './dsh/loader.ts';
+import { piAgent } from './pi/loader.ts';
 
 /** Every agent adapter this build knows about, in display order. */
-export const AGENT_ADAPTERS: readonly AgentAdapter[] = [dshAgent];
+export const AGENT_ADAPTERS: readonly AgentAdapter[] = [dshAgent, piAgent];
 
 /** Agent used when the user does not name one. */
 export const DEFAULT_AGENT = dshAgent.id;

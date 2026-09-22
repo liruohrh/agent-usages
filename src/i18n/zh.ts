@@ -348,6 +348,17 @@ export const zh = {
       `在 ${p.source} 下没有找到 DSH 用量数据：sessions/ 下没有会话日志，也没有 storages/session_projcache.json（可用 --home 指定，或设置 DSH_HOME）`,
     dshSessionHeaderMissing: (p: { path: string }) => `无法在 ${p.path} 中找到会话头（session 事件）`,
     dshSessionHeaderNoId: (p: { path: string }) => `${p.path} 的会话头缺少 id 字段`,
+    piSessionUnreadable: (p: { path: string }) => `pi 会话文件读不出来（缺少 session 头）: ${p.path}`,
+    piHomeNotAbsolute: (p: { value: string }) => `pi 数据目录必须是绝对路径，收到 ${p.value}`,
+    piNoData: (p: { source: string }) =>
+      `在 ${p.source} 下没有找到 pi 会话；用 --home 指定 pi 的 agent 目录（默认 ~/.pi/agent），或用 PI_CODING_AGENT_DIR 覆盖`,
+    piSessionNoun: '会话',
+    piNotes: (): readonly string[] => [
+      '用量来自 pi 自己的会话文件：~/.pi/agent/sessions/<项目>/<时间>_<uuid>.jsonl，每个 assistant 消息都带该次请求的 usage。',
+      '子 agent 是独立会话：pi 把它们放在与父会话同名的目录下（<父会话>.jsonl/<子会话>/run-<n>/session.jsonl），用量各记各的，父会话不会重复计入。',
+      '标题取最后一个 session_info 事件的 name，因为 pi 会随会话进展改名。',
+      '本工具只读这些文件，不读取 pi 的扩展数据。',
+    ],
     dshSessionNoun: '会话',
     dshNotes: (): readonly string[] => [
       '逐请求用量来自 harness 自己写的会话日志：每个 assistant/message 事件都带该步的 usage，因此不需要安装任何插件。',
