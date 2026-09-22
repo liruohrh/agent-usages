@@ -96,6 +96,16 @@ session.jsonl
 - **`workspace.json` 的 `sessionIds` 不是完整名册**：它由一次性 bootstrap 加后续显式挂载填充，实测只记录少数会话。因此工具不把它当 roster，只信路径。
 - **路径不在注册表里的会话**（例如项目已删或临时目录）按 `cwd` 合成一个项目，名字取路径 basename，不会丢。
 - **路径比较**统一分隔符、忽略大小写、去掉结尾分隔符（`pathKey`）。
+- **一个仓库可能被记成多个项目**：DSH 的 workspace 是目录，所以主工作区、它的 `git worktree`、被单独打开的 monorepo 子包各是一行，而 DSH 给 workspace 起的标题（`名称 (路径)`）也看不出它们同源。工具会读项目路径上的 `.git` 把它们关联起来（见 [Git 工作区](../README.md#git-工作区worktree)），判断逻辑与 DSH 无关，在 `src/core/git.ts`。
+
+## 归档会话
+
+`workspace.json` 的 `global.archivedSessionIds` 是 DSH 自己的归档名单（`session-<uuid>` 写法）。归档是**标签，不是过滤器**：
+
+- 归档会话的日志还在、账还在，所以照常统计——token 已经花掉了，不能因为 UI 收起来就当没发生；
+- 输出里只加一个标记：树节点与 `session list` 写成 `名字（已归档）`，JSON 里是 `"archived": true`；
+- 名单是全局的（不分项目），比较时两边都去掉 `session-` 前缀，两种拼写都认；
+- 归档与"续用/分叉"是两件正交的事：本机两个归档会话里，`session-97384534…` 恰好也是一个 fork 拷贝，它被归档、同时也被 seed 规则去重。
 
 ## 委派关系
 

@@ -14,7 +14,7 @@ import type { CostTotals, TokenTotals } from '../../src/core/types.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type FormatOptions, type ReportSection } from '../../src/format.ts';
 import { UserError } from '../../src/i18n/errors.ts';
-import type { ProjectReport, RateInfo, ScopeTotals, SessionListResult, SessionReport, UsageResult } from '../../src/report.ts';
+import type { ProjectReport, RateInfo, RepoGroup, ScopeTotals, SessionListResult, SessionReport, UsageResult } from '../../src/report.ts';
 import { stubProvider, TEST_CURRENCY } from '../support/stub-pricing.ts';
 
 const engine = createPricingEngine(stubProvider());
@@ -93,6 +93,7 @@ function report(overrides: Partial<UsageResult> = {}): UsageResult {
     bands: [],
     models: [],
     projects: [],
+    repos: [],
     warnings: [],
     ...overrides,
   };
@@ -474,6 +475,104 @@ describe('formatUsageReport', () => {
     const line = text.split('\n').find((row) => row.includes('👨‍👩‍👧')) ?? '';
     expect(line.endsWith('…')).toBe(true);
     expect([...line].every((glyph) => glyph === undefined || !glyph.includes('\u200d') || true)).toBe(true);
+  });
+});
+
+describe('git repositories', () => {
+  const MAIN_REPO = { name: 'Memolink', root: '/ws/apps/Memolink', kind: 'main' as const, branch: 'master' };
+  const WORKTREE_REPO = { name: 'Memolink', root: '/ws/apps/Memolink', kind: 'worktree' as const, branch: 'lynx-rewrite' };
+
+  /** A project with one session row, priced at `total`. */
+  function pricedProject(
+    id: string,
+    name: string,
+    path: string,
+    repo: ProjectReport['repo'],
+    requests: number,
+    total: string,
+  ): ProjectReport {
+    return projectRow({
+      id,
+      name,
+      path,
+      requests,
+      tokens: SMALL,
+      cost: cost(total),
+      firstUsage: 1_786_896_000_000,
+      repo,
+      own: totals(SMALL, requests, total),
+      spawned: totals(emptyBuckets(), 0, '0.0000', 0),
+      total: totals(SMALL, requests, total),
+      sessionReports: [sessionRow({ id: `${id}-s`, title: id, requests, tokens: SMALL, cost: cost(total) })],
+    });
+  }
+
+  it('folds a repository and its worktrees under one repository line', () => {
+    const main = pricedProject('p-main', 'Memolink', '/ws/apps/Memolink', MAIN_REPO, 10, '1.0000');
+    const worktree = pricedProject('p-wt', 'lynx-rewrite', '/orca/lynx-rewrite', WORKTREE_REPO, 5, '0.5000');
+    const group: RepoGroup = {
+      name: 'Memolink',
+      root: '/ws/apps/Memolink',
+      // Deliberately worktree-first: the renderer leads with the main tree.
+      projects: [worktree, main],
+      projectIds: ['p-wt', 'p-main'],
+      sessions: 2,
+      activeSessions: 2,
+      subagentSessions: 0,
+      requests: 15,
+      firstUsage: 1_786_896_000_000,
+      lastUsage: 1_786_896_000_000,
+      tokens: SMALL,
+      cost: cost('1.5000'),
+      own: totals(SMALL, 15, '1.5000', 2),
+      spawned: totals(emptyBuckets(), 0, '0.0000', 0),
+      total: totals(SMALL, 15, '1.5000', 2),
+    };
+    const text = render(
+      report({
+        requests: 15,
+        tokens: SMALL,
+        cost: cost('1.5000'),
+        projects: [worktree, main],
+        repos: [group],
+      }),
+    );
+
+    expect(text).toContain('Memolink 仓库 · 2 个项目');
+    expect(text).toContain('· git worktree · lynx-rewrite');
+    // The main working tree leads the group even though the report ordered the
+    // worktree first; every project keeps its own name and numbers.
+    expect(text.indexOf('Memolink 2026')).toBeLessThan(text.indexOf('lynx-rewrite 2026'));
+    expect(text).toContain('Q 15');
+    expect(text).toContain('Q 10');
+    expect(text).toContain('Q 5');
+  });
+
+  it('leaves a lone project without a repository line, keeping its badge', () => {
+    const worktree = pricedProject('p-wt', 'lynx-rewrite', '/orca/lynx-rewrite', WORKTREE_REPO, 5, '0.5000');
+    const group: RepoGroup = {
+      name: 'Memolink',
+      root: '/ws/apps/Memolink',
+      projects: [worktree],
+      projectIds: ['p-wt'],
+      sessions: 1,
+      activeSessions: 1,
+      subagentSessions: 0,
+      requests: 5,
+      firstUsage: 1_786_896_000_000,
+      lastUsage: 1_786_896_000_000,
+      tokens: SMALL,
+      cost: cost('0.5000'),
+      own: totals(SMALL, 5, '0.5000'),
+      spawned: totals(emptyBuckets(), 0, '0.0000', 0),
+      total: totals(SMALL, 5, '0.5000'),
+    };
+    const text = render(report({ requests: 5, tokens: SMALL, cost: cost('0.5000'), projects: [worktree], repos: [group] }));
+
+    // One project needs no repository row above it — but the badge still says
+    // which repository it belongs to.
+    expect(text).not.toContain('仓库 ·');
+    expect(text).toContain('lynx-rewrite 2026-08-17 · git worktree · lynx-rewrite');
   });
 });
 

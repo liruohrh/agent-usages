@@ -34,6 +34,13 @@ export const en: Messages = {
   tree: {
     untitled: '(untitled)',
     subagents: (count: string) => ` (${count} subagents)`,
+    archived: ' (archived)',
+  },
+  repo: {
+    heading: (name: string, count: string) => `${name} repo · ${count} projects`,
+    worktree: (branch: string) => (branch.length === 0 ? 'git worktree' : `git worktree · ${branch}`),
+    submodule: (branch: string) => (branch.length === 0 ? 'git submodule' : `git submodule · ${branch}`),
+    inside: (name: string) => `git repo · ${name}`,
   },
   section: {
     bands: 'Pricing bands:',
@@ -131,6 +138,7 @@ export const en: Messages = {
     cost: 'append the pricing bands: each band’s own metric line and unit prices',
     models: 'expand every node that billed under more than one model',
     projectFilter: 'only these projects: id, name or path (* wildcards; repeatable)',
+    repoFilter: 'only these git repositories: name or main working tree path (* wildcards; repeatable)',
     sessionFilter: 'only these sessions: id, unique prefix or title (exact, trimmed; * wildcards; repeatable)',
     currency: 'currency to display (defaults to the system language: yuan for Chinese, dollars otherwise)',
     currencyRate: 'rate from 1 unit of the priced currency (usable alone; then no currency is named)',
@@ -140,6 +148,7 @@ export const en: Messages = {
     sessionListSubagents: 'list subagents on their own rows (folded into their parent by default)',
     sessionListProjectFilter: 'only these projects (repeatable)',
     sessionListSessionFilter: 'only these sessions: id, unique prefix or title (exact, trimmed; repeatable)',
+    sessionListRepoFilter: 'only these git repositories: name or main working tree path (* wildcards; repeatable)',
     price: 'show the price lists and when each period applies (reads no data)',
     priceAll: 'list every pricing provider',
     priceCurrency: 'only this currency’s list, e.g. CNY / USD',
@@ -223,6 +232,7 @@ export const en: Messages = {
     storeNotJson: (p: { reason: string }) => `not valid JSON: ${p.reason}`,
     /* ---- report warnings ---- */
     noProjectMatch: (p: { selector: string }) => `no project matches "${p.selector}"`,
+    noRepoMatch: (p: { selector: string }) => `no git repository matches "${p.selector}"`,
     noSessionMatch: (p: { selector: string }) => `no session matches "${p.selector}"`,
     sessionNotFound: (p: { selector: string }) => `no session found for "${p.selector}"`,
     sessionAmbiguous: (p: { selector: string; count: number; candidates: string }) =>

@@ -85,6 +85,7 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 | `--cost` | 附上 `计价区间`：每段含自己的指标行与单价（按计费项给） |
 | `--models` | 多模型的节点逐个模型展开成一行 |
 | `-p, --project-filter <sel>` | 只看指定项目：id、名称或路径；支持 `*` 通配；可重复 |
+| `-r, --repo-filter <sel>` | 只看指定 git 仓库：仓库名或主工作区路径；支持 `*` 通配；可重复 |
 | `-s, --session-filter <sel>` | 只看指定会话：完整 id、唯一 id 前缀，或**标题**（标题需完全一致，忽略前后空格）；支持 `*` 通配；可重复 |
 | `--range <spec>` | 时间范围：`today` / `week` / `month` / `year`（支持 `week-1` 这类偏移）或 `起始..结束`（左闭右开） |
 | `--currency <code>` | 显示货币；默认按系统语言（中文 CNY、英文 USD…），可指定任意币种（用内置汇率表折算） |
@@ -95,9 +96,11 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 
 ### `session list`
 
-列出所有项目与会话。**项目按首个会话时间降序，会话按时间降序**，支持 `--json`、`--subagents`、`-p/--project-filter`、`-s/--session-filter`（同样可按标题筛选）。
+列出所有项目与会话。**项目按首个会话时间降序，会话按时间降序**，支持 `--json`、`--subagents`、`-p/--project-filter`、`-s/--session-filter`（同样可按标题筛选）、`-r/--repo-filter`。
 
 排序中的“会话时间”指该会话**首次计费请求**的时间；从未产生用量的会话回退到创建时间。默认只列出一级会话（其请求数已含子代理），加 `--subagents` 后子代理以 `↳` 缩进显示在其父会话下方。
+
+被 agent 归档的会话照常列出、照常计入，只在标题后标记 `（已归档）`（JSON 里是 `archived: true`）——归档是 agent 界面层的收纳动作，不改变已经花掉的 token。
 
 ### `price`
 
@@ -451,16 +454,23 @@ agent-usages usage --range 2026-09-01         # 只给一个时间 = 从这时�
                                         "tokens": 130399872, "amount": "4.6782" } ] } ],
   "models":   [ { "model": "deepseek-v4-flash", "requests": 1730, "tokens": {}, "cost": {} } ],
   "projects": [ { "id": "12345678-…", "name": "example-c", "path": "…",
+                  "repo": { "name": "example", "root": "/home/user/ws/example",
+                            "kind": "worktree", "branch": "feature-x" },
                   "sessions": 44, "activeSessions": 44,
                   "subagentSessions": 42, "requests": 1447,
                   "firstUsage": 178…, "firstUsageIso": "2026-08-27T…",
                   "tokens": {}, "cost": {}, "pricingBands": [], "models": [],
                   "own": {}, "spawned": {}, "nodeTotal": {},   // 自身 / 子代理 / 两者之和
                   "sessionReports": [
-                    { "id": "session-…", "isSubagent": false, "subagentCount": 42,
+                    { "id": "session-…", "isSubagent": false, "archived": false,
+                      "subagentCount": 42,
                       "parentId": null, "requests": 1374, "tokens": {}, "cost": {},
                       "own": {}, "spawned": {}, "nodeTotal": {} }
                   ] } ],
+  "repos":    [ { "name": "example", "root": "/home/user/ws/example",
+                  "projectIds": ["12345678-…", "87654321-…"],
+                  "requests": 1730, "tokens": {}, "cost": {},
+                  "own": {}, "spawned": {}, "nodeTotal": {} } ],   // 每个仓库都给，文本只折叠多项目的
   "warnings": []
 }
 ```

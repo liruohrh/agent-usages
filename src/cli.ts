@@ -72,6 +72,7 @@ interface UsageOptions extends GlobalOptions {
   models?: boolean;
   projectFilter?: string[];
   sessionFilter?: string[];
+  repoFilter?: string[];
   range?: string;
   currency?: string;
   currencyRate?: string;
@@ -261,6 +262,7 @@ async function runUsage(options: UsageOptions): Promise<void> {
       subagentMode,
       ...(options.projectFilter === undefined ? {} : { projects: options.projectFilter }),
       ...(options.sessionFilter === undefined ? {} : { sessions: options.sessionFilter }),
+      ...(options.repoFilter === undefined ? {} : { repos: options.repoFilter }),
     };
     const result = runQuery(dataset, query, { engine, pricingProvider: engine.provider.id });
     // Configuration problems belong where the other warnings are shown.
@@ -290,6 +292,7 @@ interface SessionListOptions extends GlobalOptions {
   subagents?: boolean;
   projectFilter?: string[];
   sessionFilter?: string[];
+  repoFilter?: string[];
 }
 
 /** The `session list` command implementation. */
@@ -301,6 +304,7 @@ async function runSessionList(options: SessionListOptions): Promise<void> {
     includeSubagents: options.subagents === true,
     ...(options.projectFilter === undefined ? {} : { projects: options.projectFilter }),
     ...(options.sessionFilter === undefined ? {} : { sessions: options.sessionFilter }),
+    ...(options.repoFilter === undefined ? {} : { repos: options.repoFilter }),
   };
   const result = listSessions(loaded.dataset, filters);
   emit(
@@ -544,6 +548,7 @@ export function buildProgram(): Command {
       .option('--models', t().help.models)
       .option('-p, --project-filter <selector>', t().help.projectFilter, collect)
       .option('-s, --session-filter <selector>', t().help.sessionFilter, collect)
+      .option('-r, --repo-filter <selector>', t().help.repoFilter, collect)
       .option('--currency <code>', t().help.currency)
       .option('--currency-rate <rate>', t().help.currencyRate, parseRateOption)
       .option('--rate-mode <mode>', t().help.rateMode),
@@ -578,7 +583,8 @@ export function buildProgram(): Command {
       .description(t().help.sessionList)
       .option('--subagents', t().help.sessionListSubagents)
       .option('-p, --project-filter <selector>', t().help.sessionListProjectFilter, collect)
-      .option('-s, --session-filter <selector>', t().help.sessionListSessionFilter, collect),
+      .option('-s, --session-filter <selector>', t().help.sessionListSessionFilter, collect)
+      .option('-r, --repo-filter <selector>', t().help.sessionListRepoFilter, collect),
   ).action(async (options: SessionListOptions, command: Command) => {
     await runSessionList(withGlobals(command, options));
   });

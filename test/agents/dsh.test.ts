@@ -799,3 +799,41 @@ describe('resumed sessions', () => {
     await rm(resumed, { recursive: true, force: true });
   });
 });
+
+describe('git repositories', () => {
+  it('maps a project directory to the repository it belongs to', async () => {
+    // Two projects that are the same repository: a main working tree, and a
+    // worktree of it opened somewhere else — the case that makes one
+    // repository look like two unrelated rows.
+    const home = await mkdtemp(join(tmpdir(), 'agent-usages-repo-'));
+    const main = join(home, 'repo');
+    const worktree = join(home, 'elsewhere', 'lynx-rewrite');
+    await mkdir(join(main, '.git', 'worktrees', 'lynx-rewrite'), { recursive: true });
+    await writeFile(join(main, '.git', 'HEAD'), 'ref: refs/heads/master\n');
+    await writeFile(join(main, '.git', 'worktrees', 'lynx-rewrite', 'HEAD'), 'ref: refs/heads/lynx-rewrite\n');
+    await mkdir(worktree, { recursive: true });
+    await writeFile(join(worktree, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'lynx-rewrite')}\n`);
+
+    // Neither directory is a registered workspace, so each session becomes a
+    // project of its own — keyed by the cwd the log records.
+    await writeSessionLog(home, 'session-11111111-0000-4000-8000-000000000011', main, {
+      delegationDepth: 0,
+      createdAt: 1,
+    }, '主仓库会话', [step(1, 1, AT.septemberOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 })]);
+    await writeSessionLog(home, 'session-22222222-0000-4000-8000-000000000022', worktree, {
+      delegationDepth: 0,
+      createdAt: 2,
+    }, '工作区会话', [step(1, 1, AT.septemberOffPeak, { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 })]);
+
+    const data = await dshAgent.load({ home });
+    const byPath = new Map(data.projects.map((project) => [project.path, project]));
+    expect(byPath.get(main)?.repo).toEqual({ name: 'repo', root: main, kind: 'main', branch: 'master' });
+    expect(byPath.get(worktree)?.repo).toEqual({
+      name: 'repo',
+      root: main,
+      kind: 'worktree',
+      branch: 'lynx-rewrite',
+    });
+    await rm(home, { recursive: true, force: true });
+  });
+});

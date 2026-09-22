@@ -502,6 +502,51 @@ describe('session list', () => {
   });
 });
 
+describe('git repositories', () => {
+  it('reports a worktree and its main tree as one repository', async () => {
+    // A DSH home of its own: two sessions whose cwd is a real directory, one a
+    // worktree of the other, so the report can tell they share a repository.
+    const repoHome = await mkdtemp(join(tmpdir(), 'agent-usages-repo-cli-'));
+    const main = join(repoHome, 'repo');
+    const worktree = join(repoHome, 'lynx-rewrite');
+    await mkdir(join(main, '.git', 'worktrees', 'lynx-rewrite'), { recursive: true });
+    await writeFile(join(main, '.git', 'HEAD'), 'ref: refs/heads/master\n');
+    await writeFile(join(main, '.git', 'worktrees', 'lynx-rewrite', 'HEAD'), 'ref: refs/heads/lynx-rewrite\n');
+    await mkdir(worktree, { recursive: true });
+    await writeFile(join(worktree, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'lynx-rewrite')}\n`);
+
+    /** Write one session log whose single request bills 1M of each bucket. */
+    const writeLog = async (dir: string, id: string): Promise<void> => {
+      const sessionDir = join(repoHome, 'sessions', 'proj', id);
+      await mkdir(sessionDir, { recursive: true });
+      const lines = [
+        JSON.stringify({ type: 'session', version: 0, id, createdAt: OFF_PEAK, cwd: dir, delegationDepth: 0 }),
+        JSON.stringify({
+          type: 'assistant/message',
+          seq: 5,
+          time: OFF_PEAK,
+          data: {
+            turn: 1,
+            step: 1,
+            message: { source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
+            usage: { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+          },
+        }),
+      ];
+      await writeFile(join(sessionDir, 'session.jsonl'), `${lines.join('\n')}\n`);
+    };
+    await writeLog(main, 'session-11111111-0000-4000-8000-0000000000aa');
+    await writeLog(worktree, 'session-22222222-0000-4000-8000-0000000000bb');
+
+    const { stdout } = await cli(['usage', '--home', repoHome, '--no-update']);
+    expect(stdout).toContain('repo 仓库 · 2 个项目');
+    expect(stdout).toContain('· git worktree · lynx-rewrite');
+    // The repository line carries the sum of the two projects under it.
+    expect(stdout).toContain('Q 2 ·');
+    await rm(repoHome, { recursive: true, force: true });
+  });
+});
+
 describe('price', () => {
   it('prints the schedule with its sources, without reading any data', async () => {
     const { code, stdout } = await cli(['price'], { HOME: '/nowhere' });

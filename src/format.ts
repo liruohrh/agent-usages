@@ -14,11 +14,12 @@ import { moneyBreakdown, type MoneyBreakdown } from './accounting.ts';
 import { t } from './i18n/index.ts';
 import { displayRate } from './pricing/index.ts';
 import { tokenBreakdown } from './core/buckets.ts';
-import type { CostTotals, TokenTotals } from './core/types.ts';
+import type { CostTotals, RepoInfo, TokenTotals } from './core/types.ts';
 import type {
   BandSummary,
   ModelBreakdown,
   ProjectReport,
+  RepoGroup,
   ScopeTotals,
   SessionListResult,
   SessionReport,
@@ -444,6 +445,37 @@ function sessionLines(
   return lines;
 }
 
+/**
+ * How a project relates to its git repository, as a badge.
+ *
+ * The badge names the git object and the one detail that varies with it —
+ * `git worktree · <branch>` — so it stands on its own when a worktree is
+ * selected and printed without the repository row above it. The repository's
+ * own name lives on that row.
+ *
+ * @param repo - the project's repository, when it is inside one.
+ * @returns the badge text, or an empty string for a repository's main tree.
+ */
+function repoBadge(repo: RepoInfo | undefined): string {
+  if (repo === undefined) return '';
+  const labels = t().repo;
+  if (repo.kind === 'worktree') return labels.worktree(repo.branch ?? '');
+  if (repo.kind === 'submodule') return labels.submodule(repo.branch ?? '');
+  if (repo.kind === 'subdir') return labels.inside(repo.name);
+  return '';
+}
+
+/**
+ * The badge a project heading carries in the session inventory.
+ *
+ * @param project - the project row.
+ * @returns ` · <badge>`, or an empty string for a repository's main tree.
+ */
+function projectBadge(project: { repo?: RepoInfo | undefined }): string {
+  const badge = repoBadge(project.repo);
+  return badge.length === 0 ? '' : ` · ${badge}`;
+}
+
 /** One project's block: its name, its metrics, and its sessions. */
 function projectLines(project: ProjectReport, symbol: string, options: FormatOptions): string[] {
   const rows = project.sessionReports ?? [];
@@ -457,7 +489,8 @@ function projectLines(project: ProjectReport, symbol: string, options: FormatOpt
     else bucket.push(row);
   }
   const projectStart = project.firstUsage === null ? undefined : dayText(project.firstUsage);
-  const lines = [projectStart === undefined ? project.name : `${project.name} ${projectStart}`];
+  const start = projectStart === undefined ? project.name : `${project.name} ${projectStart}`;
+  const lines = [`${start}${projectBadge(project)}`];
   // A project whose whole tree is one session repeats that session's numbers, so
   // its own line is dropped.
   const shown = moneyBreakdown(project.total.cost, project.total.tokens);
@@ -476,6 +509,101 @@ function projectLines(project: ProjectReport, symbol: string, options: FormatOpt
   return lines;
 }
 
+/** One top-level node of the tree: a repository, or a project that has none. */
+type TreeNode =
+  | { kind: 'repo'; group: RepoGroup; members: ProjectReport[]; heading: string }
+  | { kind: 'project'; project: ProjectReport };
+
+/** Sort rank inside a repository group: the main working tree comes first. */
+function rankInRepo(project: ProjectReport): number {
+  return project.repo?.kind === 'main' ? 0 : 1;
+}
+
+/**
+ * Group the active projects into top-level nodes.
+ *
+ * A repository appears as its own node only when it actually folds several
+ * projects together — its main working tree plus at least one worktree, say.
+ * One project does not need a repository line above it, exactly as one project
+ * does not need the root's numbers repeated.
+ *
+ * @param active - projects with rows to show, in report order.
+ * @param repos - the report's repository groups.
+ * @returns the nodes, in the order their first project appeared.
+ */
+function topLevelNodes(active: readonly ProjectReport[], repos: readonly RepoGroup[]): TreeNode[] {
+  const activeIds = new Set(active.map((project) => project.id));
+  const byProject = new Map<string, { group: RepoGroup; members: ProjectReport[] }>();
+  for (const group of repos) {
+    const members = group.projects.filter((project) => activeIds.has(project.id));
+    if (members.length < 2) continue;
+    // The repository's own working tree leads; its worktrees follow, so the
+    // group reads as "this repository, and the checkouts cut from it".
+    const ordered = [...members].sort(
+      (left, right) => rankInRepo(left) - rankInRepo(right),
+    );
+    for (const member of ordered) byProject.set(member.id, { group, members: ordered });
+  }
+  const nodes: TreeNode[] = [];
+  const placed = new Set<string>();
+  for (const project of active) {
+    if (placed.has(project.id)) continue;
+    const entry = byProject.get(project.id);
+    if (entry === undefined) {
+      nodes.push({ kind: 'project', project });
+      continue;
+    }
+    // Two repositories may share a directory name; the path disambiguates.
+    const clashing = repos.some((other) => other !== entry.group && other.name === entry.group.name);
+    nodes.push({
+      kind: 'repo',
+      group: entry.group,
+      members: entry.members,
+      heading: clashing ? `${entry.group.name} (${entry.group.root})` : entry.group.name,
+    });
+    for (const member of entry.members) placed.add(member.id);
+  }
+  return nodes;
+}
+
+/**
+ * One repository's block: its heading and metrics, then its projects.
+ *
+ * The projects are the same blocks they would be on their own, indented one
+ * level, so a worktree keeps its own name, path, badge and sessions.
+ *
+ * @param node - the repository node.
+ * @param symbol - currency symbol to print.
+ * @param options - what to include beyond the default tree.
+ * @returns the block's lines.
+ */
+function repoLines(
+  node: Extract<TreeNode, { kind: 'repo' }>,
+  symbol: string,
+  options: FormatOptions,
+): string[] {
+  const { group, members, heading } = node;
+  const start = group.firstUsage === null ? undefined : dayText(group.firstUsage);
+  const title = t().repo.heading(heading, count(members.length));
+  const lines = [start === undefined ? title : `${title} ${start}`];
+  const money = moneyBreakdown(group.cost, group.tokens);
+  // The same rule as every other level: a repository whose projects spawned
+  // nothing says everything in one line.
+  const split = group.spawned.requests > 0 || members.some((project) => project.subagentSessions > 0);
+  lines.push(
+    options.scope === true && split
+      ? [...scopeLines(group, 1, symbol)].join('\n')
+      : `${indent(1)}${metricsLine(group.tokens, money, group.requests, symbol)}`,
+  );
+  for (const member of members) {
+    // A project block may hold embedded newlines (a scope block is one string),
+    // so every line is indented, not just the first.
+    const block = projectLines(member, symbol, options).flatMap((line) => line.split('\n'));
+    lines.push(...block.map((line) => `${indent(1)}${line}`));
+  }
+  return lines;
+}
+
 /** Render one window: its heading, the root total, and the project tree. */
 function renderSection(section: ReportSection, symbol: string, options: FormatOptions): string[] {
   const { result } = section;
@@ -484,10 +612,11 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
   const lines = [span === undefined ? section.label : `${section.label} · ${span}`];
   // A project that billed nothing in range has no rows to show.
   const active = result.projects.filter((project) => (project.sessionReports ?? []).length > 0);
-  // One project already prints exactly the report's own numbers, so the root
-  // block would only repeat them.
+  const nodes = topLevelNodes(active, result.repos);
+  // One node already prints exactly the report's own numbers, so the root block
+  // would only repeat them.
   const rootMoney = moneyBreakdown(result.cost, result.tokens);
-  if (active.length !== 1) {
+  if (nodes.length !== 1) {
     lines.push(
       options.scope === true && result.scopeBreakdown !== undefined
         ? [...scopeLines({ own: result.scopeBreakdown.own, spawned: result.scopeBreakdown.subagents, total: result.scopeBreakdown.total }, 1, symbol)].join('\n')
@@ -495,8 +624,11 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
     );
     if (options.models === true) lines.push(...modelLines(result.models, 1, symbol));
   }
-  for (const project of active) {
-    lines.push('', ...projectLines(project, symbol, options));
+  for (const node of nodes) {
+    lines.push(
+      '',
+      ...(node.kind === 'repo' ? repoLines(node, symbol, options) : projectLines(node.project, symbol, options)),
+    );
   }
   if (options.cost === true) {
     const bands = bandBlocks(result.bands, symbol, result.rateInfo.mode === 'historical');
@@ -579,7 +711,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
   for (const project of result.projects) {
     sections.push(
       [
-        `▸ ${project.name}  ${project.path}`,
+        `▸ ${project.name}  ${project.path}${projectBadge(project)}`,
         `  ${labels.list.sessionCount(
           count(project.sessions.length),
           count(project.sessionCount),
@@ -671,6 +803,26 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
     // separate component list would be the same data projected twice.
     pricingBands: result.bands,
     models: result.models,
+    // Every repository any project belongs to, whether or not the text report
+    // found it worth a line of its own.
+    repos: result.repos.map((group) => ({
+      name: group.name,
+      root: group.root,
+      projectIds: group.projectIds,
+      sessions: group.sessions,
+      activeSessions: group.activeSessions,
+      subagentSessions: group.subagentSessions,
+      requests: group.requests,
+      firstUsage: group.firstUsage,
+      firstUsageIso: iso(group.firstUsage),
+      lastUsage: group.lastUsage,
+      lastUsageIso: iso(group.lastUsage),
+      tokens: group.tokens,
+      cost: group.cost,
+      own: scopeToJson(group.own),
+      spawned: scopeToJson(group.spawned),
+      nodeTotal: scopeToJson(group.total),
+    })),
     projects: result.projects.map((project) => ({
       id: project.id,
       name: project.name,
@@ -678,6 +830,7 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
       sessions: project.sessions,
       activeSessions: project.activeSessions,
       subagentSessions: project.subagentSessions,
+      ...(project.repo === undefined ? {} : { repo: project.repo }),
       requests: project.requests,
       firstUsage: project.firstUsage,
       firstUsageIso: iso(project.firstUsage),
@@ -774,6 +927,7 @@ export function sessionListToJson(result: SessionListResult): unknown {
       path: project.path,
       sessionCount: project.sessionCount,
       listRows: project.sessions.length,
+      ...(project.repo === undefined ? {} : { repo: project.repo }),
       firstUsage: project.firstUsage,
       firstUsageIso: iso(project.firstUsage),
       lastUsage: project.lastUsage,

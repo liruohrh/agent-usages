@@ -42,6 +42,18 @@ export const zh = {
   tree: {
     untitled: '(无标题)',
     subagents: (count: string) => `（${count} 个子代理）`,
+    archived: '（已归档）',
+  },
+  /** Git repository rows and badges in the tree. */
+  repo: {
+    /** `Memolink 仓库 · 2 个项目` */
+    heading: (name: string, count: string) => `${name} 仓库 · ${count} 个项目`,
+    /** `git worktree · lynx-rewrite` — git 自己的术语，两种语言都不译。 */
+    worktree: (branch: string) => (branch.length === 0 ? 'git worktree' : `git worktree · ${branch}`),
+    /** `git submodule · inner` */
+    submodule: (branch: string) => (branch.length === 0 ? 'git submodule' : `git submodule · ${branch}`),
+    /** `git repo · Memolink`：项目在仓库里，但不是主工作区也不是 worktree。 */
+    inside: (name: string) => `git repo · ${name}`,
   },
   /** Block headings. */
   section: {
@@ -161,6 +173,7 @@ export const zh = {
     cost: '附上计价区间：每段自己的指标行与单价（按计费项）',
     models: '把用了多个模型的节点逐个模型展开',
     projectFilter: '只统计指定项目：id、名称或路径（支持 * 通配；可重复）',
+    repoFilter: '只统计指定 git 仓库：仓库名或主工作区路径（支持 * 通配；可重复）',
     sessionFilter: '只统计指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；支持 * 通配；可重复）',
     currency: '显示货币（默认按系统语言选，中文人民币、英文美元）',
     currencyRate: '1 单位计价货币折算为目标货币的汇率（可单独使用，此时不显示货币）',
@@ -170,6 +183,7 @@ export const zh = {
     sessionListSubagents: '将子代理单独列出（默认并入其父会话）',
     sessionListProjectFilter: '只列出指定项目（可重复）',
     sessionListSessionFilter: '只列出指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；可重复）',
+    sessionListRepoFilter: '只列出指定 git 仓库：仓库名或主工作区路径（支持 * 通配；可重复）',
     price: '显示价格表与生效区间（不读取任何数据）',
     priceAll: '列出全部计价来源',
     priceCurrency: '只看某个币种的价格表，如 CNY / USD',
@@ -259,6 +273,7 @@ export const zh = {
     storeNotJson: (p: { reason: string }) => `不是合法 JSON：${p.reason}`,
     /* ---- report warnings ---- */
     noProjectMatch: (p: { selector: string }) => `没有项目匹配 "${p.selector}"`,
+    noRepoMatch: (p: { selector: string }) => `没有 git 仓库匹配 "${p.selector}"`,
     noSessionMatch: (p: { selector: string }) => `没有会话匹配 "${p.selector}"`,
     sessionNotFound: (p: { selector: string }) => `找不到会话 "${p.selector}"`,
     sessionAmbiguous: (p: { selector: string; count: number; candidates: string }) =>

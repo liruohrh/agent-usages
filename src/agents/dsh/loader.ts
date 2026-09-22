@@ -34,6 +34,7 @@ import type {
   UsageDataset,
   UsageRecord,
 } from '../../core/types.ts';
+import { repoOf } from '../../core/git.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
 import { readSessionLogIndex, locateSessionLogs, type SessionLogInfo } from './sessionlog.ts';
 
@@ -311,6 +312,17 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       sessions: members,
     });
   }
+  // One repository shows up as several projects when its worktrees are opened
+  // as projects of their own, so each project carries the repository it belongs
+  // to. A path the report cannot map (already deleted, not a checkout at all)
+  // simply stays without one.
+  await Promise.all(
+    projects.map(async (project) => {
+      if (project.path.length === 0) return;
+      const repo = await repoOf(project.path);
+      if (repo !== undefined) project.repo = repo;
+    }),
+  );
   projects.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 
   const stats: DatasetStats = {

@@ -83,6 +83,28 @@ export interface SessionRecord {
   extra?: Readonly<Record<string, unknown>> | undefined;
 }
 
+/** How a project's directory relates to the git repository it sits in. */
+export type RepoKind = 'main' | 'worktree' | 'submodule' | 'subdir';
+
+/**
+ * The git repository a project belongs to.
+ *
+ * Agents identify projects by directory, so one repository can show up as
+ * several projects: its main working tree, each `git worktree` checked out
+ * somewhere else, and any subdirectory opened on its own. This is the map back
+ * to the one repository they share.
+ */
+export interface RepoInfo {
+  /** Repository display name: the main working tree's directory name. */
+  name: string;
+  /** Absolute path of the main working tree, the repository's stable identity. */
+  root: string;
+  /** How this project relates to the repository. */
+  kind: RepoKind;
+  /** Branch this project has checked out, when `HEAD` names one. */
+  branch?: string | undefined;
+}
+
 /** One project: a group of sessions the agent considers one workspace. */
 export interface ProjectRecord {
   /** Stable project key (a workspace id, or the agent's own grouping key). */
@@ -93,6 +115,8 @@ export interface ProjectRecord {
   path: string;
   /** Sessions belonging to this project, in the adapter's order. */
   sessions: SessionRecord[];
+  /** The git repository this directory belongs to, when it is inside one. */
+  repo?: RepoInfo | undefined;
 }
 
 /** Everything an agent adapter recovered from its on-disk state. */

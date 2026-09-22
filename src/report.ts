@@ -10,7 +10,7 @@
  */
 
 import { addBuckets, emptyBuckets } from './core/buckets.ts';
-import type { CostTotals, ProjectRecord, SessionRecord, TokenTotals, UsageDataset, UsageRecord } from './core/types.ts';
+import type { CostTotals, ProjectRecord, RepoInfo, SessionRecord, TokenTotals, UsageDataset, UsageRecord } from './core/types.ts';
 import { addCostTotals, addSummaries, costOf, zeroCostTotals, type CostSummary } from './accounting.ts';
 import { UserError, renderDiagnostic, type Warning } from './i18n/errors.ts';
 import { t } from './i18n/index.ts';
@@ -69,6 +69,8 @@ export interface UsageQuery {
   projects?: readonly string[] | undefined;
   /** Session selectors: session id, or any unambiguous id prefix. */
   sessions?: readonly string[] | undefined;
+  /** Repository selectors: repository name, root path, or a `*` glob. */
+  repos?: readonly string[] | undefined;
   /** Half-open time range applied to each record's own timestamp. */
   range: TimeRange;
   /** Currency being displayed, when the user named one. */
@@ -219,8 +221,50 @@ export interface ProjectReport {
   bands: BandSummary[];
   /** Per-model figures. */
   models: ModelBreakdown[];
+  /** The git repository this project belongs to, when it is inside one. */
+  repo?: RepoInfo | undefined;
   /** Present only in the `session` dimension. */
   sessionReports?: SessionReport[] | undefined;
+}
+
+/**
+ * Every project of one git repository, aggregated.
+ *
+ * A repository is not a project: its main working tree and each `git worktree`
+ * opened elsewhere are separate projects to the agent, so the report rolls them
+ * up so the repository's real bill is visible as one line.
+ */
+export interface RepoGroup {
+  /** Repository display name. */
+  name: string;
+  /** Absolute path of the main working tree: the repository's identity. */
+  root: string;
+  /** The projects that belong to it, in report order. */
+  projects: ProjectReport[];
+  /** Project ids, for consumers that build their own index. */
+  projectIds: string[];
+  /** Sessions represented. */
+  sessions: number;
+  /** Sessions that billed at least one request in range. */
+  activeSessions: number;
+  /** Subagent sessions covered. */
+  subagentSessions: number;
+  /** Requests billed. */
+  requests: number;
+  /** First billed request in range. */
+  firstUsage: number | null;
+  /** Last billed request in range. */
+  lastUsage: number | null;
+  /** Token totals. */
+  tokens: TokenTotals;
+  /** Cost totals. */
+  cost: CostTotals;
+  /** Requests from sessions a human started, across the repository. */
+  own: ScopeTotals;
+  /** Requests from every subagent under it. */
+  spawned: ScopeTotals;
+  /** `own` + `spawned`, summed at full precision. */
+  total: ScopeTotals;
 }
 
 /** One or more sessions plus everything they spawned, aggregated. */
@@ -293,6 +337,14 @@ export interface UsageResult {
   models: ModelBreakdown[];
   /** Per-project rows. */
   projects: ProjectReport[];
+  /**
+   * Per-repository rows: one entry per repository any project belongs to.
+   *
+   * Always present, so a consumer can group projects without repeating the
+   * detection; the text report only prints the repositories that actually fold
+   * several projects together.
+   */
+  repos: RepoGroup[];
   /** Non-fatal problems worth showing. */
   warnings: Warning[];
 }
@@ -434,6 +486,40 @@ export function resolveSessionSelectors(
     }
   }
   return { ids, errors };
+}
+
+/** Every spelling of a repository a selector may refer to. */
+function repoKeys(repo: RepoInfo): string[] {
+  return [repo.name, repo.root].filter((key) => key.length > 0);
+}
+
+/**
+ * Resolve repository selectors to the ids of the projects inside them.
+ *
+ * A repository selector is the convenient way to ask "everything in Memolink",
+ * whose projects (`Memolink`, `lynx-rewrite`, a package opened on its own) are
+ * otherwise three unrelated rows.
+ *
+ * @param projects - every project of the dataset.
+ * @param selectors - repository names, root paths, or `*` globs.
+ * @returns the selected project ids, and one warning per selector that matched nothing.
+ */
+export function resolveRepoSelectors(
+  projects: readonly ProjectRecord[],
+  selectors: readonly string[],
+): { keys: Set<string>; errors: Warning[] } {
+  const keys = new Set<string>();
+  const errors: Warning[] = [];
+  for (const selector of selectors) {
+    const trimmed = selector.trim();
+    if (trimmed.length === 0) continue;
+    const matched = projects.filter(
+      (project) => project.repo !== undefined && repoKeys(project.repo).some((key) => matchesAny(key, [trimmed])),
+    );
+    if (matched.length === 0) errors.push(new UserError('noRepoMatch', { selector: trimmed }));
+    for (const project of matched) keys.add(project.id);
+  }
+  return { keys, errors };
 }
 
 /** Resolve project selectors to concrete project ids, rejecting ambiguity. */
@@ -654,6 +740,63 @@ function sessionReport(input: SessionRowInput): SessionReport {
   return row;
 }
 
+/**
+ * Roll projects up by the git repository they belong to.
+ *
+ * Projects without repository information (a checkout that was deleted, a
+ * directory that never was one) are left out rather than grouped together:
+ * inventing a repository for them would be a lie.
+ *
+ * @param projects - the priced project rows, in report order.
+ * @returns one group per repository, in the order its first project appeared.
+ */
+function groupByRepo(projects: readonly ProjectReport[]): RepoGroup[] {
+  const order: string[] = [];
+  const byRoot = new Map<string, ProjectReport[]>();
+  for (const project of projects) {
+    const repo = project.repo;
+    if (repo === undefined) continue;
+    const bucket = byRoot.get(repo.root);
+    if (bucket === undefined) {
+      byRoot.set(repo.root, [project]);
+      order.push(repo.root);
+    } else {
+      bucket.push(project);
+    }
+  }
+  return order.map((root) => {
+    const members = byRoot.get(root) as ProjectReport[];
+    const repo = (members[0] as ProjectReport).repo as RepoInfo;
+    return {
+      name: repo.name,
+      root,
+      projects: members,
+      projectIds: members.map((project) => project.id),
+      sessions: members.reduce((total, project) => total + project.sessions, 0),
+      activeSessions: members.reduce((total, project) => total + project.activeSessions, 0),
+      subagentSessions: members.reduce((total, project) => total + project.subagentSessions, 0),
+      requests: members.reduce((total, project) => total + project.requests, 0),
+      firstUsage: minOf(members, (project) => project.firstUsage),
+      lastUsage: maxOf(members, (project) => project.lastUsage),
+      tokens: members.reduce((total, project) => addBuckets(total, project.tokens), emptyBuckets()),
+      cost: members.reduce((total, project) => addCostTotals(total, project.cost), zeroCostTotals()),
+      own: sumScopes(members.map((project) => project.own)),
+      spawned: sumScopes(members.map((project) => project.spawned)),
+      total: sumScopes(members.map((project) => project.total)),
+    };
+  });
+}
+
+/** Sum scope rows: every field is a plain addition of the rows' own fields. */
+function sumScopes(scopes: readonly ScopeTotals[]): ScopeTotals {
+  return {
+    sessions: scopes.reduce((total, scope) => total + scope.sessions, 0),
+    requests: scopes.reduce((total, scope) => total + scope.requests, 0),
+    tokens: scopes.reduce((total, scope) => addBuckets(total, scope.tokens), emptyBuckets()),
+    cost: scopes.reduce((total, scope) => addCostTotals(total, scope.cost), zeroCostTotals()),
+  };
+}
+
 /** One scope row from an already-priced summary and its own records. */
 function scopeOf(summary: CostSummary, sessions: number, tokens: TokenTotals): ScopeTotals {
   return {
@@ -726,8 +869,12 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   const sessionSelection = query.sessions === undefined || query.sessions.length === 0
     ? undefined
     : resolveSessionSelectors(dataset.sessions, query.sessions);
+  const repoSelection = query.repos === undefined || query.repos.length === 0
+    ? undefined
+    : resolveRepoSelectors(dataset.projects, query.repos);
   for (const error of projectSelection?.errors ?? []) warnings.push(error);
   for (const error of sessionSelection?.errors ?? []) warnings.push(error);
+  for (const error of repoSelection?.errors ?? []) warnings.push(error);
 
   const mode = query.subagentMode ?? 'total';
   // `detail` implies the by-scope breakdown: it is the same question asked with
@@ -737,7 +884,9 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   // row per session a human started, with subagents folded into it.
   const splitRows = mode === 'detail';
   const selectedProjects = dataset.projects.filter(
-    (project) => projectSelection === undefined || projectSelection.keys.has(project.id),
+    (project) =>
+      (projectSelection === undefined || projectSelection.keys.has(project.id)) &&
+      (repoSelection === undefined || repoSelection.keys.has(project.id)),
   );
   // Selecting a session selects its whole delegation subtree: asking about a
   // session a human started naturally means "and everything it spawned".
@@ -814,6 +963,7 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
       id: project.id,
       name: project.name,
       path: project.path,
+      ...(project.repo === undefined ? {} : { repo: project.repo }),
       sessions: splitRows ? projectScope.length : ownRows.length,
       activeSessions: splitRows
         ? projectScope.filter((entry) => entry.records.length > 0).length
@@ -901,11 +1051,17 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
       }
     : undefined;
 
+  // Repositories roll their projects up. The group's numbers are the sum of the
+  // rows beneath it — never a second pass over the records — so the extra level
+  // cannot disagree with what it contains.
+  const repoGroups = groupByRepo(projectRows);
+
   const result: UsageResult = {
     agent: dataset.agent,
     source: dataset.source,
     dimension: query.dimension,
     range: query.range,
+    repos: repoGroups,
     currency: query.currency ?? query.rate.base,
     currencyRate: Number(query.rate.rate),
     rateInfo: query.rate,
@@ -1018,6 +1174,8 @@ export interface SessionListProject {
   sessions: SessionListEntry[];
   /** Sessions in scope, counting subagents that were folded into a parent row. */
   sessionCount: number;
+  /** The git repository this project belongs to, when it is inside one. */
+  repo?: RepoInfo | undefined;
 }
 
 /** The `session list` inventory. */
@@ -1040,6 +1198,8 @@ export interface SessionListFilters {
   projects?: readonly string[] | undefined;
   /** Session selectors. */
   sessions?: readonly string[] | undefined;
+  /** Repository selectors: repository name, root path, or a `*` glob. */
+  repos?: readonly string[] | undefined;
   /** List subagents separately (`true`) or fold them into their parent (`false`, default). */
   includeSubagents?: boolean | undefined;
 }
@@ -1076,8 +1236,12 @@ export function listSessions(dataset: UsageDataset, filters: SessionListFilters 
   const sessionSelection = filters.sessions === undefined || filters.sessions.length === 0
     ? undefined
     : resolveSessionSelectors(dataset.sessions, filters.sessions);
+  const repoSelection = filters.repos === undefined || filters.repos.length === 0
+    ? undefined
+    : resolveRepoSelectors(dataset.projects, filters.repos);
   for (const error of projectSelection?.errors ?? []) warnings.push(error);
   for (const error of sessionSelection?.errors ?? []) warnings.push(error);
+  for (const error of repoSelection?.errors ?? []) warnings.push(error);
 
   const selected = sessionSelection === undefined ? undefined : expandWithDescendants(dataset, sessionSelection.ids);
   const projects: SessionListProject[] = [];
@@ -1085,6 +1249,7 @@ export function listSessions(dataset: UsageDataset, filters: SessionListFilters 
 
   for (const project of dataset.projects) {
     if (projectSelection !== undefined && !projectSelection.keys.has(project.id)) continue;
+    if (repoSelection !== undefined && !repoSelection.keys.has(project.id)) continue;
 
     // Every session in scope, with its tokens already summed.
     const all = new Map<string, SessionListEntry>();
@@ -1135,6 +1300,7 @@ export function listSessions(dataset: UsageDataset, filters: SessionListFilters 
       lastUsage: maxOf(ordered, (entry) => entry.lastUsage),
       sessions: ordered,
       sessionCount: allEntries.length,
+      ...(project.repo === undefined ? {} : { repo: project.repo }),
     });
   }
 
