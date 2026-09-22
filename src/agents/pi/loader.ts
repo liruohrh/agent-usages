@@ -88,6 +88,12 @@ interface ScannedSession {
   createdAt: number | null;
   /** Last name pi gave the session, when it named it at all. */
   title: string | null;
+  /** The task line of a subagent's first user message, when it has one. */
+  task: string | null;
+  /** First line of the session's first user message, as a last-resort title. */
+  firstUser: string | null;
+  /** Subagent kind parsed from `subagent-<kind>-<runId>-<n>`, e.g. `delegate`. */
+  agentType: string | null;
   /** One record per billed assistant message, in file order. */
   records: UsageRecord[];
   /** Message ids behind {@link records}, in the same order. */
@@ -113,6 +119,9 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
   let cwd: string | null = null;
   let createdAt: number | null = null;
   let title: string | null = null;
+  let task: string | null = null;
+  let firstUser: string | null = null;
+  let agentType: string | null = null;
   let parentSessionPath: string | null = null;
   const records: UsageRecord[] = [];
   const messageIds: string[] = [];
@@ -143,9 +152,25 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
     if (type === 'session_info') {
       // pi renames a session as the work moves on; the last name is the title.
       title = asString(event['name']) ?? title;
+      // The subagents plugin names its runs `subagent-<kind>-<runId>-<n>`.
+      const kind = /^subagent-([a-z][a-z-]*)-[0-9a-f]+-\d+$/.exec(title ?? '')?.[1];
+      if (kind !== undefined) agentType = kind;
       continue;
     }
     if (type !== 'message') continue;
+    if (task === null && asString(asRecord(event['message'])?.['role']) === 'user') {
+      // The plugin sends the task as the first user message: `Task: …`.
+      const content = asRecord(event['message'])?.['content'];
+      const first = Array.isArray(content) ? asRecord(content[0]) : undefined;
+      const text = first === undefined ? undefined : asString(first['text']);
+      if (text !== undefined) {
+        const line = text.replace(/^Task:\s*/, '').split('\n').map((part) => part.trim()).find((part) => part.length > 0);
+        if (line !== undefined) {
+          task = line.slice(0, 80);
+          firstUser = line.slice(0, 80);
+        }
+      }
+    }
     const message = asRecord(event['message']);
     const usage = message === undefined ? undefined : asRecord(message['usage']);
     const time = asInstant(event['timestamp']);
@@ -166,7 +191,7 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
     });
   }
   if (id === undefined) return undefined;
-  return { id, cwd, createdAt, title, records, messageIds, parentSessionPath };
+  return { id, cwd, createdAt, title, task, firstUser, agentType, records, messageIds, parentSessionPath };
 }
 
 /** Where pi keeps a session's subagent runs: the file's own name, sans suffix. */
@@ -274,9 +299,13 @@ function buildSession(walked: WalkedSession): SessionRecord {
   const records = [...session.records].sort((left, right) =>
     left.time === right.time ? 0 : left.time - right.time,
   );
+  const extra: Record<string, unknown> = {};
+  if (session.agentType !== null) extra['agentType'] = session.agentType;
   return {
     id: session.id,
-    title: session.title,
+    // A subagent's `session_info` name is `subagent-delegate-<runId>-1`; the task
+    // it was given says far more, so it wins when there is one.
+    title: depth > 0 ? (session.task ?? session.title ?? session.firstUser) : (session.title ?? session.firstUser),
     cwd: session.cwd,
     createdAt: session.createdAt,
     records,
@@ -286,6 +315,7 @@ function buildSession(walked: WalkedSession): SessionRecord {
     archived: false,
     childIds: [],
     parentKnown: false,
+    ...(Object.keys(extra).length === 0 ? {} : { extra }),
   };
 }
 

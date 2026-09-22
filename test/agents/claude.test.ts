@@ -71,6 +71,8 @@ beforeEach(async () => {
     // from the file name instead.
     `${assistant('b1', '2026-09-23T00:00:03.000Z', 'deepseek-flash', 2_000, 50)}\n`,
   );
+  // Claude Code stores a user-set session name next to the log.
+  await writeFile(join(project, SESSION, 'custom-title.json'), JSON.stringify({ customTitle: '我的会话' }));
   await writeFile(
     join(subagents, `agent-${AGENT}.meta.json`),
     JSON.stringify({
@@ -88,6 +90,12 @@ afterEach(async () => {
 });
 
 describe('reading a Claude Code home', () => {
+  it('names a session from custom-title.json', async () => {
+    const data = await claudeAgent.load({ home });
+    const session = data.sessions.find((candidate) => candidate.id === SESSION);
+    expect(session?.title).toBe('我的会话');
+  });
+
   it('bills assistant entries and strips the model suffix', async () => {
     const data = await claudeAgent.load({ home });
     const session = data.sessions.find((candidate) => candidate.id === SESSION);

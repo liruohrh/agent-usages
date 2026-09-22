@@ -64,6 +64,14 @@ beforeEach(async () => {
       timestamp: '2026-08-02T10:38:00.000Z',
       cwd: '/home/user/ws/demo',
     }),
+    JSON.stringify({
+      type: 'message',
+      id: 'u1',
+      parentId: null,
+      timestamp: '2026-08-02T10:38:00.500Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'Task: 列出当前目录文件\n只读，不要修改。' }] },
+    }),
+    JSON.stringify({ type: 'session_info', id: 'i3', timestamp: '2026-08-02T10:38:00.700Z', name: `subagent-delegate-d3131b6a-1` }),
     message('c1', 'x1', '2026-08-02T10:38:01.000Z', 500_000, 50),
   ].join('\n');
   await writeFile(join(project, PARENT_STEM, 'd3131b6a', 'run-0', 'session.jsonl'), `${child}\n`);
@@ -99,6 +107,9 @@ describe('reading a pi home', () => {
     expect(child?.parentId).toBe(parent?.id);
     expect(child?.parentKnown).toBe(true);
     expect(child?.records).toHaveLength(1);
+    // The task it was given beats the plugin's `subagent-delegate-…` name.
+    expect(child?.title).toBe('列出当前目录文件');
+    expect(child?.extra?.['agentType']).toBe('delegate');
     expect(parent?.childIds).toEqual([CHILD_ID]);
   });
 

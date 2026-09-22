@@ -47,7 +47,14 @@ sessions/<项目>/2026-08-02T10-35-20-835Z_019fc20a-…/d3131b6a/run-0/session.j
 
 ## 标题
 
-pi 用 `session_info` 事件给会话命名，并且会随进展改名，所以取**最后一个** `name`；从未命名的会话显示 `(无标题)`。
+| 会话 | 标题来源 |
+| --- | --- |
+| 顶层会话 | **最后一个** `session_info.name`（pi 会随进展改名）；没有名字时退回首条 user 消息的首行 |
+| 子 agent | 它收到的那条 `Task: …` 正文（比插件给的名字有用得多）；再退回 `session_info.name` |
+
+子 agent 的 `session_info.name` 是插件生成的 `subagent-<kind>-<runId>-<n>`：工具从中解析出 `kind`（如 `delegate`）放进 `extra.agentType`，而标题用任务正文。
+
+插件的产物 `<项目 cwd>/.pi-subagents/artifacts/<runId>_<agent>_<n>_meta.json` 里还有 `task`、`usage`、`model`、`exitCode` —— 那一份 `usage` 是子会话自身用量的**副本**，工具**不读它**（读了就双计），需要交叉校验时可以人工对照。
 
 ## 续用与 fork
 

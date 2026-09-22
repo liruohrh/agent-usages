@@ -91,7 +91,7 @@ interface ScannedSession {
   cwd: string | null;
   /** First timestamp seen. */
   createdAt: number | null;
-  /** Last `summary` entry, when Claude Code compacted the session. */
+  /** Last `summary` entry, or the user-set title, or the opening prompt. */
   title: string | null;
   /** One record per billed assistant entry, in file order. */
   records: UsageRecord[];
@@ -143,6 +143,18 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     if (treeParent !== undefined) children.set(treeParent, (children.get(treeParent) ?? 0) + 1);
     id ??= asString(entry['sessionId']);
     cwd ??= asString(entry['cwd']) ?? null;
+    if (asString(entry['type']) === 'user' && title === null) {
+      // Sessions without a custom title still open with something worth showing.
+      const message = asRecord(entry['message']);
+      const content = message?.['content'];
+      const text = typeof content === 'string'
+        ? content
+        : (Array.isArray(content) ? asString(asRecord(content[0])?.['text']) : undefined);
+      if (text !== undefined) {
+        const line = text.split('\n').map((part) => part.trim()).find((part) => part.length > 0);
+        if (line !== undefined) title = line.slice(0, 80);
+      }
+    }
     if (asString(entry['type']) === 'summary') {
       // Compaction summaries are the closest thing to a title that the log has.
       title = asString(entry['summary']) ?? title;
@@ -206,13 +218,25 @@ async function walk(
   warnings: Warning[],
   source: string,
 ): Promise<void> {
-  const session = await scanSession(file, id);
+  let session = await scanSession(file, id);
   if (session === undefined || session.records.length === 0) {
     // A session that never billed a request (an aborted run) is still a session,
     // but only if it has anything at all to say.
     if (session === undefined) {
       warnings.push(new UserError('claudeSessionUnreadable', { path: relative(source, file).split(sep).join('/') }));
       return;
+    }
+  }
+  // Claude Code keeps a user-set session name next to the log.
+  const custom = await readFile(join(file.replace(/\.jsonl$/, ''), 'custom-title.json'), 'utf8').catch(() => undefined);
+  if (custom !== undefined && session.title === null) {
+    try {
+      const parsed = asRecord(JSON.parse(custom));
+      const customTitle = asString(parsed?.['customTitle']);
+      // A user-set name outranks the opening prompt.
+      if (customTitle !== undefined) session = { ...session, title: customTitle };
+    } catch {
+      // An unreadable title is not worth failing a report over.
     }
   }
   found.push({ session, file, parentId: null, depth: 0, isSubagent: false, meta: undefined });
@@ -231,7 +255,8 @@ async function walk(
     // A subagent's own log has no title; the meta file's description is what
     // the parent asked it to do, which is exactly what a title should say.
     const described = asString(meta?.['description']);
-    const title = child.title ?? described ?? null;
+    // The description the parent gave it beats its own opening prompt.
+    const title = described ?? child.title;
     found.push({
       session: { ...child, id: agentId, title },
       file: join(subagents, entry),

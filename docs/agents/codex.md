@@ -33,6 +33,12 @@
 - CLI 打印的 `tokens used` 是 `total − cached`，不是账；`state_5.sqlite.threads.tokens_used` 也只是同一笔账的线程级累计。
 - 模型取 `turn_context.model`（会话中途换模型时按当前值计）。
 
+## 标题
+
+`state_5.sqlite` 的 `threads` 表存着用户起的 `name`（如 `afork`、`子agent测试`）与自动生成的 `title`（首条用户消息），工具优先取 `name ?? title`——包括子 agent 线程，它们的 `title` 往往就是任务正文，比 `agent_path` 更好用。
+
+读取是**可选**的：`node:sqlite` 不可用（老版 Node）、数据库缺失或被锁，都只是没有标题，不影响报表其余部分。rollout 本身不含标题。
+
 ## 怎么识别 fork / 子 agent（`--json` 里）
 
 每条会话在 `projects[].sessionReports[]`（`--subagents` 时含子会话）上带这些字段：

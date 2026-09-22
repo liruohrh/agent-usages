@@ -276,7 +276,7 @@ async function findRollouts(root: string): Promise<string[]> {
 }
 
 /** Assemble one neutral session record. */
-function buildSession(scanned: ScannedSession): SessionRecord {
+function buildSession(scanned: ScannedSession, named: string | null): SessionRecord {
   const records = [...scanned.records].sort((left, right) => left.time - right.time);
   const extra: Record<string, unknown> = {};
   // A fork is a continuation of its source, not a subagent it spawned: it keeps
@@ -291,7 +291,7 @@ function buildSession(scanned: ScannedSession): SessionRecord {
   }
   return {
     id: scanned.id,
-    title: scanned.title,
+    title: named ?? scanned.title,
     cwd: scanned.cwd,
     createdAt: scanned.createdAt,
     records,
@@ -322,7 +322,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     throw new UserError('codexHomeNotAbsolute', { value: JSON.stringify(options.home) });
   }
 
-  const files = await findRollouts(join(source, 'sessions'));
+  const [files, titles] = [await findRollouts(join(source, 'sessions')), await readThreadTitles(source)];
   const sessions: SessionRecord[] = [];
   const filesOf = new Map<string, string>();
   for (const file of files) {
@@ -335,7 +335,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       continue;
     }
     if (sessions.some((session) => session.id === scanned.id)) continue;
-    const session = buildSession(scanned);
+    const session = buildSession(scanned, titles.get(scanned.id) ?? null);
     sessions.push(session);
     filesOf.set(session.id, file);
   }
@@ -428,6 +428,44 @@ async function countUnpersistedSessions(path: string, known: ReadonlySet<string>
     }
   }
   return unpersisted.size;
+}
+
+/**
+ * Titles Codex keeps outside the rollout.
+ *
+ * `state_5.sqlite`'s `threads` table carries the user-set `name` and the
+ * generated `title` (the first user message) — including for subagent threads,
+ * whose task text is often the most useful label there is. Reading it is
+ * optional: an older Node without `node:sqlite`, a missing file, or a locked
+ * database all degrade to "no titles" rather than failing the report.
+ *
+ * @param home - the Codex home.
+ * @returns a map from thread id to its display name.
+ */
+async function readThreadTitles(home: string): Promise<Map<string, string>> {
+  const titles = new Map<string, string>();
+  const path = join(home, 'state_5.sqlite');
+  try {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      const rows = db.prepare('SELECT id, name, title FROM threads').all() as {
+        id?: unknown;
+        name?: unknown;
+        title?: unknown;
+      }[];
+      for (const row of rows) {
+        const id = asString(row.id);
+        const label = asString(row.name) ?? asString(row.title);
+        if (id !== undefined && label !== undefined) titles.set(id, label.replace(/\s+/g, ' ').slice(0, 80));
+      }
+    } finally {
+      db.close();
+    }
+  } catch {
+    // No sqlite module, no database, no titles.
+  }
+  return titles;
 }
 
 /** Default data root: `~/.codex`. */
