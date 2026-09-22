@@ -314,6 +314,18 @@ export const en: Messages = {
     claudeHomeNotAbsolute: (p: { value: string }) => `the Claude Code config directory must be an absolute path, got ${p.value}`,
     claudeNoData: (p: { source: string }) =>
       `no Claude Code sessions under ${p.source}; point --home at the config directory (default ~/.claude) or set CLAUDE_CONFIG_DIR`,
+    codexSessionUnreadable: (p: { path: string }) => `could not read the Codex rollout file: ${p.path}`,
+    codexHomeNotAbsolute: (p: { value: string }) => `the Codex home must be an absolute path, got ${p.value}`,
+    codexNoData: (p: { source: string }) =>
+      `no Codex rollouts under ${p.source}; point --home at the Codex home (default ~/.codex) or set CODEX_HOME`,
+    codexSessionNoun: 'sessions',
+    codexNotes: (): readonly string[] => [
+      'Usage comes from Codex’s own rollouts: the token_count events in ~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl.',
+      'Only the delta (last_token_usage) is summed: the same calls are also written as running totals (total_token_usage / thread_token_usage) and as token_usage_record, and taking a second view doubles them. A codex fork inherits the parent’s running total without copying its events, so deltas cannot double bill.',
+      'input_tokens already contains cached_input_tokens, and output_tokens already contains reasoning_output_tokens; the buckets are split accordingly.',
+      'A subagent is its own rollout; the parent link lives in the child’s session_meta.source.subagent.thread_spawn, and its session_id names the parent — hence identity comes from id.',
+      'See docs/agents/codex.md for the official DeepSeek wiring (base_url=https://api.deepseek.com/, wire_api="responses").',
+    ],
     claudeSessionNoun: 'sessions',
     claudeNotes: (): readonly string[] => [
       'Usage comes from Claude Code’s own session files: ~/.claude/projects/<cwd>/<session>.jsonl, where assistant entries carry that request’s usage (cache read/write and thinking tokens included).',

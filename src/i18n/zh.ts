@@ -356,6 +356,18 @@ export const zh = {
     claudeHomeNotAbsolute: (p: { value: string }) => `Claude Code 配置目录必须是绝对路径，收到 ${p.value}`,
     claudeNoData: (p: { source: string }) =>
       `在 ${p.source} 下没有找到 Claude Code 会话；用 --home 指定配置目录（默认 ~/.claude），或用 CLAUDE_CONFIG_DIR 覆盖`,
+    codexSessionUnreadable: (p: { path: string }) => `Codex rollout 文件读不出来: ${p.path}`,
+    codexHomeNotAbsolute: (p: { value: string }) => `Codex 数据目录必须是绝对路径，收到 ${p.value}`,
+    codexNoData: (p: { source: string }) =>
+      `在 ${p.source} 下没有找到 Codex rollout；用 --home 指定 Codex 主目录（默认 ~/.codex），或用 CODEX_HOME 覆盖`,
+    codexSessionNoun: '会话',
+    codexNotes: (): readonly string[] => [
+      '用量来自 Codex 自己写的 rollout：~/.codex/sessions/年/月/日/rollout-*.jsonl 的 token_count 事件。',
+      '只按增量（last_token_usage）求和：同一批数字还有累计表示（total_token_usage / thread_token_usage）与 token_usage_record，再取一处就会翻倍；codex fork 会继承父会话累计但不复制事件，取增量天然不会重复计费。',
+      'input_tokens 已包含 cached_input_tokens、output_tokens 已包含 reasoning_output_tokens，工具按互不重叠的桶拆分。',
+      '子 agent 是独立 rollout，父链在子文件的 session_meta.source.subagent.thread_spawn；其 session_id 指向父会话，因此身份用 id。',
+      'Codex 与 DeepSeek 的官方接法见 docs/agents/codex.md（base_url=https://api.deepseek.com/、wire_api="responses"）。',
+    ],
     claudeSessionNoun: '会话',
     claudeNotes: (): readonly string[] => [
       '用量来自 Claude Code 自己写的会话文件：~/.claude/projects/<工作目录>/<会话>.jsonl，assistant 条目带该次请求的 usage（含缓存读/写与思考 token）。',

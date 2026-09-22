@@ -12,9 +12,10 @@ import type { AgentAdapter } from './contract.ts';
 import { dshAgent } from './dsh/loader.ts';
 import { piAgent } from './pi/loader.ts';
 import { claudeAgent } from './claude/loader.ts';
+import { codexAgent } from './codex/loader.ts';
 
 /** Every agent adapter this build knows about, in display order. */
-export const AGENT_ADAPTERS: readonly AgentAdapter[] = [dshAgent, piAgent, claudeAgent];
+export const AGENT_ADAPTERS: readonly AgentAdapter[] = [dshAgent, piAgent, claudeAgent, codexAgent];
 
 /** Agent used when the user does not name one. */
 export const DEFAULT_AGENT = dshAgent.id;
