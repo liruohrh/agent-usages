@@ -75,6 +75,13 @@ export interface SessionRecord {
   depth: number;
   /** Whether this session was spawned by another session. */
   isSubagent: boolean;
+  /**
+   * Whether the agent has archived this session.
+   *
+   * Archiving hides a session from the agent's own lists; it does not unspend
+   * the tokens, so the usage is still counted — the row is only labelled.
+   */
+  archived: boolean;
   /** Ids of the sessions this one spawned. */
   childIds: string[];
   /** Whether {@link SessionRecord.parentId} names a session present in the dataset. */

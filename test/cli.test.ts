@@ -7,7 +7,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -479,6 +479,32 @@ describe('session list', () => {
       expect(parsed.projects[0]?.name).toBe('demo');
       expect(parsed.projects[0]?.sessionCount).toBe(1);
       expect(parsed.projects[0]?.sessions[0]?.title).toBe('演示会话');
+    }
+  });
+
+  it('marks an archived session without dropping it from the numbers', async () => {
+    // DSH's archive list lives in `workspace.json`; archiving is the harness
+    // hiding a row, not the user unspending the tokens.
+    const workspacePath = join(home, '.dsh', 'storages', 'workspace.json');
+    const original = await readFile(workspacePath, 'utf8');
+    const parsed = JSON.parse(original) as { global: { archivedSessionIds: string[] } };
+    parsed.global.archivedSessionIds = [SESSION_ID];
+    await writeFile(workspacePath, JSON.stringify(parsed));
+    try {
+      expect((await cli(['session', 'list'])).stdout).toContain('演示会话（已归档）');
+
+      const json = JSON.parse((await cli(['session', 'list', '--json'])).stdout) as {
+        projects: { sessions: { id: string; archived: boolean }[] }[];
+      };
+      const row = json.projects.flatMap((project) => project.sessions).find((session) => session.id === SESSION_ID);
+      expect(row?.archived).toBe(true);
+
+      // The report labels the session and still bills its one request.
+      const usage = await cli(['usage']);
+      expect(usage.stdout).toContain('演示会话（已归档）');
+      expect(usage.stdout).toContain('Q 1 · ¥5.02');
+    } finally {
+      await writeFile(workspacePath, original);
     }
   });
 

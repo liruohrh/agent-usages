@@ -419,10 +419,13 @@ function sessionLines(
 ): string[] {
   const children = childrenOf.get(session.id) ?? [];
   const badge = session.subagentCount > 0 ? t().tree.subagents(count(session.subagentCount)) : '';
+  // Archived sessions keep their bill; the marker only says where the agent
+  // has filed them away.
+  const archived = session.archived ? t().tree.archived : '';
   const end = nodeDate(session.lastUsage, 'end');
   // The date is only worth repeating when it differs from the row above.
   const suffix = end === undefined || end === parentDate ? '' : ` ${end}`;
-  const lines = [`${indent(level)}${clip(session.title ?? t().tree.untitled, TITLE_WIDTH)}${badge}${suffix}`];
+  const lines = [`${indent(level)}${clip(session.title ?? t().tree.untitled, TITLE_WIDTH)}${archived}${badge}${suffix}`];
   const total = moneyBreakdown(session.total.cost, session.total.tokens);
   // The split is worth printing only when there is something to split off; a
   // session with no subagents says everything in one line.
@@ -727,7 +730,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
         [labels.list.sessionId, labels.list.title, labels.list.firstUsage, labels.list.lastUsage, labels.list.subagents, labels.list.requests],
         project.sessions.map((session) => [
           `${session.nested ? '  ↳ ' : ''}${session.id}`,
-          `${session.nested ? '  ' : ''}${session.title ?? labels.tree.untitled}`,
+          `${session.nested ? '  ' : ''}${session.title ?? labels.tree.untitled}${session.archived ? labels.tree.archived : ''}`,
           dayLabel(session.firstUsage),
           dayLabel(session.lastUsage),
           session.subagentCount > 0 && !session.isSubagent ? count(session.subagentCount) : '—',
@@ -859,6 +862,7 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
               lastUsage: session.lastUsage,
               lastUsageIso: iso(session.lastUsage),
               isSubagent: session.isSubagent,
+              archived: session.archived,
               subagentCount: session.subagentCount,
               parentId: session.parentId,
               requests: session.requests,
@@ -947,6 +951,7 @@ export function sessionListToJson(result: SessionListResult): unknown {
         requests: session.requests,
         tokens: session.tokens,
         isSubagent: session.isSubagent,
+        archived: session.archived,
         depth: session.depth,
         parentId: session.parentId,
         subagentCount: session.subagentCount,

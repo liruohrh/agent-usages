@@ -118,8 +118,26 @@ interface WorkspaceMeta {
   sessionIds: string[];
 }
 
+/** What the workspace registry holds: the workspaces, and DSH's archive list. */
+interface WorkspaceRegistry {
+  workspaces: WorkspaceMeta[];
+  /**
+   * Sessions the user archived, by bare UUID.
+   *
+   * The archive list is a *label*, not a filter: an archived session keeps its
+   * log and its bill, so it is reported and merely marked.
+   */
+  archivedIds: ReadonlySet<string>;
+}
+
+/** Strip the `session-` id prefix, so both spellings compare equal. */
+function bareId(id: string): string {
+  return id.replace(/^session-/, '');
+}
+
 /** Read the workspace registry. */
-async function readWorkspaces(home: string, warnings: Warning[]): Promise<WorkspaceMeta[]> {
+async function readWorkspaceRegistry(home: string, warnings: Warning[]): Promise<WorkspaceRegistry> {
+  const empty: WorkspaceRegistry = { workspaces: [], archivedIds: new Set() };
   const path = join(home, 'storages', 'workspace.json');
   let parsed: unknown;
   try {
@@ -128,10 +146,15 @@ async function readWorkspaces(home: string, warnings: Warning[]): Promise<Worksp
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       warnings.push(new UserError('dshReadFailed', { path, reason: (error as Error).message }));
     }
-    return [];
+    return empty;
   }
+  const global = asRecord(asRecord(parsed)?.['global']);
+  const archived = Array.isArray(global?.['archivedSessionIds']) ? global['archivedSessionIds'] : [];
+  const archivedIds = new Set(
+    archived.filter((id): id is string => typeof id === 'string').map((id) => bareId(id)),
+  );
   const workspaces = asRecord(asRecord(asRecord(parsed)?.['tables'])?.['workspaces']);
-  if (workspaces === undefined) return [];
+  if (workspaces === undefined) return { workspaces: [], archivedIds };
   const result: WorkspaceMeta[] = [];
   for (const [workspaceId, rawWorkspace] of Object.entries(workspaces)) {
     const record = asRecord(rawWorkspace);
@@ -144,7 +167,7 @@ async function readWorkspaces(home: string, warnings: Warning[]): Promise<Worksp
       sessionIds: ids.filter((id): id is string => typeof id === 'string'),
     });
   }
-  return result;
+  return { workspaces: result, archivedIds };
 }
 
 /**
@@ -210,14 +233,15 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   }
 
   const enrich = options.enrich !== false;
-  const [workspaces, meta, logIndex] = await Promise.all([
-    readWorkspaces(source, warnings),
+  const [registry, meta, logIndex] = await Promise.all([
+    readWorkspaceRegistry(source, warnings),
     readSessionMeta(source, warnings),
     // The log answers two questions at once: per-request usage (every step), and
     // delegation (the leading frame), which neither of the two caches records.
     // An unreadable log degrades to a warning rather than failing the report.
-    readSessionLogIndex(source, { collectUsage: true }),
+    readSessionLogIndex(source),
   ]);
+  const { workspaces, archivedIds } = registry;
   warnings.push(...logIndex.warnings);
 
   if (logIndex.files.length === 0 && meta.size === 0) {
@@ -271,6 +295,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       title: sessionMeta?.title ?? log?.title ?? null,
       cwd,
       createdAt: sessionMeta?.createdAt ?? log?.createdAt ?? null,
+      archived: archivedIds.has(bareId(sessionId)),
       log,
       byId: logIndex.byId,
     });
@@ -341,6 +366,7 @@ function buildSession(
     title: string | null;
     cwd: string | null;
     createdAt: number | null;
+    archived: boolean;
     log: SessionLogInfo | undefined;
     byId: ReadonlyMap<string, SessionLogInfo>;
   },
@@ -360,6 +386,7 @@ function buildSession(
     parentId,
     depth,
     isSubagent,
+    archived: meta.archived,
     childIds: [],
     parentKnown: parentId !== null && meta.byId.has(parentId),
   };

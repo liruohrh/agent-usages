@@ -145,7 +145,7 @@ async function buildHome(): Promise<string> {
     join(home, 'storages', 'workspace.json'),
     JSON.stringify({
       unit: { name: 'workspace', version: 2 },
-      global: { initialized: true, workspaceIds: [WORKSPACE_A, WORKSPACE_B], archivedSessionIds: [] },
+      global: { initialized: true, workspaceIds: [WORKSPACE_A, WORKSPACE_B], archivedSessionIds: [SID.subB] },
       tables: {
         workspaces: {
           [WORKSPACE_A]: { path: APP_DIR, title: 'example-app', sessionIds: [SID.spanning], createdAt: 'x', updatedAt: 'x' },
@@ -350,6 +350,17 @@ describe('reading a DSH home', () => {
     // `example-lib` declares none at all, yet both of its sessions are found.
     expect(byName.get('example-lib')?.sessions).toHaveLength(2);
     expect(data.warnings).toEqual([]);
+  });
+
+  it('labels an archived session without dropping its usage', async () => {
+    // `workspace.json` carries DSH's own archive list; archiving hides a
+    // session in the harness' UI, but the tokens were still spent.
+    const data = await dshAgent.load({ home });
+    const archived = data.sessions.find((session) => session.id === SID.subB);
+    expect(archived?.archived).toBe(true);
+    expect(archived?.records.length).toBeGreaterThan(0);
+    const plain = data.sessions.find((session) => session.id === SID.spanning);
+    expect(plain?.archived).toBe(false);
   });
 
   it('reads titles and creation times from the projection cache', async () => {

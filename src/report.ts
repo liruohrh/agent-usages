@@ -157,6 +157,8 @@ export interface SessionReport {
   lastUsage: number | null;
   /** Whether this row is a subagent session. */
   isSubagent: boolean;
+  /** Whether the agent archived this session; the usage still counts. */
+  archived: boolean;
   /** For a top-level row: how many subagent sessions it stands for. */
   subagentCount: number;
   /** For a subagent row: the session that spawned it. */
@@ -718,6 +720,7 @@ function sessionReport(input: SessionRowInput): SessionReport {
     firstUsage: records[0]?.time ?? null,
     lastUsage: records[records.length - 1]?.time ?? null,
     isSubagent: session.isSubagent,
+    archived: session.archived,
     subagentCount,
     parentId: session.parentId,
     requests: records.length,
@@ -1142,6 +1145,8 @@ export interface SessionListEntry {
   tokens: TokenTotals;
   /** Whether this session is a subagent. */
   isSubagent: boolean;
+  /** Whether the agent archived this session; the usage still counts. */
+  archived: boolean;
   /** Delegation depth. */
   depth: number;
   /** The session that spawned this one. */
@@ -1326,6 +1331,7 @@ function toListEntry(session: SessionRecord, project: ProjectRecord, dataset: Us
     requests: session.records.length,
     tokens: sumOf(session.records),
     isSubagent: session.isSubagent,
+    archived: session.archived,
     depth: session.depth,
     parentId: session.parentId,
     subagentCount: session.childIds.length,

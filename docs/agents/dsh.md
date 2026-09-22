@@ -8,8 +8,8 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `sessions/<projectKey>/<id>/session.jsonl[.zstd]` | **唯一的逐请求用量来源**：每个 `assistant/message` 事件都带该步的 `usage`；首帧给出**委派关系**（子代理与父会话）与标题 |
-| `storages/workspace.json` | 项目注册表：名称、路径 |
+| `sessions/<projectKey>/<id>/session.jsonl[.zstd]` | **唯一的逐请求用量来源**：每个 `assistant/message` 事件都带该步的 `usage`；首帧给出**委派关系**（子代理与父会话），`session/title` 事件给出标题 |
+| `storages/workspace.json` | 项目注册表：名称、路径；`global.archivedSessionIds` 是**归档名单** |
 | `storages/session_projcache.json` | 会话标题、工作目录、创建时间、harness 自身统计（仅用于交叉校验） |
 
 除此之外不读别的文件，也不写任何文件。

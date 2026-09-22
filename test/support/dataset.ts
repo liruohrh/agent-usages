@@ -35,6 +35,7 @@ export function session(overrides: Partial<SessionRecord> & { id: string }): Ses
     parentId: null,
     depth: 0,
     isSubagent: false,
+    archived: false,
     childIds: [],
     parentKnown: false,
     ...overrides,
