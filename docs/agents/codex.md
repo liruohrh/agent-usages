@@ -40,7 +40,7 @@
 | 现象 | 判据 | 输出 |
 | --- | --- | --- |
 | **fork** | `session_meta.forked_from_id` | `parentId` 指向源会话、`isSubagent=false`、`extra = { "forkedFrom": "<源 id>", "inheritedTokens": 316645 }`（`inheritedTokens` 是它继承的累计量，**从不计费**） |
-| **子 agent** | `session_meta.source.subagent.thread_spawn` | `isSubagent=true`、`parentId=parent_thread_id`、`depth`、`extra = { "agentPath": "/root/ls_agent", "agentNickname": "Turing" }`、并进入源的 `childIds` |
+| **子 agent** | `session_meta.source.subagent.thread_spawn` | `isSubagent=true`、`parentId=parent_thread_id`、`depth`、并进入源的 `childIds`；`title` 取它收到的那条 `NEW_TASK` 任务正文（无正文时退回 `agent_path` 末段，再退回昵称）；`extra = { "agentPath": "/root/ls_agent", "agentNickname": "Turing" }` |
 | **子 agent 再 fork** | 两者都有 | 两个字段并存（实测 `01a0ca57-1c5`：既是子 agent 又从另一个子 agent fork） |
 
 fork 因此既不会重复计费（只取增量），也不会被折叠成"1 个子代理"（不算 childIds），但它在报告里是可识别的独立会话。

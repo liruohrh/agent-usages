@@ -49,7 +49,7 @@ export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-flash
 | 现象 | 判据 | 输出 |
 | --- | --- | --- |
 | **fork**（`--fork-session`） | 同一项目里 message.id 与更早文件重叠 | `parentId` 指向源会话、`isSubagent=false`、`extra = { "forkedFrom": "<源 id>", "inheritedRequests": 4 }` |
-| **子 agent** | `<会话>/subagents/agent-<id>.jsonl` + 同名 `.meta.json` | `isSubagent=true`、`parentId` 指向父会话、进入父的 `childIds`；`extra = { "agentType": "general-purpose", "description": "列出当前目录文件", "toolUseId": "call_00_…" }`（直接从 meta.json 取，和 Codex 的 `agentPath`/`agentNickname` 对称） |
+| **子 agent** | `<会话>/subagents/agent-<id>.jsonl` + 同名 `.meta.json` | `isSubagent=true`、`parentId` 指向父会话、进入父的 `childIds`；`title` 取 `meta.json` 的 `description`（如「列出当前目录文件」）；`extra = { "agentType": "general-purpose", "description": "列出当前目录文件", "toolUseId": "call_00_…" }`（直接从 meta.json 取，和 Codex 的 `agentPath`/`agentNickname` 对称） |
 | **branch**（`--resume-session-at`） | 消息树里某个 `parentUuid` 有 ≥2 个子节点 | `extra = { "branchPoints": 1 }` |
 
 ## 已知盲区：`/btw`（以及同类本地命令）

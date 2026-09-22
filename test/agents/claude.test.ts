@@ -113,6 +113,8 @@ describe('reading a Claude Code home', () => {
     expect(child?.parentId).toBe(SESSION);
     expect(child?.parentKnown).toBe(true);
     expect(child?.records).toHaveLength(1);
+    // The description the parent gave it is the title.
+    expect(child?.title).toBe('Say hello');
     expect(child?.extra).toEqual({
       agentType: 'claude',
       description: 'Say hello',

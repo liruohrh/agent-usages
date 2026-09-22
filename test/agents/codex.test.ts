@@ -79,6 +79,19 @@ beforeEach(async () => {
         source: { subagent: { thread_spawn: { parent_thread_id: PARENT, depth: 1, agent_path: '/root/math' } } },
       },
     }),
+    JSON.stringify({
+      timestamp: '2026-09-23T00:02:00.500Z',
+      ordinal: 1,
+      type: 'response_item',
+      payload: {
+        type: 'agent_message',
+        author: '/root',
+        recipient: '/root/math',
+        content: [
+          { type: 'input_text', text: 'Message Type: NEW_TASK\nTask name: /root/math\nSender: /root\nPayload:\nAdd 1+1 and reply with the number.' },
+        ],
+      },
+    }),
     tokenCount(1, counters(500, 400, 60, 10), counters(500, 400, 60, 10)),
   ].join('\n');
   await writeFile(join(day, `rollout-2026-09-23T00-02-00-${CHILD}.jsonl`), `${child}\n`);
@@ -138,6 +151,8 @@ describe('reading a Codex home', () => {
     expect(child?.parentId).toBe(PARENT);
     expect(child?.parentKnown).toBe(true);
     expect(child?.records).toHaveLength(1);
+    // The task it was spawned with is its title.
+    expect(child?.title).toBe('Add 1+1 and reply with the number.');
     expect(parent?.childIds).toEqual([CHILD]);
   });
 

@@ -228,8 +228,12 @@ async function walk(
     const child = await scanSession(join(subagents, entry), agentId);
     if (child === undefined) continue;
     const depth = typeof meta?.['spawnDepth'] === 'number' ? Number(meta['spawnDepth']) : 1;
+    // A subagent's own log has no title; the meta file's description is what
+    // the parent asked it to do, which is exactly what a title should say.
+    const described = asString(meta?.['description']);
+    const title = child.title ?? described ?? null;
     found.push({
-      session: { ...child, id: agentId },
+      session: { ...child, id: agentId, title },
       file: join(subagents, entry),
       parentId: session.id,
       depth,

@@ -104,6 +104,8 @@ interface ScannedSession {
   parentId: string | null;
   depth: number;
   isSubagent: boolean;
+  /** Title: the task a subagent was given, or nothing. */
+  title: string | null;
   /** Session this one was forked from (`forked_from_id`). */
   forkedFrom: string | null;
   /** Subagent identity, straight from `thread_spawn`. */
@@ -128,6 +130,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     return undefined;
   }
   let id: string | undefined;
+  let title: string | null = null;
   let forkedFrom: string | null = null;
   let agentPath: string | null = null;
   let agentNickname: string | null = null;
@@ -177,6 +180,14 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       model = asString(payload['model']) ?? model;
       continue;
     }
+    if (type === 'response_item' && payload !== undefined && title === null) {
+      // A subagent's first message is the task it was spawned with:
+      // "Message Type: NEW_TASK\nTask name: …\n\n<the task itself>".
+      if (asString(payload['type']) === 'agent_message') {
+        title = taskTitle(payload) ?? title;
+      }
+      continue;
+    }
     if (type !== 'event_msg' || payload === undefined) continue;
     if (asString(payload['type']) !== 'token_count') continue;
     // The delta, never the running total: a fork inherits the parent's total
@@ -200,7 +211,48 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     });
   }
   if (id === undefined && records.length === 0 && cwd === null) return undefined;
-  return { id: id ?? fallbackId, cwd, createdAt, records, parentId, depth, isSubagent, forkedFrom, agentPath, agentNickname, inheritedTokens };
+  // Without a task message, the spawn path still names the agent.
+  title ??= agentPath === null ? null : (agentPath.split('/').filter((part) => part.length > 0).pop() ?? null);
+  title ??= agentNickname;
+  return {
+    id: id ?? fallbackId,
+    cwd,
+    createdAt,
+    title,
+    records,
+    parentId,
+    depth,
+    isSubagent,
+    forkedFrom,
+    agentPath,
+    agentNickname,
+    inheritedTokens,
+  };
+}
+
+/**
+ * The task text out of a subagent's opening `NEW_TASK` message.
+ *
+ * @param payload - the `agent_message` payload.
+ * @returns the first line of the task itself, or `undefined` when this is not a
+ *   task message.
+ */
+function taskTitle(payload: Record<string, unknown>): string | undefined {
+  const content = Array.isArray(payload['content']) ? payload['content'] : [];
+  const texts = content
+    .map((item) => asString(asRecord(item)?.['text']) ?? '')
+    .filter((text) => text.length > 0);
+  const text = texts.join('\n');
+  if (!text.includes('NEW_TASK')) return undefined;
+  // The envelope is `Message Type: …\nTask name: …\nSender: …\nPayload:` and the
+  // task itself follows the `Payload:` marker.
+  const marker = text.indexOf('Payload:');
+  const body = marker === -1 ? text : text.slice(marker + 'Payload:'.length);
+  const line = body
+    .split('\n')
+    .map((part) => part.trim())
+    .find((part) => part.length > 0);
+  return line === undefined ? undefined : line.slice(0, 80);
 }
 
 /** Every `rollout-*.jsonl` under a directory tree, sorted for stable runs. */
@@ -239,7 +291,7 @@ function buildSession(scanned: ScannedSession): SessionRecord {
   }
   return {
     id: scanned.id,
-    title: null,
+    title: scanned.title,
     cwd: scanned.cwd,
     createdAt: scanned.createdAt,
     records,
