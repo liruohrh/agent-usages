@@ -16,13 +16,15 @@
  * `zstdDecompressSync` stops at the end of the first frame and a streaming
  * decoder aborts with `ZSTD_error_prefix_unknown` at the second, so frames are
  * located by scanning for the zstd magic number and decoded one at a time.
- * Reading therefore stops as soon as the fields of interest have been found, or
- * continues to the end of the file when per-request usage is wanted.
+ *
+ * Every frame is read: usage lives in the last frames as much as the first, and
+ * a log's title is rewritten as the session goes on, so stopping early would
+ * report a stale title or a partial bill.
  */
 
 import type { Warning } from '../../i18n/errors.ts';
 import { UserError } from '../../i18n/errors.ts';
-import { open, readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
 
@@ -30,12 +32,6 @@ import type { TokenBuckets, UsageRecord } from '../../core/types.ts';
 
 /** The zstd frame magic number. */
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
-
-/** Bytes read up-front; a header plus an early title always fit comfortably. */
-const HEAD_BYTES = 256 * 1024;
-
-/** Hard cap on bytes read per log before giving up on optional fields. */
-const MAX_BYTES = 4 * 1024 * 1024;
 
 /**
  * Log file names in preference order.
@@ -64,7 +60,13 @@ export interface SessionLogInfo {
   createdAt: number | null;
   /** Working directory from the header. */
   cwd: string | null;
-  /** Projected title from the log, used for subagents the projection cache omits. */
+  /**
+   * The log's title: the last one written, preferring the model-generated one.
+   *
+   * DSH writes a `fallback` title (a truncation of the first prompt) before the
+   * provider names the session, and re-titles it later as the work changes, so
+   * the first title in the stream is almost never the one to show.
+   */
   title: string | null;
   /**
    * Length of the seeded prefix when this session resumed/forked another one.
@@ -77,12 +79,7 @@ export interface SessionLogInfo {
 
 /** A session log's header facts plus the billed requests it records. */
 export interface SessionLogScan extends SessionLogInfo {
-  /**
-   * One record per `assistant/message` usage block, in file order.
-   *
-   * Empty unless the read was asked to collect usage: header-only reads stop at
-   * the leading frames.
-   */
+  /** One record per `assistant/message` usage block, in file order. */
   records: UsageRecord[];
 }
 
@@ -193,13 +190,16 @@ function parseUsageEvent(event: Record<string, unknown>): PendingUsage | undefin
 /** Accumulator shared by the file-format readers. */
 interface ScanState {
   header: Record<string, unknown> | undefined;
+  /** Last title seen, whatever its source. */
   title: string | undefined;
+  /** Last model-generated title seen; it beats the fallback truncation. */
+  providerTitle: string | undefined;
   /** Usage records by request key; a later append supersedes an earlier one. */
   records: Map<string, PendingUsage>;
 }
 
 /** Absorb one decoded chunk of newline-delimited JSON events. */
-function absorbChunk(text: string, state: ScanState, collectUsage: boolean): void {
+function absorbChunk(text: string, state: ScanState): void {
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
@@ -211,74 +211,44 @@ function absorbChunk(text: string, state: ScanState, collectUsage: boolean): voi
     }
     if (event === undefined) continue;
     const type = asString(event['type']);
-    if (type === 'session' && state.header === undefined) state.header = event;
-    else if (type === 'session/title' && state.title === undefined) {
-      state.title = asString(asRecord(event['data'])?.['title']);
+    if (type === 'session') {
+      if (state.header === undefined) state.header = event;
+    } else if (type === 'session/title') {
+      const data = asRecord(event['data']);
+      const title = asString(data?.['title']);
+      if (title !== undefined) {
+        state.title = title;
+        if (asString(asRecord(data?.['source'])?.['kind']) === 'provider') state.providerTitle = title;
+      }
     }
-    if (!collectUsage) continue;
     const usage = parseUsageEvent(event);
     if (usage !== undefined) state.records.set(usage.key, usage);
   }
 }
 
-/** Where a log's facts are complete enough to stop scanning. */
-function isComplete(state: ScanState, collectUsage: boolean, lastFrame: boolean): boolean {
-  if (collectUsage) return lastFrame;
-  return state.header !== undefined && (state.title !== undefined || lastFrame);
-}
-
 /** Decode every frame in `data`, absorbing events into `state`. */
-function absorbFrames(data: Buffer, state: ScanState, collectUsage: boolean): void {
+function absorbFrames(data: Buffer, state: ScanState): void {
   const offsets = frameOffsets(data);
   for (let index = 0; index < offsets.length; index += 1) {
     const start = offsets[index] as number;
     const end = index + 1 < offsets.length ? (offsets[index + 1] as number) : data.length;
     const text = decodeFrame(data.subarray(start, end));
-    if (text !== undefined) absorbChunk(text, state, collectUsage);
-    if (isComplete(state, collectUsage, index === offsets.length - 1)) return;
+    if (text !== undefined) absorbChunk(text, state);
   }
 }
 
 /**
- * Read a session log.
+ * Read a session log from beginning to end.
  *
  * @param path - absolute path to `session.jsonl.zstd` (or `.jsonl`).
- * @param options - `collectUsage: true` scans the whole file and fills
- *   {@link SessionLogScan.records}; the default stops once the header (and, if
- *   it is near the front, the title) has been seen.
- * @returns what was recovered.
+ * @returns the header facts, the log's final title, and every billed request.
  * @throws when the header frame cannot be found or parsed, which means the file is not a DSH session log.
  */
-export async function readSessionLog(
-  path: string,
-  options: { collectUsage?: boolean } = {},
-): Promise<SessionLogScan> {
-  const collectUsage = options.collectUsage === true;
-  const state: ScanState = { header: undefined, title: undefined, records: new Map() };
-  const compressed = path.endsWith('.zstd');
-
-  if (!compressed) {
-    const data = collectUsage ? await readFile(path) : await readHead(path, HEAD_BYTES);
-    absorbChunk(data.toString('utf8'), state, collectUsage);
-  } else {
-    const handle = await open(path, 'r');
-    try {
-      const size = Number((await handle.stat()).size);
-      let length = collectUsage ? size : Math.min(HEAD_BYTES, size);
-      let data = Buffer.alloc(length);
-      await handle.read(data, 0, length, 0);
-      absorbFrames(data, state, collectUsage);
-      if (!collectUsage && state.header === undefined && size > data.length) {
-        // The leading frames did not contain the header; widen the window once.
-        length = Math.min(MAX_BYTES, size);
-        data = Buffer.alloc(length);
-        await handle.read(data, 0, length, 0);
-        absorbFrames(data, state, collectUsage);
-      }
-    } finally {
-      await handle.close();
-    }
-  }
+export async function readSessionLog(path: string): Promise<SessionLogScan> {
+  const state: ScanState = { header: undefined, title: undefined, providerTitle: undefined, records: new Map() };
+  const data = await readFile(path);
+  if (path.endsWith('.zstd')) absorbFrames(data, state);
+  else absorbChunk(data.toString('utf8'), state);
 
   if (state.header === undefined) {
     throw new UserError('dshSessionHeaderMissing', { path });
@@ -295,7 +265,7 @@ export async function readSessionLog(
     delegationDepth: depth,
     createdAt: asInteger(state.header['createdAt']) ?? null,
     cwd: asString(state.header['cwd']) ?? null,
-    title: state.title ?? null,
+    title: state.providerTitle ?? state.title ?? null,
     seedLength: asInteger(state.header['seedLength']) ?? null,
     // The header carries the id, so every record can now be keyed
     // `<sessionId>:step:<turn>:<step>`.
@@ -304,19 +274,6 @@ export async function readSessionLog(
       ...pending.record,
     })),
   };
-}
-
-/** Read at most `limit` bytes from the start of a file. */
-async function readHead(path: string, limit: number): Promise<Buffer> {
-  const handle = await open(path, 'r');
-  try {
-    const size = Number((await handle.stat()).size);
-    const buffer = Buffer.alloc(Math.min(limit, size));
-    await handle.read(buffer, 0, buffer.length, 0);
-    return buffer;
-  } finally {
-    await handle.close();
-  }
 }
 
 /** A session log located on disk. */
@@ -376,28 +333,22 @@ export async function locateSessionLogs(home: string): Promise<LocatedSessionLog
 }
 
 /**
- * Read delegation facts — and optionally usage — for every session log under a DSH home.
+ * Read delegation facts and usage for every session log under a DSH home.
  *
  * Failures are collected rather than thrown: a single unreadable log must not
  * make the whole report unavailable.
  *
  * @param home - DSH home directory.
- * @param options - `collectUsage` also fills `records`, one entry per session,
- *   which requires reading every log to its end.
  * @returns a map from session id (and its `session-` spellings) to facts, a map
  *   from canonical session id to its records, the files read, and one warning per
  *   unreadable log.
  */
-export async function readSessionLogIndex(
-  home: string,
-  options: { collectUsage?: boolean } = {},
-): Promise<{
+export async function readSessionLogIndex(home: string): Promise<{
   byId: Map<string, SessionLogInfo>;
   records: Map<string, UsageRecord[]>;
   files: string[];
   warnings: Warning[];
 }> {
-  const collectUsage = options.collectUsage === true;
   const logs = await locateSessionLogs(home);
   const byId = new Map<string, SessionLogInfo>();
   const records = new Map<string, UsageRecord[]>();
@@ -407,7 +358,7 @@ export async function readSessionLogIndex(
   const results = await Promise.all(
     logs.map(async (log): Promise<Result> => {
       try {
-        return { log, scan: await readSessionLog(log.path, { collectUsage }) };
+        return { log, scan: await readSessionLog(log.path) };
       } catch (error) {
         return { log, error: error instanceof Error ? error : new Error(String(error)) };
       }
@@ -426,7 +377,7 @@ export async function readSessionLogIndex(
     const { scan } = result;
     files.push(result.log.path);
     byId.set(scan.sessionId, scan);
-    if (collectUsage) records.set(scan.sessionId, scan.records);
+    records.set(scan.sessionId, scan.records);
     // A session may be referenced by its bare UUID in one place and by its
     // `session-` prefixed id in another; index both spellings.
     const bare = scan.sessionId.replace(/^session-/, '');

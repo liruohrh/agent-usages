@@ -469,15 +469,33 @@ describe('session log reading', () => {
     expect(info.parentSessionId).toBe(SID.spanning);
     expect(info.delegationDepth).toBe(1);
     expect(info.title).toBe('分类插件的子代理');
-    // A header-only read stops at the leading frames.
-    expect(info.records).toEqual([]);
+    // The whole file is read: header, title, and every billed step.
+    expect(info.records.map((record) => record.id)).toEqual([`${SID.subA}:step:1:1`]);
   });
 
-  it('collects one record per billed step when asked', async () => {
-    const scan = await readSessionLog(
-      join(home, 'sessions', '--home-user-ws-example-app--', SID.spanning, 'session.jsonl'),
-      { collectUsage: true },
-    );
+  it('prefers the model-generated title over the early fallback', async () => {
+    // DSH writes a truncation of the first prompt before the provider names the
+    // session, and re-titles it as the work changes; the last one is the title
+    // the harness itself shows.
+    const dir = await mkdtemp(join(tmpdir(), 'agent-usages-title-'));
+    const titled = [
+      JSON.stringify({ type: 'session', version: 0, id: SID.subB, createdAt: 1, cwd: APP_DIR, delegationDepth: 1 }),
+      JSON.stringify({ type: 'session/title', seq: 2, time: 2, data: { title: '第一句截断', source: { kind: 'fallback' } } }),
+      JSON.stringify({ type: 'session/title', seq: 3, time: 3, data: { title: '模型起的标题', source: { kind: 'provider' } } }),
+      JSON.stringify({ type: 'session/title', seq: 4, time: 4, data: { title: '改过的标题', source: { kind: 'provider' } } }),
+    ];
+    await writeFile(join(dir, 'session.jsonl'), `${titled.join('\n')}\n`);
+    expect((await readSessionLog(join(dir, 'session.jsonl'))).title).toBe('改过的标题');
+
+    // A log the provider never titled keeps its fallback rather than no title.
+    const fallbackOnly = titled.slice(0, 2);
+    await writeFile(join(dir, 'session.jsonl'), `${fallbackOnly.join('\n')}\n`);
+    expect((await readSessionLog(join(dir, 'session.jsonl'))).title).toBe('第一句截断');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('collects one record per billed step', async () => {
+    const scan = await readSessionLog(join(home, 'sessions', '--home-user-ws-example-app--', SID.spanning, 'session.jsonl'));
     expect(scan.records.map((record) => record.id)).toEqual([
       `${SID.spanning}:step:1:1`,
       `${SID.spanning}:step:1:2`,
@@ -538,7 +556,7 @@ describe('session log reading', () => {
     const located = await locateSessionLogs(home);
     expect(located.find((log) => log.directoryName === SID.current)?.path).toMatch(/session\.v3\.jsonl\.zstd$/);
 
-    const scan = await readSessionLog(join(dir, 'session.v3.jsonl.zstd'), { collectUsage: true });
+    const scan = await readSessionLog(join(dir, 'session.v3.jsonl.zstd'));
     expect(scan.records).toHaveLength(1);
     expect(scan.records[0]).toMatchObject({
       id: `${SID.current}:step:1:1`,
