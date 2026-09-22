@@ -25,6 +25,7 @@ import {
 } from './pricing/index.ts';
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
+import { resolveLanguage, setLanguage } from './i18n/index.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -90,23 +91,6 @@ interface Loaded {
   warnings: string[];
 }
 
-/**
- * The user's locale, as the platform reports it.
- *
- * `Intl` already reflects `LANG`/`LC_ALL`, so it is asked first; the environment
- * is only a fallback for runtimes that cannot resolve one.
- */
-function systemLocale(): string | undefined {
-  try {
-    const resolved = Intl.DateTimeFormat().resolvedOptions().locale;
-    if (resolved.length > 0) return resolved;
-  } catch {
-    // Fall through to the environment.
-  }
-  const fromEnv = process.env['LC_ALL'] ?? process.env['LC_MESSAGES'] ?? process.env['LANG'];
-  return fromEnv === undefined || fromEnv.trim().length === 0 ? undefined : fromEnv.trim();
-}
-
 /** Validate `--currency-rate`: a positive decimal, taken literally. */
 function parseRateOption(value: string): string {
   if (!/^\d+(\.\d+)?$/.test(value.trim()) || Number(value) <= 0) {
@@ -167,7 +151,7 @@ async function loadOrExit(
       // The user's own file is the middle layer: a flag still wins over it.
       ...(options.currency !== undefined ? { currencyFlag: options.currency } : config.currency !== undefined ? { currencyFlag: config.currency } : {}),
       ...(options.currencyRate === undefined ? {} : { rateFlag: options.currencyRate }),
-      ...(systemLocale() === undefined ? {} : { locale: systemLocale() }),
+      ...(systemLocaleFromEnv() === undefined ? {} : { locale: systemLocaleFromEnv() }),
     });
     // One published list per model, in the currency the report will speak; the
     // rates are then converted — so a list published in the reader's currency is
@@ -617,8 +601,28 @@ export function buildProgram(): Command {
   return program;
 }
 
+/**
+ * The locale the machine reports.
+ *
+ * `Intl` already reflects `LANG`/`LC_ALL`, so it is asked first; the environment
+ * is only a fallback for runtimes that cannot resolve one.
+ */
+function systemLocaleFromEnv(): string | undefined {
+  try {
+    const resolved = Intl.DateTimeFormat().resolvedOptions().locale;
+    if (resolved.length > 0) return resolved;
+  } catch {
+    // Fall through to the environment.
+  }
+  const fromEnv = process.env['LC_ALL'] ?? process.env['LC_MESSAGES'] ?? process.env['LANG'];
+  return fromEnv === undefined || fromEnv.trim().length === 0 ? undefined : fromEnv.trim();
+}
+
 /** Run the CLI. */
 async function main(): Promise<void> {
+  // The language is settled before the program is built: commander renders help
+  // text while parsing, and half a report in one language is worse than none.
+  setLanguage(resolveLanguage(readUserConfig().config.language, systemLocaleFromEnv()));
   const program = buildProgram();
   program.exitOverride();
   try {

@@ -11,6 +11,7 @@
 import stringWidth from 'string-width';
 
 import { moneyBreakdown, type MoneyBreakdown } from './accounting.ts';
+import { t } from './i18n/index.ts';
 import { displayRate } from './pricing/index.ts';
 import { tokenBreakdown } from './core/buckets.ts';
 import type { CostTotals, TokenTotals } from './core/types.ts';
@@ -105,6 +106,19 @@ function labeled(text: string, value: string): string {
   return `${label(text)}  ${value}`;
 }
 
+/**
+ * Width the report header's labels pad to.
+ *
+ * Narrower than {@link LABEL_WIDTH} on purpose: the header's labels are short and
+ * its values are long, so the values start at column 10 rather than 20.
+ */
+const HEADER_LABEL_WIDTH = 10;
+
+/** One `label  value` line of the report header. */
+function headerLine(text: string, value: string): string {
+  return `${pad(text, HEADER_LABEL_WIDTH)}${value}`;
+}
+
 /** Render a column-aligned table. */
 function table(
   headers: readonly string[],
@@ -172,19 +186,17 @@ function iso(instant: number | null): string | null {
   return instant === null || !Number.isFinite(instant) ? null : new Date(instant).toISOString();
 }
 
-const TIER_LABELS: Readonly<Record<string, string>> = {
-  peak: '高峰时段',
-  'off-peak': '空闲时段',
-  flat: '统一价格',
-};
+/** How a tier reads, in the active language. */
+function tierLabel(tier: string): string {
+  const labels = t().tier;
+  return (labels as Record<string, string>)[tier] ?? tier;
+}
 
 /** Explanation shown when a period had to be chosen by fallback. */
-const RESOLUTION_NOTES: Readonly<Record<string, string>> = {
-  exact: '',
-  'fallback-later': ' ← 该时间早于本区间，按其后第一个区间的价格计算',
-  'fallback-earlier': ' ← 该时间晚于本区间，按最后一个已知区间的价格计算',
-  'fallback-default': ' ← 该模型无价格表，按默认模型价格计算',
-};
+function resolutionNote(resolution: string): string {
+  const notes = t().resolution as Record<string, string>;
+  return resolution === 'exact' ? '' : (notes[resolution] ?? '');
+}
 
 /**
  * The metric vocabulary, and the billed component each token figure prices.
@@ -202,7 +214,7 @@ const COMPONENT_METRICS: Readonly<Record<string, string>> = {
 
 /** The unit a rate card is quoted in. */
 function rateUnit(symbol: string): string {
-  return symbol.length === 0 ? '每百万 token' : `${symbol} / 百万 token`;
+  return t().rate.perMillion(symbol);
 }
 
 /** A share of a whole, shown beside the figure it describes. */
@@ -255,11 +267,11 @@ function metricsLine(tokens: TokenTotals, amounts: MoneyBreakdown, requests: num
  */
 function bandBlocks(bands: readonly BandSummary[], symbol: string, historical = false): string[] {
   if (bands.length === 0) return [];
-  const lines = ['计价区间:'];
+  const lines: string[] = [t().section.bands];
   for (const band of bands) {
-    const note = RESOLUTION_NOTES[band.resolution] ?? '';
+    const note = resolutionNote(band.resolution);
     const window = band.window.length === 0 ? '' : `（${band.window}）`;
-    lines.push(`▸ ${band.periodId} ${TIER_LABELS[band.tier] ?? band.tier} · ${band.model}`);
+    lines.push(`▸ ${band.periodId} ${tierLabel(band.tier)} · ${band.model}`);
     lines.push(`  ${band.periodLabel}${window}${note}`);
     lines.push(`  ${metricsLine(band.tokens, moneyBreakdown(band.cost, band.tokens), band.requests, symbol)}`);
     const rates = band.components
@@ -270,7 +282,7 @@ function bandBlocks(bands: readonly BandSummary[], symbol: string, historical = 
     if (rates.length > 0) {
       lines.push(
         historical
-          ? `  P（厂商原价，按记录日期汇率折算）: ${rates}`
+          ? `  P（${t().rate.vendorCard}）: ${rates}`
           : `  P（${rateUnit(symbol)}）: ${rates}`,
       );
     }
@@ -388,7 +400,8 @@ function scopeLines(
       totals.requests,
       symbol,
     )}`;
-  return [line('总', node.total), line('自身', node.own), line('子代理', node.spawned)];
+  const scope = t().scope;
+  return [line(scope.total, node.total), line(scope.own, node.own), line(scope.spawned, node.spawned)];
 }
 
 /** One session and, recursively, everything it spawned. */
@@ -401,11 +414,11 @@ function sessionLines(
   parentDate: string | undefined,
 ): string[] {
   const children = childrenOf.get(session.id) ?? [];
-  const badge = session.subagentCount > 0 ? `（${count(session.subagentCount)} 个子代理）` : '';
+  const badge = session.subagentCount > 0 ? t().tree.subagents(count(session.subagentCount)) : '';
   const end = nodeDate(session.lastUsage, 'end');
   // The date is only worth repeating when it differs from the row above.
   const suffix = end === undefined || end === parentDate ? '' : ` ${end}`;
-  const lines = [`${indent(level)}${clip(session.title ?? '(无标题)', TITLE_WIDTH)}${badge}${suffix}`];
+  const lines = [`${indent(level)}${clip(session.title ?? t().tree.untitled, TITLE_WIDTH)}${badge}${suffix}`];
   const total = moneyBreakdown(session.total.cost, session.total.tokens);
   // The split is worth printing only when there is something to split off; a
   // session with no subagents says everything in one line.
@@ -487,7 +500,7 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
     if (bands.length > 0) lines.push('', ...bands);
   }
   if (result.warnings.length > 0) {
-    lines.push('', '提示:', ...result.warnings.map((warning) => `  - ${warning}`));
+    lines.push('', t().section.tips, ...result.warnings.map((warning) => `  - ${warning}`));
   }
   return lines;
 }
@@ -511,28 +524,29 @@ export function formatUsageReport(
   // The vendor's own currency is the reference; a conversion adds the equation
   // that was applied, so a reader can check every amount against the price list.
   const historical = rate.mode === 'historical';
+  const labels = t();
   const source =
     rate.display === null
-      ? `计价来源  ${vendor}（${rate.base}，按 1 ${rate.base} = ${displayRate(rate.rate)} 折算，未指定目标货币）`
+      ? labels.rate.anonymous(vendor, rate.base, displayRate(rate.rate))
       : historical
-        ? `计价来源  ${vendor}（${rate.base}，按每条记录当天的汇率折算为 ${rate.display}）`
+        ? labels.rate.byDate(vendor, rate.base, rate.display)
         : rate.rate === '1'
-          ? `计价来源  ${vendor}（${rate.base}）`
-          : `计价来源  ${vendor}（${rate.base} → ${rate.display}）`;
+          ? labels.rate.published(vendor, rate.base)
+          : labels.rate.converted(vendor, rate.base, rate.display);
   const rateLine = historical
-    ? `汇率      按记录日期 · ${rate.series ?? '日序列'}`
+    ? labels.rate.historical(rate.series ?? '')
     : rate.display === null || rate.rate === '1'
       ? undefined
-      : `汇率      1 ${rate.base} = ${displayRate(rate.rate)} ${rate.display} · ${rate.source} · ${rate.date}`;
+      : labels.rate.equation(rate.base, displayRate(rate.rate), rate.display, rate.source, rate.date);
   const header = [
-    'Agent 用量统计',
-    `Agent     ${options.agentLabel === undefined ? first.result.agent : `${first.result.agent}（${options.agentLabel}）`}`,
-    `数据目录  ${first.result.source}`,
+    labels.app.usage,
+    headerLine(labels.header.title, options.agentLabel === undefined ? first.result.agent : `${first.result.agent}（${options.agentLabel}）`),
+    headerLine(labels.header.dataDir, first.result.source),
     sections.length === 1
-      ? `时间范围  ${first.range.label}`
-      : `时间窗口  ${sections.map((section) => section.label).join(' / ')}`,
-    source,
-    ...(rateLine === undefined ? [] : [rateLine]),
+      ? headerLine(labels.header.range, first.range.label)
+      : headerLine(labels.header.windows, sections.map((section) => section.label).join(' / ')),
+    headerLine(labels.header.pricing, source),
+    ...(rateLine === undefined ? [] : [headerLine(labels.header.rate, rateLine)]),
   ].join('\n');
   const blocks = [header];
   for (const section of sections) blocks.push(renderSection(section, symbol, options).join('\n'));

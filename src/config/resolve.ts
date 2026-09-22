@@ -8,6 +8,7 @@
  * degrades to the one below it instead of failing the run.
  */
 
+import type { Language } from '../i18n/index.ts';
 import type { PricingProvider } from '../pricing/contract.ts';
 import type { RateTable } from '../pricing/currency.ts';
 import { mergeProviders, readUserConfig, type RateMode, type UpdateSettings } from './user.ts';
@@ -23,6 +24,8 @@ export interface ResolvedConfig {
   rateTable: RateTable;
   /** Sources available for a rate refresh, in order. */
   rateSources: RatesConfig['sources'];
+  /** Language the user pinned, if any. */
+  language: Language | undefined;
   /** Currency the user pinned, if any. */
   currency: string | undefined;
   /** How to convert, when the user pinned a mode. */
@@ -125,6 +128,7 @@ export async function resolveConfig(options: ResolveOptions = {}): Promise<Resol
       provenance: { source: `内置汇率表 ${rates.source}`, date: rates.updatedAt },
     },
     rateSources: rates.sources,
+    language: user.config.language,
     currency: user.config.currency,
     rateMode: user.config.rateMode,
     rateSource: user.config.rateSource,

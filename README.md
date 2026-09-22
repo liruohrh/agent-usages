@@ -267,6 +267,7 @@ pnpm link --global && agent-usages usage
   "version": 1,
   "currency": "USD",              // 固定显示货币，命令行 --currency 仍然优先
   "rateSource": "er-api",         // 优先用哪个在线汇率源
+  "language": "en",               // 输出语言：zh / en（默认按系统语言探测，探测不到用 zh）
   "rateMode": "historical",       // 可选：按记录当天的汇率折算（默认 latest）
   "updates": { "pricing": true, "rates": false },   // 默认值
   "pricing": {                    // 覆盖厂商的某些价格区间，其余仍用默认表

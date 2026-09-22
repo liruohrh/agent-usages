@@ -8,6 +8,7 @@
  * drops the rest of the vendor's history.
  */
 
+import { LANGUAGES, type Language } from '../i18n/index.ts';
 import type { PricePeriod } from '../pricing/contract.ts';
 import { ConfigError, parsePricingConfig, type ProviderConfig } from './pricing.ts';
 import { userConfigPath } from './paths.ts';
@@ -26,6 +27,8 @@ export type RateMode = 'latest' | 'historical';
 
 /** What a user's configuration file may say. */
 export interface UserConfig {
+  /** Language to speak, instead of the one the machine's locale implies. */
+  language: Language | undefined;
   /** Display currency to use instead of the locale's. */
   currency: string | undefined;
   /** Whether to convert at one current rate or at each record's own date's rate. */
@@ -51,7 +54,21 @@ export interface LoadedUserConfig {
 
 /** The empty configuration: everything comes from the shipped files. */
 function emptyConfig(): UserConfig {
-  return { currency: undefined, rateMode: undefined, updates: { ...DEFAULT_UPDATES }, rateSource: undefined, pricing: [] };
+  return {
+    language: undefined,
+    currency: undefined,
+    rateMode: undefined,
+    updates: { ...DEFAULT_UPDATES },
+    rateSource: undefined,
+    pricing: [],
+  };
+}
+
+/** Read a language name, rejecting anything this build cannot speak. */
+function languageSetting(value: unknown, path: string): Language | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string' && (LANGUAGES as readonly string[]).includes(value)) return value as Language;
+  throw new ConfigError(path, `应为 ${LANGUAGES.join(' / ')} 之一，收到 ${JSON.stringify(value)}`);
 }
 
 /** Read a rate mode, rejecting anything else. */
@@ -93,6 +110,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): LoadedUser
     const pricing = node['pricing'] === undefined ? [] : parsePricingConfig(node['pricing']).providers;
     return {
       config: {
+        language: languageSetting(node['language'], 'language'),
         rateMode: rateMode(node['rateMode'], 'rateMode'),
         currency:
           currency === undefined
