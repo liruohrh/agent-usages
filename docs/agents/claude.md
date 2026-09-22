@@ -44,6 +44,18 @@ export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-flash
 - `hasUnknownModelCost: true` 时 `cost-state.totalCostUSD` 不可信（token 仍可信）；金额一律由本工具按价格表重算。
 - `cache_creation` 是对象（`ephemeral_1h/5m_input_tokens`）而非数字；DeepSeek 侧 `cache_creation_input_tokens` 恒为 0。
 
+## 已知盲区：`/btw`（以及同类本地命令）
+
+Claude Code 2.1.278 实测：用 `/btw <问题>` 提问**不会在会话 JSONL 里留下任何可计量的条目**。
+
+- 输入本身只出现在 `~/.claude/history.jsonl`（字段：`display` / `pastedContents` / `timestamp` / `project` / `sessionId`，**没有任何 token 字段**）；
+- 会话文件里只有一条 `system` / `subtype: local_command` 的记录（`<command-name>/btw</command-name>` 与 `Usage: /btw <your question>`），**不带 `message.usage`**；
+- 两次真实提问（02:38:06、02:44:02）之后会话文件 **mtime 没变、没有新的 `cost-state`** ——连 Claude Code 自己的 `/cost` 数据源都没动。
+
+因此这类交互的 token **磁盘上不存在**，本工具（以及任何基于文件的统计工具）都无法计入。`~/.claude/sessions/<pid>.json` 这个目录我们**刻意不读**：它是运行中进程的注册表（pid / sessionId / socket / 状态 / 对端名），不含用量。
+
+若你在 TUI 里确实看到了模型生成的回答，那说明是 Claude Code 自己没有把这笔花费写进日志（建议向 Claude Code 反馈）；如果 `/btw` 只是本地/对端通道、没有走模型，那就没有遗漏。
+
 ## fork / rewind（已实测）
 
 - **`--fork-session` 原样复制源会话的条目**：源 17 个 `uuid` → fork 22 个，**交集 17（100%）**，且**没有任何 back-pointer**（无 `forkedFrom`/`parentSession`，行内 `sessionId` 全是新的），fork 也不复制 `subagents/`，但它的 `cost-state` 仍带着源会话的子 agent 桶。**因此按文件求和会把历史算 N 遍**。工具按"一次 API 调用一个 `message.id`"识别这种复制：同一项目里，某个 id 已被更早的文件计过费，就说明当前文件那一条是复制来的历史，不计费；该会话仍照常列出（自己的标题、路径、新产生的请求），并作为**来源会话的延续**（`parentId` 指向它、不算子代理、不进源的 `childIds`）。源文件已删除时该 id 无人认领，记录保留。
