@@ -342,8 +342,23 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   if (sessions.length === 0) {
     throw new Error(renderDiagnostic('codexNoData', { source }));
   }
-  const btw = await countUnpersistedSessions(join(source, 'history.jsonl'), new Set(sessions.map((s) => s.id)));
-  if (btw > 0) warnings.push(new UserError('sideQuestionsUncounted', { count: String(btw), agent: 'Codex' }));
+  // `/btw` runs in a thread that never gets a rollout, so its tokens are missing
+  // from every session file — but the internal log records each turn's total.
+  const known = new Set(sessions.map((session) => session.id));
+  const side = await readSideTurnUsage(source, known);
+  if (side.turns > 0) {
+    warnings.push(
+      new UserError('sideQuestionsCounted', {
+        count: String(side.threads),
+        tokens: side.tokens.toLocaleString('en-US'),
+        turns: String(side.turns),
+        agent: 'Codex',
+      }),
+    );
+  } else {
+    const btw = await countUnpersistedSessions(join(source, 'history.jsonl'), known);
+    if (btw > 0) warnings.push(new UserError('sideQuestionsUncounted', { count: String(btw), agent: 'Codex' }));
+  }
 
   const byId = new Map(sessions.map((session) => [session.id, session]));
   for (const session of sessions) {
@@ -394,6 +409,54 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       records: sessions.reduce((total, session) => total + session.records.length, 0),
     },
     warnings,
+  };
+}
+
+/**
+ * Usage of turns whose thread never got a rollout.
+ *
+ * `logs_2.sqlite` logs one line per sampled turn:
+ * `… post sampling token usage turn_id=… total_usage_tokens=48556 …`. Threads
+ * that appear there but have no rollout are exactly the side questions
+ * (`/btw`), whose spend is otherwise invisible. Only the total is available —
+ * no input/cache split — so the number is reported, never priced.
+ *
+ * @param home - the Codex home.
+ * @param known - thread ids that do have a rollout (never counted here).
+ * @returns the side threads, their turns, and their total tokens.
+ */
+async function readSideTurnUsage(
+  home: string,
+  known: ReadonlySet<string>,
+): Promise<{ threads: number; turns: number; tokens: number }> {
+  const perThread = new Map<string, { turns: number; tokens: number }>();
+  try {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(join(home, 'logs_2.sqlite'), { readOnly: true });
+    try {
+      const rows = db
+        .prepare("SELECT thread_id, feedback_log_body FROM logs WHERE feedback_log_body LIKE '%post sampling token usage%'")
+        .all() as { thread_id?: unknown; feedback_log_body?: unknown }[];
+      for (const row of rows) {
+        const thread = asString(row.thread_id);
+        const body = asString(row.feedback_log_body);
+        if (thread === undefined || body === undefined || known.has(thread)) continue;
+        const tokens = Number(/total_usage_tokens=(\d+)/.exec(body)?.[1] ?? 0);
+        const entry = perThread.get(thread) ?? { turns: 0, tokens: 0 };
+        entry.turns += 1;
+        entry.tokens += tokens;
+        perThread.set(thread, entry);
+      }
+    } finally {
+      db.close();
+    }
+  } catch {
+    // No sqlite module, missing database, or a locked one: no side usage.
+  }
+  return {
+    threads: perThread.size,
+    turns: [...perThread.values()].reduce((total, entry) => total + entry.turns, 0),
+    tokens: [...perThread.values()].reduce((total, entry) => total + entry.tokens, 0),
   };
 }
 

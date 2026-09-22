@@ -318,6 +318,8 @@ export const en: Messages = {
     codexHomeNotAbsolute: (p: { value: string }) => `the Codex home must be an absolute path, got ${p.value}`,
     codexNoData: (p: { source: string }) =>
       `no Codex rollouts under ${p.source}; point --home at the Codex home (default ~/.codex) or set CODEX_HOME`,
+    sideQuestionsCounted: (p: { count: string; tokens: string; turns: string; agent: string }) =>
+      `${p.count} side interaction(s) found (${p.agent}, ${p.turns} turn(s)): ${p.tokens} tokens in total; they never reach a session log and only a total exists (no cache split), so they are reported but never priced`,
     sideQuestionsUncounted: (p: { count: string; agent: string }) =>
       `${p.count} side interaction(s) found (${p.agent}): /btw questions run in a throwaway session that never reaches a session log; only a total token count exists (no cache split), so they are reported but never priced`,
     codexSessionNoun: 'sessions',

@@ -156,6 +156,27 @@ describe('reading a Codex home', () => {
     expect(parent?.childIds).toEqual([CHILD]);
   });
 
+  it('reports the tokens of a side question that never got a rollout', async () => {
+    let sqlite: typeof import('node:sqlite');
+    try {
+      sqlite = await import('node:sqlite');
+    } catch {
+      return; // an older Node has no node:sqlite; the feature degrades quietly
+    }
+    const db = new sqlite.DatabaseSync(join(home, 'logs_2.sqlite'));
+    db.exec('CREATE TABLE logs (thread_id TEXT, feedback_log_body TEXT)');
+    const insert = db.prepare('INSERT INTO logs VALUES (?, ?)');
+    insert.run('side-thread', 'session_task.run:run_turn: post sampling token usage total_usage_tokens=4242');
+    // A thread that has a rollout is already billed from the rollout.
+    insert.run(PARENT, 'session_task.run:run_turn: post sampling token usage total_usage_tokens=999999');
+    db.close();
+
+    const data = await codexAgent.load({ home });
+    const warning = data.warnings.find((candidate) => candidate.code === 'sideQuestionsCounted');
+    expect(warning?.message).toContain('4,242');
+    expect(warning?.message).not.toContain('999,999');
+  });
+
   it('groups sessions by their cwd and recognises the home', async () => {
     const data = await codexAgent.load({ home });
     expect(data.agent).toBe('codex');
