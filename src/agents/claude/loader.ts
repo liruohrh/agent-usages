@@ -194,6 +194,8 @@ interface WalkedSession {
   parentId: string | null;
   depth: number;
   isSubagent: boolean;
+  /** `agent-<id>.meta.json` of a subagent run, when there is one. */
+  meta: Record<string, unknown> | undefined;
 }
 
 /** Read a session file and the subagent files filed under it. */
@@ -213,7 +215,7 @@ async function walk(
       return;
     }
   }
-  found.push({ session, file, parentId: null, depth: 0, isSubagent: false });
+  found.push({ session, file, parentId: null, depth: 0, isSubagent: false, meta: undefined });
   // Subagents live one level down, in a directory named after the session file.
   const subagents = join(file.replace(/\.jsonl$/, ''), 'subagents');
   for (const entry of await readdirOrEmpty(subagents)) {
@@ -232,6 +234,7 @@ async function walk(
       parentId: session.id,
       depth,
       isSubagent: true,
+      meta,
     });
   }
 }
@@ -330,6 +333,15 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
         extra['inheritedRequests'] = entry.session.records.length - records.length;
       }
       if (entry.session.branchPoints > 0) extra['branchPoints'] = entry.session.branchPoints;
+      if (entry.isSubagent && entry.meta !== undefined) {
+        // Claude Code records what the subagent was asked to do next to its log.
+        const agentType = asString(entry.meta['agentType']);
+        const description = asString(entry.meta['description']);
+        const toolUseId = asString(entry.meta['toolUseId']);
+        if (agentType !== undefined) extra['agentType'] = agentType;
+        if (description !== undefined) extra['description'] = description;
+        if (toolUseId !== undefined) extra['toolUseId'] = toolUseId;
+      }
       const session = buildSession({
         ...entry,
         session: { ...entry.session, records, messageIds },

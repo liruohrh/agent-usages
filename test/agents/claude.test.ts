@@ -73,7 +73,13 @@ beforeEach(async () => {
   );
   await writeFile(
     join(subagents, `agent-${AGENT}.meta.json`),
-    JSON.stringify({ agentType: 'claude', description: 'Say hello', spawnDepth: 1, requestShape: 'foreground' }),
+    JSON.stringify({
+      agentType: 'claude',
+      description: 'Say hello',
+      toolUseId: 'call_test',
+      spawnDepth: 1,
+      requestShape: 'foreground',
+    }),
   );
 });
 
@@ -107,6 +113,11 @@ describe('reading a Claude Code home', () => {
     expect(child?.parentId).toBe(SESSION);
     expect(child?.parentKnown).toBe(true);
     expect(child?.records).toHaveLength(1);
+    expect(child?.extra).toEqual({
+      agentType: 'claude',
+      description: 'Say hello',
+      toolUseId: 'call_test',
+    });
     expect(parent?.childIds).toEqual([AGENT]);
   });
 
