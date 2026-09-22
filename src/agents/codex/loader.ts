@@ -132,6 +132,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   let id: string | undefined;
   let title: string | null = null;
   let forkedFrom: string | null = null;
+  let forkBoundary: number | undefined;
   let agentPath: string | null = null;
   let agentNickname: string | null = null;
   let inheritedTokens = 0;
@@ -172,6 +173,11 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       // any event; the difference is what must never be billed here.
       const forkSource = asString(payload['forked_from_id']);
       if (forkSource !== undefined) forkedFrom ??= forkSource;
+      // A fork may copy the source's history up to this ordinal. Today's forks do
+      // not (verified: every copied-fork's first token event sits past the
+      // boundary), but skipping anything at or below it costs nothing and keeps
+      // the "delta only" rule safe if that ever changes.
+      forkBoundary ??= asNumber(payload['forked_from_ordinal_exclusive']);
       continue;
     }
     if (type === 'turn_context' && payload !== undefined) {
@@ -190,6 +196,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     }
     if (type !== 'event_msg' || payload === undefined) continue;
     if (asString(payload['type']) !== 'token_count') continue;
+    if (forkBoundary !== undefined && (asNumber(entry['ordinal']) ?? 0) <= forkBoundary) continue;
     // The delta, never the running total: a fork inherits the parent's total
     // without inheriting its events.
     const delta = asRecord(asRecord(payload['info'])?.['last_token_usage']);

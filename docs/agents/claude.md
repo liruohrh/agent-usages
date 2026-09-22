@@ -38,7 +38,7 @@ export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-flash
 
 ## 去重与用量口径（实测 2.1.278）
 
-- **一次响应写多行**：Claude Code 为每个 content block 写一条 `assistant` 条目，`usage` 逐行原样重复。按条目累加会把一次请求算 2 倍（实测 4 行 naive `input 30564` vs 去重后 `15282`，正好 2 倍）。工具按 **`message.id`**（一次 API 调用一个 id）在文件内去重。
+- **一次响应写多行**：Claude Code 为每个 content block 写一条 `assistant` 条目，`usage` 逐行原样重复。按条目累加会把一次请求算 2 倍（实测 4 行 naive `input 30564` vs 去重后 `15282`，正好 2 倍）。工具按 **`message.id`**（一次 API 调用一个 id）在文件内去重；同一个 id 出现两条且数值不一致时，取**已完成（有 `stop_reason`）且 output 更大**的那条（参考 cc-usage `Sources/Shared/SessionOverlay.swift` 的裁决规则）。
 - **`cost-state` 行是好用的交叉校验**：它按模型分桶、**已把子 agent 聚合进来**，与"按 `message.id` 去重的逐行求和"**逐位相等**（实测 `deepseek-flash` 桶 21757 = 两个子 agent 文件 11416+10341）。一个文件里可能有多行，取最后一行；它与逐行求和、与子 agent 文件**三选一，不可叠加**。
 - `uuid` 文件内唯一、**跨文件不唯一**（fork 会复制）；`requestId` 在 JSONL 里不存在，别当去重键。
 - `hasUnknownModelCost: true` 时 `cost-state.totalCostUSD` 不可信（token 仍可信）；金额一律由本工具按价格表重算。

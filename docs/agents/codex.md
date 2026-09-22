@@ -88,8 +88,9 @@ session_task.run:run_turn: post sampling token usage turn_id=01a0ca87-…   tota
 
 ## fork / resume
 
-- **`codex exec fork`**：新建 rollout 并带 `forked_from_id`、`history_base.end_byte_offset`；它**不复制父的事件，却继承父的累计**（实测 fork 内唯一一次调用报 `total=29,376 = 19,530(父) + 9,846(自己)`）。**按增量求和天然不会重复计费**——继承的那部分根本没有对应事件。实测 8 个 rollout：Σ增量 = 406,582（真值），而 Σ末次累计 = 426,112，差额 19,530 正是继承量；本工具取前者，与独立核对**逐位相等**。
+- **`codex exec fork`**：新建 rollout 并带 `forked_from_id` / `forked_from_ordinal_exclusive` / `history_base`；它**不复制父的事件，却继承父的累计**（实测 fork 内唯一一次调用报 `total=29,376 = 19,530(父) + 9,846(自己)`）。**按增量求和天然不会重复计费**——继承的那部分根本没有对应事件。实测 8 个 rollout：Σ增量 = 406,582（真值），而 Σ末次累计 = 426,112，差额 19,530 正是继承量；本工具取前者，与独立核对**逐位相等**。
 - **`codex exec resume <UUID>`**：不新建文件，向同一 rollout 追加，累计续算；增量同样只在追加的部分出现。
+- 另有一道防线：若某个 fork 形态真的把源事件复制进来了（当前实测 5 个 fork 全部**没有**——`token_count` 的 ordinal 都落在 `forked_from_ordinal_exclusive` 之后，如 30→42、140→156），适配器会跳过 ordinal ≤ 边界的事件；这条规则来自对 ccusage `rust/adapters/codex/src/replay.rs` 的参考，零成本。
 - `ordinal` 只保证文件内唯一（fork 会从父的序号续号），所以请求键是 `${会话 id}:tok:${ordinal}`。
 
 ## 子 agent

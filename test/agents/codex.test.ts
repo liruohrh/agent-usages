@@ -96,6 +96,20 @@ beforeEach(async () => {
   ].join('\n');
   await writeFile(join(day, `rollout-2026-09-23T00-02-00-${CHILD}.jsonl`), `${child}\n`);
 
+  // A fork that *did* copy history (a flavour today's Codex does not produce):
+  // anything at or below `forked_from_ordinal_exclusive` belongs to the source.
+  const copiedFork = [
+    JSON.stringify({
+      timestamp: '2026-09-23T00:04:00.000Z',
+      ordinal: 0,
+      type: 'session_meta',
+      payload: { id: 'fork-copied', session_id: 'fork-copied', cwd: '/tmp/demo', forked_from_id: PARENT, forked_from_ordinal_exclusive: 5 },
+    }),
+    tokenCount(3, counters(9_000, 0, 10, 0), counters(9_000, 0, 10, 0)),
+    tokenCount(9, counters(700, 0, 20, 0), counters(700, 0, 20, 0)),
+  ].join('\n');
+  await writeFile(join(day, 'rollout-2026-09-23T00-04-00-fork-copied.jsonl'), `${copiedFork}\n`);
+
   // A fork: it inherits the parent's running total but copies no events, so its
   // only token_count carries a total with no delta behind it.
   const fork = [
@@ -156,6 +170,13 @@ describe('reading a Codex home', () => {
     expect(parent?.childIds).toEqual([CHILD]);
   });
 
+  it('skips the history a fork copied from its source', async () => {
+    const data = await codexAgent.load({ home });
+    const fork = data.sessions.find((candidate) => candidate.id === 'fork-copied');
+    // Ordinal 3 is at or below the fork boundary; only ordinal 9 is its own work.
+    expect(fork?.records.map((record) => record.id)).toEqual(['fork-copied:tok:9']);
+  });
+
   it('reports the tokens of a side question that never got a rollout', async () => {
     let sqlite: typeof import('node:sqlite');
     try {
@@ -183,7 +204,7 @@ describe('reading a Codex home', () => {
     expect(data.projects).toHaveLength(1);
     expect(data.projects[0]?.path).toBe('/tmp/demo');
     expect(data.projects[0]?.name).toBe('demo');
-    expect(data.projects[0]?.sessions).toHaveLength(3);
+    expect(data.projects[0]?.sessions).toHaveLength(4);
     expect(await codexAgent.hasData(home)).toBe(true);
     expect(await codexAgent.hasData(join(home, 'nope'))).toBe(false);
   });

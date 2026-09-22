@@ -90,6 +90,37 @@ afterEach(async () => {
 });
 
 describe('reading a Claude Code home', () => {
+  it('keeps the fuller record when one message.id appears twice', async () => {
+    // A replayed request can repeat a message id with a different usage; the
+    // entry that finished (a `stop_reason`) and reported more output wins.
+    const project = join(home, 'projects', '-tmp-demo');
+    const id = 'dddddddd-0000-4000-8000-00000000000d';
+    const entry = (uuid: string, timestamp: string, output: number, stop: boolean): string =>
+      JSON.stringify({
+        type: 'assistant',
+        uuid,
+        parentUuid: null,
+        sessionId: id,
+        timestamp,
+        cwd: '/tmp/demo',
+        message: {
+          id: 'msg-dup',
+          model: 'deepseek-flash',
+          ...(stop ? { stop_reason: 'end_turn' } : {}),
+          usage: { input_tokens: 100, output_tokens: output },
+        },
+      });
+    await writeFile(
+      join(project, `${id}.jsonl`),
+      `${[entry('p1', '2026-09-23T00:30:01.000Z', 1, false), entry('p2', '2026-09-23T00:30:02.000Z', 40, true)].join('\n')}\n`,
+    );
+
+    const data = await claudeAgent.load({ home });
+    const session = data.sessions.find((candidate) => candidate.id === id);
+    expect(session?.records).toHaveLength(1);
+    expect(session?.records[0]?.tokens.output).toBe(40);
+  });
+
   it('names a session from custom-title.json', async () => {
     const data = await claudeAgent.load({ home });
     const session = data.sessions.find((candidate) => candidate.id === SESSION);

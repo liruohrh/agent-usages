@@ -124,8 +124,10 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   const children = new Map<string, number>();
   // One API response is written as one entry per content block, and every one of
   // them repeats the same `usage` — counting entries would bill each request two
-  // or three times. `message.id` identifies the call, so it is the key.
-  const billed = new Set<string>();
+  // or three times. `message.id` identifies the call, so it is the key; when two
+  // entries disagree, the one that actually finished (a `stop_reason`) and
+  // reported more output is the better record (cc-usage's rule).
+  const billed = new Map<string, { index: number; score: number }>();
   let line = 0;
   for (const raw of text.split('\n')) {
     if (raw.trim().length === 0) continue;
@@ -171,8 +173,17 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     const time = asInstant(entry['timestamp']);
     if (time === null) continue;
     const messageId = asString(message['id']) ?? asString(entry['uuid']) ?? `line${line}`;
-    if (billed.has(messageId)) continue;
-    billed.add(messageId);
+    const buckets = usageBuckets(usage);
+    const score = (asString(message['stop_reason']) === undefined ? 0 : 1_000_000_000) + buckets.output;
+    const seen = billed.get(messageId);
+    if (seen !== undefined) {
+      if (score > seen.score) {
+        records[seen.index] = { ...(records[seen.index] as UsageRecord), tokens: buckets, time };
+        billed.set(messageId, { index: seen.index, score });
+      }
+      continue;
+    }
+    billed.set(messageId, { index: records.length, score });
     messageIds.push(messageId);
     createdAt ??= time;
     records.push({
@@ -180,7 +191,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       time,
       model: priceableModel(model),
       modelLabel: model,
-      tokens: usageBuckets(usage),
+      tokens: buckets,
     });
   }
   if (id === undefined && cwd === null && records.length === 0) return undefined;
