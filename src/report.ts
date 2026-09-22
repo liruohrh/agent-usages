@@ -10,7 +10,16 @@
  */
 
 import { addBuckets, emptyBuckets } from './core/buckets.ts';
-import type { CostTotals, ProjectRecord, RepoInfo, SessionRecord, TokenTotals, UsageDataset, UsageRecord } from './core/types.ts';
+import type {
+  CacheWriteTtl,
+  CostTotals,
+  ProjectRecord,
+  RepoInfo,
+  SessionRecord,
+  TokenTotals,
+  UsageDataset,
+  UsageRecord,
+} from './core/types.ts';
 import { addCostTotals, addSummaries, costOf, zeroCostTotals, type CostSummary } from './accounting.ts';
 import { UserError, renderDiagnostic, type Warning } from './i18n/errors.ts';
 import { t } from './i18n/index.ts';
@@ -105,6 +114,23 @@ export interface BandComponent {
   tokens: number;
   /** Money this component produced in this band. */
   amount: string;
+  /**
+   * Long-context tranche: the tokens billed above the component's threshold.
+   *
+   * A part of {@link BandComponent.tokens} and {@link BandComponent.amount}, not
+   * a line beside them — `tokens - excess.tokens` is what the published rate
+   * charged, and `excess.amount` is what the higher rate added. Present only when
+   * the threshold actually moved money.
+   */
+  excess?: { tokens: number; rate: string; amount: string } | undefined;
+  /**
+   * Cache-write TTL scaling that applied in this band.
+   *
+   * A part of the component's tokens like {@link BandComponent.excess}: the
+   * `tokens` billed under this tier had their rate multiplied. Present only when
+   * the tier changed the money.
+   */
+  ttl?: { tier: CacheWriteTtl; multiplier: string; tokens: number } | undefined;
 }
 
 /**
@@ -673,11 +699,23 @@ function bandsOf(summary: CostSummary, engine: PricingEngine, records: readonly 
       requests: band.requests,
       tokens: entry?.tokens ?? emptyBuckets(),
       cost: bandCost(band.amounts, band.total, band.reasoningCost),
-      components: (entry?.rateCard ?? []).map((component) => ({
-        ...component,
-        tokens: entry?.charged.get(component.id) ?? 0,
-        amount: band.amounts[component.id] ?? '0.0000',
-      })),
+      components: (entry?.rateCard ?? []).map((component) => {
+        const charge = band.charges?.[component.id];
+        const priced: BandComponent = {
+          ...component,
+          tokens: entry?.charged.get(component.id) ?? 0,
+          amount: band.amounts[component.id] ?? '0.0000',
+        };
+        // The tranche is reported only where it changed the money, and always as
+        // a part of the component's own tokens and amount.
+        if (charge !== undefined && charge.excessTokens > 0 && charge.excessRate !== null) {
+          priced.excess = { tokens: charge.excessTokens, rate: charge.excessRate, amount: charge.excessAmount };
+        }
+        if (charge !== undefined && charge.ttlTier !== null && charge.ttlTokens > 0) {
+          priced.ttl = { tier: charge.ttlTier, multiplier: charge.ttlMultiplier, tokens: charge.ttlTokens };
+        }
+        return priced;
+      }),
     };
   });
 }

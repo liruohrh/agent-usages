@@ -371,6 +371,62 @@ describe('usage', () => {
   it('exits 2 when the filter matches no usage', async () => {
     expect((await cli(['usage', '--range', '2027-01-01..'])).code).toBe(2);
   });
+
+  it('writes a self-contained HTML report with --html', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-usages-html-'));
+    const file = join(dir, 'report.html');
+    try {
+      const { code, stdout, stderr } = await cli(['usage', '--html', file, '--no-update']);
+      expect(code).toBe(0);
+      expect(stderr).toBe('');
+      const document = await readFile(file, 'utf8');
+      expect(document.startsWith('<!doctype html>')).toBe(true);
+      expect(document).toContain('demo');
+      expect(document).toContain('演示会话');
+      expect(document).toContain('¥5.02');
+      expect(document).not.toContain('<script');
+      // The file replaces the text report: stdout only says where it went.
+      expect(stdout).toContain(`已写入 ${file}`);
+      expect(stdout).not.toContain('I/M 1.00M');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps --json on stdout when it also writes HTML', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-usages-html-json-'));
+    const file = join(dir, 'report.html');
+    try {
+      const { code, stdout, stderr } = await cli(['usage', '--json', '--html', file, '--no-update']);
+      expect(code).toBe(0);
+      // The notice goes to stderr, so a script's stdout stays parseable.
+      expect(JSON.parse(stdout)).toMatchObject({ totals: { requests: 1 } });
+      expect(stderr).toContain(`已写入 ${file}`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('still exits 2 when the written report has no usage', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-usages-html-empty-'));
+    const file = join(dir, 'report.html');
+    try {
+      const { code } = await cli(['usage', '--html', file, '--range', '2027-01-01..', '--no-update']);
+      expect(code).toBe(2);
+      expect((await readFile(file, 'utf8')).startsWith('<!doctype html>')).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails clearly when the HTML file cannot be written', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-usages-html-gone-'));
+    await rm(dir, { recursive: true, force: true });
+    const { code, stderr } = await cli(['usage', '--html', join(dir, 'report.html'), '--no-update']);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/无法写入/);
+    expect(stderr).toContain('report.html');
+  });
 });
 
 describe('text output alignment', () => {
@@ -621,6 +677,12 @@ describe('help', () => {
     for (const command of ['usage', 'session', 'price', 'agents']) expect(stdout).toContain(command);
     expect(stdout).toContain('--agent');
     expect(stdout).toContain('--provider');
+  });
+
+  it('documents the HTML report option', async () => {
+    const { stdout } = await cli(['usage', '--help']);
+    expect(stdout).toContain('--html <path>');
+    expect(stdout).toContain('自包含');
   });
 });
 

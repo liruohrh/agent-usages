@@ -150,13 +150,18 @@ function table(
   return lines.join('\n');
 }
 
-/** Render an integer with thousands separators. */
-function count(value: number): string {
+/**
+ * Render an integer with thousands separators.
+ *
+ * Exported because the HTML renderer prints the same figures with the same
+ * rules; a second spelling of "1,027" would be a second thing to get wrong.
+ */
+export function count(value: number): string {
   return value.toLocaleString('en-US');
 }
 
 /** Compact a large token count for dense columns. */
-function compact(value: number): string {
+export function compact(value: number): string {
   if (value < 1000) return String(value);
   if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}K`;
   if (value < 1_000_000_000) return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 2 : 1)}M`;
@@ -164,7 +169,7 @@ function compact(value: number): string {
 }
 
 /** Render an exact decimal amount with a currency symbol. */
-function money(amount: string, symbol: string): string {
+export function money(amount: string, symbol: string): string {
   const [whole = '0', fraction = ''] = amount.split('.');
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   // Trailing zeros carry no information, so drop them — one at a time, and never
@@ -176,7 +181,7 @@ function money(amount: string, symbol: string): string {
 }
 
 /** `YYYY-MM-DD` in local time, for dense columns. */
-function dayLabel(instant: number | null): string {
+export function dayLabel(instant: number | null): string {
   if (instant === null || !Number.isFinite(instant)) return '—';
   const date = new Date(instant);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -197,6 +202,33 @@ function tierLabel(tier: string): string {
 function resolutionNote(resolution: string): string {
   const notes = t().resolution as Record<string, string>;
   return resolution === 'exact' ? '' : (notes[resolution] ?? '');
+}
+
+/**
+ * How a band names itself: the period, its tier, and the model that was billed.
+ *
+ * The model belongs in the heading because one session can span several models
+ * whose bands share a period and a tier — the unit price alone was the only
+ * thing telling those rows apart. Shared with the HTML renderer.
+ *
+ * @param band - the priced band.
+ * @returns the heading text.
+ */
+export function bandTitle(band: BandSummary): string {
+  return `${band.periodId} ${tierLabel(band.tier)} · ${band.model}`;
+}
+
+/**
+ * How a band describes when it applied: the period label, its hours, and any
+ * note about the period having been chosen by fallback. Shared with the HTML
+ * renderer.
+ *
+ * @param band - the priced band.
+ * @returns the window text.
+ */
+export function bandWindow(band: BandSummary): string {
+  const window = band.window.length === 0 ? '' : `（${band.window}）`;
+  return `${band.periodLabel}${window}${resolutionNote(band.resolution)}`;
 }
 
 /**
@@ -273,13 +305,23 @@ function bandBlocks(bands: readonly BandSummary[], symbol: string, historical = 
   if (bands.length === 0) return [];
   const lines: string[] = [t().section.bands];
   for (const band of bands) {
-    const note = resolutionNote(band.resolution);
-    const window = band.window.length === 0 ? '' : `（${band.window}）`;
-    lines.push(`▸ ${band.periodId} ${tierLabel(band.tier)} · ${band.model}`);
-    lines.push(`  ${band.periodLabel}${window}${note}`);
+    lines.push(`▸ ${bandTitle(band)}`);
+    lines.push(`  ${bandWindow(band)}`);
     lines.push(`  ${metricsLine(band.tokens, moneyBreakdown(band.cost, band.tokens), band.requests, symbol)}`);
     const rates = band.components
-      .map((component) => `${COMPONENT_METRICS[component.id] ?? component.label} ${displayRate(component.rate)}`)
+      .map((component) => {
+        // An item a tranche or a TTL repriced says so beside its base rate, so
+        // the amount on the line above can still be checked against the card.
+        const notes: string[] = [];
+        if (component.ttl !== undefined) {
+          notes.push(t().rate.ttlMultiplier(component.ttl.tier, displayRate(component.ttl.multiplier)));
+        }
+        if (component.excess !== undefined) {
+          notes.push(t().rate.overThreshold(compact(component.excess.tokens), displayRate(component.excess.rate)));
+        }
+        const note = notes.length === 0 ? '' : `（${notes.join(', ')}）`;
+        return `${COMPONENT_METRICS[component.id] ?? component.label} ${displayRate(component.rate)}${note}`;
+      })
       .join(' · ');
     // With one rate per day there is no single converted unit price, so the card
     // stays as published and says so.
@@ -360,9 +402,9 @@ function dayText(instant: number): string {
  * The span is derived from the billed requests, not from the nominal bounds, so
  * a half-open `to` never shows up as the next day. Only a span inside one day
  * carries hours: `2026-07-01 8h~23h`, or `2026-07-01 8h ~` when the whole span
- * sits inside a single hour.
+ * sits inside a single hour. Shared with the HTML renderer.
  */
-function spanText(from: number, to: number): string {
+export function spanText(from: number, to: number): string {
   const start = new Date(from);
   const end = new Date(to);
   const sameDay =
@@ -644,21 +686,18 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
 }
 
 /**
- * Render a usage report for the terminal.
- * @param sections - one window, or several when the caller asked for them together.
- * @param symbol - currency symbol to print.
- * @param options - what to include beyond the default tree.
- * @returns the text to print.
+ * How the report's money was obtained, for the provenance line.
+ *
+ * Shared by both renderers so a converted report reads the same whichever one
+ * prints it — the equation is a property of the data, not of the medium.
+ *
+ * @param result - the aggregated result.
+ * @param pricingLabel - the provider's display name, when the caller has one.
+ * @returns the pricing source line and, when money was converted, the equation.
  */
-export function formatUsageReport(
-  sections: readonly ReportSection[],
-  symbol: string,
-  options: FormatOptions = {},
-): string {
-  const [first] = sections;
-  if (first === undefined) return '';
-  const rate = first.result.rateInfo;
-  const vendor = options.pricingLabel ?? first.result.pricingProvider;
+export function provenanceOf(result: UsageResult, pricingLabel?: string): { source: string; rate: string | undefined } {
+  const rate = result.rateInfo;
+  const vendor = pricingLabel ?? result.pricingProvider;
   // The vendor's own currency is the reference; a conversion adds the equation
   // that was applied, so a reader can check every amount against the price list.
   const historical = rate.mode === 'historical';
@@ -676,6 +715,25 @@ export function formatUsageReport(
     : rate.display === null || rate.rate === '1'
       ? undefined
       : labels.rate.equation(rate.base, displayRate(rate.rate), rate.display, rate.source, rate.date);
+  return { source, rate: rateLine };
+}
+
+/**
+ * Render a usage report for the terminal.
+ * @param sections - one window, or several when the caller asked for them together.
+ * @param symbol - currency symbol to print.
+ * @param options - what to include beyond the default tree.
+ * @returns the text to print.
+ */
+export function formatUsageReport(
+  sections: readonly ReportSection[],
+  symbol: string,
+  options: FormatOptions = {},
+): string {
+  const [first] = sections;
+  if (first === undefined) return '';
+  const { source, rate: rateLine } = provenanceOf(first.result, options.pricingLabel);
+  const labels = t();
   const header = [
     labels.app.usage,
     headerLine(

@@ -54,5 +54,7 @@ export {
 } from './accounting.ts';
 export type { ComponentUsage, CostGroup, CostSummary, ExactCost, MoneyBreakdown, UsageCost } from './accounting.ts';
 export { formatSessionList, formatUsageReport, sessionListToJson, usageToJson } from './format.ts';
+export { renderHtmlReport } from './html.ts';
+export type { HtmlOptions } from './html.ts';
 export { inRange, parseInstant, presetRange, resolveRange } from './timerange.ts';
 export type { RangePreset, TimeRange } from './timerange.ts';

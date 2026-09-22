@@ -35,12 +35,14 @@ export {
   bareModelName,
   basisQuantity,
   charge,
+  chargeComponent,
   counterForBasis,
   createPricingEngine,
   formatInstant,
   isPeak,
   parseRate,
   zoneTime,
+  type ChargeContext,
   type ZoneTime,
 } from './engine.ts';
 export {

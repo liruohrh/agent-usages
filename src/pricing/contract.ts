@@ -19,7 +19,7 @@
  *   component; a vendor that does not bill cache writes simply omits one.
  */
 
-import type { CostTotals, TokenBuckets, UsageRecord } from '../core/types.ts';
+import type { CacheWriteTtl, CostTotals, TokenBuckets, UsageRecord } from '../core/types.ts';
 
 /** A billable quantity: which tokens a rate applies to. */
 export type TokenBucket = 'input' | 'output' | 'cacheRead' | 'cacheWrite';
@@ -44,6 +44,22 @@ export type BillingBasis =
   /** The whole prompt: `input + cacheRead + cacheWrite`. */
   | 'prompt';
 
+/**
+ * A long-context tranche: the quantity above `tokens` is billed at `rate`.
+ *
+ * Graduated, not a flat surcharge: the first `tokens` units keep the component's
+ * own `rate`, so the charge is `min(q, tokens) × rate + max(0, q − tokens) × rate′`
+ * — the way a published "over 200k, the excess costs more" table reads. It is
+ * applied per request, to the quantity this component bills, and per component:
+ * a vendor whose threshold spans several buckets states it on each of them.
+ */
+export interface AboveThreshold {
+  /** Units of the component's own basis billed at `rate` before the higher rate starts. */
+  tokens: number;
+  /** Rate for the units above {@link AboveThreshold.tokens}, quoted per {@link RateComponent.per}. */
+  rate: string;
+}
+
 /** One rate within a price period. */
 export interface RateComponent {
   /** Stable component id, e.g. `input-miss`. Also the key in cost breakdowns. */
@@ -56,6 +72,22 @@ export interface RateComponent {
   rate: string;
   /** Token quantity one `rate` unit covers. */
   per: number;
+  /**
+   * Higher rate for the quantity above a threshold, when the vendor publishes one.
+   *
+   * Absent means one rate for the whole quantity, which is the common case.
+   */
+  aboveThreshold?: AboveThreshold | undefined;
+  /**
+   * Cache-write TTL multipliers over {@link RateComponent.rate}, keyed by tier.
+   *
+   * Only meaningful on a component that bills cache writes alone (`cacheWrite`):
+   * the multiplier reprices those tokens for a longer-lived cache, and a rate
+   * that folds writes into another basis has no separate write quantity to
+   * reprice. A missing tier means that tier costs the base rate, which is why a
+   * record without a TTL is billed at `rate` unchanged.
+   */
+  ttlMultipliers?: Readonly<Partial<Record<CacheWriteTtl, string>>> | undefined;
 }
 
 /**
@@ -178,10 +210,36 @@ export interface CostBreakdown {
   requests: number;
   /** Amount per component id, as exact decimal strings in the pricing currency. */
   amounts: Readonly<Record<string, string>>;
+  /**
+   * Tranche detail per component id, present only where a second rate applied.
+   *
+   * A view of {@link CostBreakdown.amounts}, never an extra line: the amounts here
+   * are parts of the component's own amount, so summing this beside `amounts`
+   * would count money twice.
+   */
+  charges?: Readonly<Record<string, CostCharge>> | undefined;
   /** Part of the output amount attributable to this group's reasoning tokens. */
   reasoningCost: string;
   /** Sum of {@link CostBreakdown.amounts}. */
   total: string;
+}
+
+/** How one band component's money split, at display precision. */
+export interface CostCharge {
+  /** Tokens billed at the component's own rate. */
+  baseTokens: number;
+  /** Tokens billed above the long-context threshold. */
+  excessTokens: number;
+  /** Money the excess tranche produced; part of the component's amount. */
+  excessAmount: string;
+  /** Published rate the excess was billed at, or `null` when nothing exceeded it. */
+  excessRate: string | null;
+  /** Cache-write TTL tier that scaled the rate, or `null` when none did. */
+  ttlTier: CacheWriteTtl | null;
+  /** Tokens whose rate the tier scaled. */
+  ttlTokens: number;
+  /** The multiplier the tier applied, as an exact decimal string (`"1"` when none). */
+  ttlMultiplier: string;
 }
 
 /**
@@ -216,6 +274,43 @@ export interface RecordCost {
   amounts: Map<string, bigint>;
   /** The rates that produced the amounts. */
   rate: ResolvedRate;
+  /**
+   * How a component's charge was split, keyed by component id.
+   *
+   * Present only for components whose money was changed by a tranche or a TTL
+   * multiplier: `amounts` stays the authority on what was charged, and this only
+   * explains the part of it that a second rate produced. A component whose rate
+   * card has neither never appears here, so the common record carries no map.
+   */
+  charges?: ReadonlyMap<string, ComponentCharge> | undefined;
+}
+
+/**
+ * One component's charge for one request, split by what produced it.
+ *
+ * The pieces are exact (`base + excess === total`, in scaled units) so a report
+ * can attribute the money without re-deriving it, and without the split losing
+ * or duplicating a fraction of a unit.
+ */
+export interface ComponentCharge {
+  /** Amount charged at the component's own rate, TTL multiplier included. */
+  base: bigint;
+  /** Amount charged above the long-context threshold; `0n` when nothing exceeded it. */
+  excess: bigint;
+  /** `base + excess`, exactly. */
+  total: bigint;
+  /** Quantity billed at the component's own rate. */
+  baseTokens: number;
+  /** Quantity billed above the threshold. */
+  excessTokens: number;
+  /** Rate the excess was billed at, scaled by 1e9, or `null` when none was. */
+  excessRate: bigint | null;
+  /** Cache-write TTL tier that scaled the rate, or `null` when no tier changed it. */
+  ttlTier: CacheWriteTtl | null;
+  /** Tokens whose rate {@link ComponentCharge.ttlTier} scaled. */
+  ttlTokens: number;
+  /** Multiplier the tier applied, scaled by 1e9 (`1_000_000_000n` = 1×). */
+  ttlMultiplier: bigint;
 }
 
 /**

@@ -14,7 +14,7 @@ import { costOf, moneyBreakdown } from '../../src/accounting.ts';
 import type { CostTotals, TokenBuckets, UsageRecord } from '../../src/core/types.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { record } from '../support/dataset.ts';
-import { STUB_AT, stubProvider } from '../support/stub-pricing.ts';
+import { CONTEXT_AT, STUB_AT, contextProvider, stubProvider } from '../support/stub-pricing.ts';
 
 /** A cost total with only what a test sets. */
 function cost(overrides: Partial<CostTotals> = {}): CostTotals {
@@ -130,5 +130,45 @@ describe('reasoning cost', () => {
     expect(money.outputOnly).toBe(summary.breakdown[0]!.amounts['output']);
     // A combined-token split would have said half of 6, not all of 4.
     expect(Number(money.reasoning)).toBeGreaterThan(3);
+  });
+});
+
+describe('tranche accounting', () => {
+  const engine = createPricingEngine(contextProvider());
+
+  it('folds a long-context tranche into the component it belongs to', () => {
+    const tokens: TokenBuckets = { input: 300_000, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+    const summary = costOf([record({ time: CONTEXT_AT.any, model: 'context-model', tokens })], engine);
+    // 0.2 at the published rate plus 0.2 above the threshold, all of it input.
+    expect(summary.totals.cacheMissInputCost).toBe('0.4000');
+    expect(summary.totals.cacheHitInputCost).toBe('0.0000');
+    expect(summary.totals.total).toBe('0.4000');
+    // The tranche is a part of the component's amount, so it never inflates the
+    // line a reader checks against the total.
+    expect(summary.breakdown[0]!.charges?.['input-miss']?.excessAmount).toBe('0.2000');
+    expect(summary.breakdown[0]!.amounts['input-miss']).toBe('0.4000');
+    const money = moneyBreakdown(summary.totals, tokens);
+    expect(money.inputMiss).toBe('0.4000');
+    expect(money.total).toBe(summary.totals.total);
+  });
+
+  it('carries a cache-write TTL through to the write component', () => {
+    const tokens: TokenBuckets = { input: 0, output: 0, cacheRead: 0, cacheWrite: 250_000, reasoning: 0 };
+    const plain = costOf([record({ time: CONTEXT_AT.any, model: 'context-model', tokens })], engine);
+    const long = costOf(
+      [record({ time: CONTEXT_AT.any, model: 'context-model', tokens, cacheWriteTtl: '1h' })],
+      engine,
+    );
+    // 200k at 5 plus 50k at 7, then the same card at twice the rate for 1h.
+    expect(plain.breakdown[0]!.amounts['input-write']).toBe('1.3500');
+    expect(long.breakdown[0]!.amounts['input-write']).toBe('2.7000');
+    expect(long.breakdown[0]!.charges?.['input-write']?.ttlTier).toBe('1h');
+    expect(long.breakdown[0]!.charges?.['input-write']?.ttlMultiplier).toBe('2');
+    // The write bill is still one component: the total is not the tranche twice.
+    expect(long.totals.cacheWriteInputCost).toBe('2.7000');
+    expect(long.totals.total).toBe('2.7000');
+    // Same tokens without a TTL: the tranche stands, the multiplier does not.
+    expect(plain.breakdown[0]!.charges?.['input-write']?.ttlTier).toBeNull();
+    expect(plain.breakdown[0]!.charges?.['input-write']?.excessAmount).toBe('0.3500');
   });
 });

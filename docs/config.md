@@ -17,6 +17,46 @@ DeepSeek 英文站直接写 UTC）。
 
 `src/config/resolve.ts` 把它们合成一次运行实际使用的配置：先按开关做一次懒更新，再取「缓存 > 随包」的那份，最后把用户覆盖合并上去。解析失败就退到下一层，绝不因为配置问题让命令失败——用户配置的问题会作为「提示」出现在报告里。
 
+## 组件的两个可选计费档：长上下文与缓存写入 TTL
+
+`offPeak` / `peak` 数组里的每个组件，除 `id` / `label` / `basis` / `rate` / `per` 外还可以带两个**可选**字段。
+两者都按**单条请求**计算，不写就完全不生效——现有的 22 个区间不含这两个字段，语义与金额都不变。
+
+```json
+{
+  "id": "input-miss",
+  "label": "缓存未命中输入",
+  "basis": "input",
+  "rate": "3",
+  "per": 1000000,
+  "aboveThreshold": { "tokens": 200000, "rate": "6" },
+  "ttlMultipliers": { "1h": "2.0" }
+}
+```
+
+| 字段 | 作用 | 校验（`check-config`） |
+| --- | --- | --- |
+| `aboveThreshold.tokens` | 该组件本次请求计费量的**前 N 个 token 按 `rate` 计，超出部分**按 `aboveThreshold.rate` 计。 | 必须与 `rate` 同时出现；正的安全整数 |
+| `aboveThreshold.rate` | 超出部分的单价，同样以组件的 `per` 为单位。 | 正的十进制字符串（非十进制、零、负数都报错） |
+| `ttlMultipliers` | 缓存写入 TTL 档位 → 倍率。请求带 `cacheWriteTtl: "1h"` 时写入价 = `rate × 倍率`。 | 至少一个档位；键只能是 `5m` / `1h`；值为正的十进制字符串；`5m` 档只能是 `"1"`（组件自身的 `rate` 就是 5 分钟写入价） |
+| — | `ttlMultipliers` 只能写在 `basis: "cacheWrite"` 的组件上：其它基准没有单独的“缓存写入量”可供调价，混在一起会把输入价也乘上去。 | 写在别的基准上报错 |
+
+口径：
+
+- **分档是渐进的（graduated）**，不是“超过阈值就整体涨价”：
+  `min(q, N) × rate + max(0, q − N) × aboveThreshold.rate`，两段都用精确十进制相加，不会因为分档丢分或重复。
+- 阈值按**每条请求**、按**该组件自己的计费量**判断；`inputAndCacheWrite` 这类合并基准，比较的就是合并后的量。
+- 两个字段可以同时写：TTL 倍率同时作用于基础价与超出价（1 小时写入的“超出部分”同样是 5 分钟价的倍数）。
+- `cacheWriteTtl` 缺省（或为 `5m`）时按组件自身的 `rate` 计；带了档位、但组件没写该档倍率，也按 `rate` 计
+  （含义是该档没有单独定价）。`UsageRecord.cacheWriteTtl` 是可选字段，适配器不填就是 5m。
+- 一条记录只带**一个** TTL 档位。像 Anthropic 的 `cache_creation.ephemeral_{5m,1h}_input_tokens` 那样把一次请求的
+  缓存写入拆成两档的接口，适配器要么按档位拆成两条记录，要么只报主档位；schema 不支持“同一条记录里两档各有
+  token 数”。
+- 用户覆盖按区间合并、组件整体替换，所以覆盖里的组件要用哪档就写哪档。
+- 报告层：`usage --cost` 的单价行与 `price` 会把超出档/TTL 倍率标注在单价后面；JSON 里体现为
+  `BandComponent.excess`（超出的 token 数、单价、金额）与 `BandComponent.ttl`（档位、倍率、token 数）。
+  它们都是**组件自身 tokens / amount 的一部分**，不是额外的行，所以 `components` 之和恒等于该段 `total`。
+
 ## 合并规则（用户 > 默认）
 
 价格表按**时间**合并，不是整表替换：把两份表的所有边界点并起来逐段走，用户区间覆盖到的段用用户的，其余段用厂商的；被切开的厂商区间拆成片段（id 带 `#时间戳`，说明里标注），`to: null` 的开区间在末尾保持开区间。合并结果会用同一套校验器再验一次，所以覆盖不会在时间轴上留下空洞或重叠。

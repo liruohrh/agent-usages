@@ -88,6 +88,20 @@ DeepSeek 的用法明细分四个互不重叠的桶（口径取自 DSH 自身的
 
 每条请求按**自身时刻的时段价**计费，再按区间聚合，因此跨价格调整、跨峰谷的会话都能算准。
 
+## 长上下文与缓存写入 TTL（当前两套表都没用到）
+
+价格表 schema 还支持两个可选的组件级字段，写法与校验见[配置](../config.md)：
+
+- `aboveThreshold: { tokens, rate }`：一次请求的计费量超过 `tokens` 后，**超出部分**按 `rate` 计（同类工具里
+  Anthropic 的 200k、OpenAI 的 272k 阈值，ccusage 的字段名是 `long_context_threshold`）。
+- `ttlMultipliers: { "1h": "2.0" }`：缓存写入按 TTL 档位乘倍率（Anthropic 的 1 小时写入是 5 分钟的 2 倍，
+  ccusage 的常量名是 `CACHE_CREATE_1H_INPUT_MULTIPLIER`）；记录用可选的 `UsageRecord.cacheWriteTtl` 带档位，
+  不带即按 5 分钟档（也就是组件自身的 `rate`）计。
+
+**DeepSeek 当前两套表都没用到它们**：官方既不发布长上下文加价，也不区分缓存写入 TTL（写入甚至不单独计费），
+所以 `deepseek-flash` / `deepseek-v4-pro` 的金额与没有这两个字段时完全一致（有测试与实跑对账保证）。哪天官方
+发布这类价格，只需在 `config/pricing.json` 对应组件上加字段，不需要改代码。
+
 ## 货币：两份价格表
 
 DeepSeek 发布两套价格表，**数字各自发布，不是互相换算的**：

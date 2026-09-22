@@ -21,7 +21,7 @@ import {
   type UsageQuery,
 } from '../../src/report.ts';
 import { buckets, dataset, project, record, session } from '../support/dataset.ts';
-import { STUB_AT, stubProvider } from '../support/stub-pricing.ts';
+import { CONTEXT_AT, STUB_AT, contextProvider, stubProvider } from '../support/stub-pricing.ts';
 
 const engine = createPricingEngine(stubProvider());
 const context = { engine, pricingProvider: engine.provider.id };
@@ -376,6 +376,55 @@ describe('reconciliation', () => {
     const sum =
       Number(cost.cacheHitInputCost) + Number(cost.cacheMissInputCost) + Number(cost.outputCost) + Number(cost.cacheWriteInputCost);
     expect(sum).toBeCloseTo(Number(cost.total), 10);
+  });
+
+  it('keeps the excess and the TTL visible without counting them twice', () => {
+    const tiered = createPricingEngine(contextProvider());
+    const data = dataset([
+      project({
+        id: 'ctx',
+        sessions: [
+          session({
+            id: 's-ctx',
+            records: [
+              record({ id: 'over', time: CONTEXT_AT.any, model: 'context-model', tokens: buckets({ input: 300_000 }) }),
+              record({
+                id: 'cached',
+                time: CONTEXT_AT.any,
+                model: 'context-model',
+                tokens: buckets({ cacheWrite: 250_000 }),
+                cacheWriteTtl: '1h',
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+    const result = runQuery(data, query(), { engine: tiered, pricingProvider: tiered.provider.id });
+    expect(result.bands).toHaveLength(1);
+    const band = result.bands[0]!;
+    const miss = band.components.find((component) => component.id === 'input-miss');
+    const write = band.components.find((component) => component.id === 'input-write');
+
+    // 200k at 1 + 100k at 2, per million.
+    expect(miss?.excess).toEqual({ tokens: 100_000, rate: '2', amount: '0.2000' });
+    expect(miss?.tokens).toBe(300_000);
+    expect(miss?.amount).toBe('0.4000');
+    // 200k at 5 x 2 + 50k at 7 x 2, per million.
+    expect(write?.ttl).toEqual({ tier: '1h', multiplier: '2', tokens: 250_000 });
+    expect(write?.excess).toEqual({ tokens: 50_000, rate: '14', amount: '0.7000' });
+    expect(write?.amount).toBe('2.7000');
+    expect(result.cost.total).toBe('3.1000');
+    expect(result.cost.cacheMissInputCost).toBe('0.4000');
+    expect(result.cost.cacheWriteInputCost).toBe('2.7000');
+
+    // The tranche is a view of the component's money, never a line beside it.
+    const components = band.components.reduce((total, component) => total + Number(component.amount), 0);
+    expect(Number(components.toFixed(4))).toBe(Number(band.cost.total));
+    const parts = Number(miss?.amount) + Number(write?.amount);
+    expect(Number(parts.toFixed(4))).toBe(Number(result.cost.total));
+    // And the tokens add up the same way: base + excess is the whole quantity.
+    expect((write?.tokens ?? 0) - (write?.excess?.tokens ?? 0)).toBe(200_000);
   });
 
   it('makes the grand total the sum of the rows, rounding included', () => {

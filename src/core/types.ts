@@ -37,6 +37,19 @@ export interface TokenBuckets {
   reasoning: number;
 }
 
+/**
+ * How long a cache write is kept before it expires.
+ *
+ * The TTL is priced, not just stored: a vendor may publish a higher write price
+ * for the longer-lived tier, in which case the price list carries the multiplier
+ * per tier. A record that does not say which tier it wrote is billed as `5m`,
+ * the price every vendor's base write rate already describes.
+ */
+export type CacheWriteTtl = '5m' | '1h';
+
+/** Every cache-write TTL tier the schema knows, in ascending order of life. */
+export const CACHE_WRITE_TTLS: readonly CacheWriteTtl[] = ['5m', '1h'];
+
 /** One billed request. */
 export interface UsageRecord {
   /** Adapter-stable identifier for the record, unique within its session. */
@@ -49,6 +62,14 @@ export interface UsageRecord {
   modelLabel: string;
   /** Tokens the provider counted. */
   tokens: TokenBuckets;
+  /**
+   * TTL tier the provider wrote the prompt cache for, when it reports one.
+   *
+   * Absent means the vendor's default tier (`5m`), which is what the component's
+   * own `rate` prices; only a longer-lived, separately priced tier needs to be
+   * named here.
+   */
+  cacheWriteTtl?: CacheWriteTtl | undefined;
   /** Sequence number inside the agent's own log, when it has one. */
   seq?: number | undefined;
   /** Turn number, when the agent tracks turns. */

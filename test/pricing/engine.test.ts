@@ -9,11 +9,30 @@
 import { describe, expect, it } from 'vitest';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
-import { bareModelName, createPricingEngine, isPeak, zoneTime } from '../../src/pricing/index.ts';
-import { STUB_AT, perMillion, stubProvider, TEST_CURRENCY } from '../support/stub-pricing.ts';
+import { bareModelName, chargeComponent, createPricingEngine, isPeak, zoneTime } from '../../src/pricing/index.ts';
+import type { RateComponent } from '../../src/pricing/index.ts';
+import {
+  CONTEXT_AT,
+  CONTEXT_THRESHOLD,
+  STUB_AT,
+  contextProvider,
+  perMillion,
+  stubProvider,
+  TEST_CURRENCY,
+} from '../support/stub-pricing.ts';
 import { record } from '../support/dataset.ts';
 
 const engine = createPricingEngine(stubProvider());
+const contextEngine = createPricingEngine(contextProvider());
+
+/** A component with a long-context tranche and, optionally, TTL multipliers. */
+function tiered(overrides: Partial<RateComponent> = {}): RateComponent {
+  return {
+    ...perMillion('input-miss', 'miss', 'input', '1'),
+    aboveThreshold: { tokens: 200_000, rate: '3' },
+    ...overrides,
+  };
+}
 
 describe('model resolution', () => {
   it('strips a provider-qualified label', () => {
@@ -191,5 +210,158 @@ describe('descriptions', () => {
   it('describes a flat period as untiered', () => {
     const flat = engine.provider.models()[0]?.periods[0];
     expect(engine.describeTiers(flat!)).toContain('不分峰谷');
+  });
+});
+
+describe('long-context tranches', () => {
+  it('charges the excess at the higher rate and the rest at the published one', () => {
+    // 200k x 1 + 100k x 3, per million: 0.2 + 0.3.
+    const charge = chargeComponent(tiered(), { ...emptyBuckets(), input: 300_000 });
+    expect(charge.baseTokens).toBe(200_000);
+    expect(charge.excessTokens).toBe(100_000);
+    expect(charge.base).toBe(200_000_000n);
+    expect(charge.excess).toBe(300_000_000n);
+    expect(charge.excessRate).toBe(3_000_000_000n);
+    expect(charge.total).toBe(500_000_000n);
+  });
+
+  it('bills the whole quantity at the base rate at, and below, the threshold', () => {
+    const atThreshold = chargeComponent(tiered(), { ...emptyBuckets(), input: 200_000 });
+    expect(atThreshold.excessTokens).toBe(0);
+    expect(atThreshold.excessRate).toBeNull();
+    expect(atThreshold.excess).toBe(0n);
+    expect(atThreshold.base).toBe(200_000_000n);
+    expect(atThreshold.total).toBe(atThreshold.base);
+
+    const below = chargeComponent(tiered(), { ...emptyBuckets(), input: 199_999 });
+    expect(below.excessTokens).toBe(0);
+    expect(below.base).toBe(199_999_000n);
+    expect(below.total).toBe(below.base);
+  });
+
+  it('never produces a negative tranche, and charges nothing for no tokens', () => {
+    const none = chargeComponent(tiered(), emptyBuckets());
+    expect(none.total).toBe(0n);
+    expect(none.baseTokens).toBe(0);
+    expect(none.excessTokens).toBe(0);
+    expect(none.excessRate).toBeNull();
+
+    // A threshold larger than the quantity is simply never reached.
+    const tiny = chargeComponent(tiered({ aboveThreshold: { tokens: 10, rate: '3' } }), {
+      ...emptyBuckets(),
+      input: 4,
+    });
+    expect(tiny.excessTokens).toBe(0);
+    expect(tiny.baseTokens).toBe(4);
+  });
+
+  it('adds the tranches exactly, so the record total is the sum of its components', () => {
+    const cost = contextEngine.costOf(
+      record({
+        time: CONTEXT_AT.any,
+        model: 'context-model',
+        tokens: { ...emptyBuckets(), input: 300_000, cacheWrite: 100_000 },
+      }),
+    );
+    expect(cost).toBeDefined();
+    let summed = 0n;
+    for (const amount of cost!.amounts.values()) summed += amount;
+    expect(cost!.total).toBe(summed);
+    // 0.2 + 0.2 for the input, 0.5 for the write, and no rounding anywhere.
+    expect(cost!.amounts.get('input-miss')).toBe(400_000_000n);
+    expect(cost!.amounts.get('input-write')).toBe(500_000_000n);
+    expect(cost!.total).toBe(900_000_000n);
+    const miss = cost!.charges?.get('input-miss');
+    expect((miss?.base ?? 0n) + (miss?.excess ?? 0n)).toBe(miss?.total);
+    // The write stayed under the threshold, so only the input carries a tranche.
+    expect(cost!.charges?.has('input-write')).toBe(false);
+  });
+
+  it('keeps a card without a threshold on the untiered path', () => {
+    const plain = perMillion('input-miss', 'miss', 'input', '4');
+    const charge = chargeComponent(plain, { ...emptyBuckets(), input: 700_000 });
+    expect(charge.total).toBe(charge.base);
+    expect(charge.excessTokens).toBe(0);
+    expect(charge.excessRate).toBeNull();
+    expect(charge.base).toBe(2_800_000_000n);
+  });
+
+  it('reports no tranche when the quantity stayed under the threshold', () => {
+    const cost = contextEngine.costOf(
+      record({ time: CONTEXT_AT.any, model: 'context-model', tokens: { ...emptyBuckets(), input: CONTEXT_THRESHOLD } }),
+    );
+    expect(cost?.charges).toBeUndefined();
+  });
+});
+
+describe('cache-write TTL multipliers', () => {
+  it('multiplies a 1h write and leaves a default write at the published rate', () => {
+    const write: RateComponent = {
+      ...perMillion('input-write', 'write', 'cacheWrite', '5'),
+      ttlMultipliers: { '1h': '2' },
+    };
+    const long = chargeComponent(write, { ...emptyBuckets(), cacheWrite: 1_000_000 }, { cacheWriteTtl: '1h' });
+    expect(long.total).toBe(10_000_000_000n);
+    expect(long.ttlTier).toBe('1h');
+    expect(long.ttlMultiplier).toBe(2_000_000_000n);
+    expect(long.ttlTokens).toBe(1_000_000);
+
+    // A record that names no TTL is billed at the card's own (5m) rate.
+    const short = chargeComponent(write, { ...emptyBuckets(), cacheWrite: 1_000_000 });
+    expect(short.total).toBe(5_000_000_000n);
+    expect(short.ttlTier).toBeNull();
+    expect(short.ttlMultiplier).toBe(1_000_000_000n);
+  });
+
+  it('bills a tier the card does not price at the published rate', () => {
+    // No multipliers at all: even a 1h record is billed at the card's own rate.
+    const bare = perMillion('input-write', 'write', 'cacheWrite', '5');
+    expect(chargeComponent(bare, { ...emptyBuckets(), cacheWrite: 1_000_000 }, { cacheWriteTtl: '1h' }).total).toBe(
+      5_000_000_000n,
+    );
+    // A card that prices 1h only: a 5m record keeps the base rate.
+    const longOnly: RateComponent = { ...bare, ttlMultipliers: { '1h': '2' } };
+    expect(chargeComponent(longOnly, { ...emptyBuckets(), cacheWrite: 1_000_000 }, { cacheWriteTtl: '5m' }).total).toBe(
+      5_000_000_000n,
+    );
+  });
+
+  it('scales both tranches of a cache write, and says so in the detail', () => {
+    const cost = contextEngine.costOf(
+      record({
+        time: CONTEXT_AT.any,
+        model: 'context-model',
+        tokens: { ...emptyBuckets(), cacheWrite: 300_000 },
+        cacheWriteTtl: '1h',
+      }),
+    );
+    // 200k x (5 x 2) + 100k x (7 x 2), per million.
+    expect(cost?.amounts.get('input-write')).toBe(3_400_000_000n);
+    const charge = cost?.charges?.get('input-write');
+    expect(charge?.ttlTier).toBe('1h');
+    expect(charge?.ttlMultiplier).toBe(2_000_000_000n);
+    expect(charge?.ttlTokens).toBe(300_000);
+    expect(charge?.excessTokens).toBe(100_000);
+    expect((charge?.base ?? 0n) + (charge?.excess ?? 0n)).toBe(charge?.total);
+  });
+
+  it('ignores a TTL on a component that bills no cache writes', () => {
+    const input: RateComponent = { ...perMillion('input-miss', 'miss', 'input', '1'), ttlMultipliers: { '1h': '2' } };
+    const charge = chargeComponent(input, { ...emptyBuckets(), input: 1_000_000 }, { cacheWriteTtl: '1h' });
+    expect(charge.total).toBe(1_000_000_000n);
+    expect(charge.ttlTier).toBeNull();
+    expect(charge.ttlMultiplier).toBe(1_000_000_000n);
+  });
+
+  it('exposes no charge detail when no tier changed the money', () => {
+    const cost = contextEngine.costOf(
+      record({
+        time: CONTEXT_AT.any,
+        model: 'context-model',
+        tokens: { ...emptyBuckets(), cacheWrite: 100_000 },
+        cacheWriteTtl: '5m',
+      }),
+    );
+    expect(cost?.charges).toBeUndefined();
   });
 });

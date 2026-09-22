@@ -88,7 +88,7 @@ agent-usages usage --provider deepseek
 
 ```bash
 pnpm install
-pnpm test        # vitest，221 个用例
+pnpm test        # vitest，441 个用例
 pnpm typecheck   # tsc --noEmit
 ```
 
@@ -100,6 +100,7 @@ pnpm typecheck   # tsc --noEmit
 | `test/pricing/deepseek.test.ts` | DeepSeek 的具体数字：各区间单价、2026-08-23 周末豁免、2026-04-26 缓存命中降价、9-10 精确切换点 |
 | `test/unit/report.test.ts` | 聚合：维度、筛选（含按标题搜索的语义）、子代理合并/拆分、总量与各行的精确对账 |
 | `test/unit/format.test.ts` | 呈现层：项目/会话树的缩进与折叠、指标行、附加表开关、JSON 字段 |
+| `test/unit/html.test.ts` | HTML 报告：文档结构、无脚本无外链、转义、SVG 条形图归一化、多窗口与折叠块 |
 | `test/unit/money.test.ts`、`test/unit/timerange.test.ts` | 精确十进制、时间范围解析（含时区与日期边界） |
 | `test/unit/git.test.ts` | 仓库识别：主工作区、worktree、子模块、仓库内子目录、相对 `gitdir`、detached HEAD、不在仓库里 |
 | `test/agents/pi.test.ts` | pi 适配器：消息级用量、标题取最后一个 `session_info`、子 agent 目录识别 |
@@ -142,6 +143,7 @@ src/
 ├── report.ts              筛选、每个会话计价一次、向上全部相加、会话清单
 ├── timerange.ts           时间范围解析
 ├── format.ts              纯排版：token 树、计价区间、JSON 序列化（不读价格表）
+├── html.ts                纯排版：单文件 HTML 报告（内联样式与 SVG，无脚本）
 └── cli.ts                 命令行入口
 ```
 

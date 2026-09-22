@@ -22,12 +22,14 @@ import {
   createPricingEngine,
   resolvePricingProvider,
   type PricingEngine,
+  type RateComponent,
 } from './pricing/index.ts';
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
 import { resolveLanguage, setLanguage, t } from './i18n/index.ts';
 import { renderDiagnostic, type Warning } from './i18n/errors.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { resolveConfig, type ResolvedConfig } from './config/resolve.ts';
@@ -48,6 +50,7 @@ import {
   type DisplayResolution,
 } from './pricing/currency.ts';
 import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type ReportSection } from './format.ts';
+import { renderHtmlReport } from './html.ts';
 import type { UsageDataset } from './core/types.ts';
 
 const EXIT_OK = 0;
@@ -78,6 +81,7 @@ interface UsageOptions extends GlobalOptions {
   currencyRate?: string;
   rateMode?: string;
   noEnrich?: boolean;
+  html?: string;
 }
 
 /** A dataset plus everything needed to price and describe it. */
@@ -220,6 +224,58 @@ function emit(payload: unknown, text: string, json: boolean, requests: number): 
   process.exitCode = requests === 0 ? EXIT_NO_DATA : EXIT_OK;
 }
 
+/** The provenance of one report, for the header of whichever renderer prints it. */
+interface ReportHeadings {
+  /** Symbol amounts are printed with. */
+  symbol: string;
+  /** Agent display name. */
+  agentLabel: string;
+  /** Pricing provider's display name. */
+  pricingLabel: string;
+  /** Whether to print the 总 / 自身 / 子代理 split. */
+  scope: boolean;
+}
+
+/**
+ * Write the HTML report and say where it went.
+ *
+ * A file the user asked for is the command's output, so a write failure is the
+ * command's failure — the exit code says so rather than leaving a stale file
+ * behind a zero.
+ */
+async function writeHtmlReport(
+  path: string,
+  sections: readonly ReportSection[],
+  headings: ReportHeadings,
+  json: boolean,
+  requests: number,
+): Promise<void> {
+  const document = renderHtmlReport(sections, {
+    agentLabel: headings.agentLabel,
+    pricingLabel: headings.pricingLabel,
+    symbol: headings.symbol,
+    scope: headings.scope,
+  });
+  try {
+    await writeFile(path, document, 'utf8');
+  } catch (error) {
+    // The reason has to name the path: `EACCES` alone does not say which file
+    // could not be written, and the path is the one thing the user just typed.
+    process.stderr.write(`agent-usages: ${t().html.writeFailed(path, (error as Error).message)}\n`);
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+  // Beside JSON the notice goes to stderr, so a script's stdout stays parseable.
+  const notice = `${t().html.written(path)}\n`;
+  if (json) {
+    process.stderr.write(notice);
+    process.stdout.write(`${JSON.stringify(usageToJson(sections), null, 2)}\n`);
+  } else {
+    process.stdout.write(notice);
+  }
+  process.exitCode = requests === 0 ? EXIT_NO_DATA : EXIT_OK;
+}
+
 /** The `usage` command implementation. */
 async function runUsage(options: UsageOptions): Promise<void> {
   const config = await resolveConfig(options.update === false ? { noUpdate: true } : {});
@@ -269,6 +325,25 @@ async function runUsage(options: UsageOptions): Promise<void> {
     result.warnings.push(...loaded.warnings);
     sections.push({ label, range, result });
     requests += result.requests;
+  }
+
+  // A written file replaces the text report: printing the tree as well would bury
+  // the one line that says where it went. `--json` keeps its stream, because a
+  // script asked for a machine-readable answer rather than a rendering.
+  if (options.html !== undefined) {
+    await writeHtmlReport(
+      options.html,
+      sections,
+      {
+        symbol,
+        agentLabel: loaded.adapter.label,
+        pricingLabel: engine.provider.label,
+        scope: subagentMode !== 'total',
+      },
+      options.json === true,
+      requests,
+    );
+    return;
   }
 
   emit(
@@ -358,8 +433,24 @@ function runPrice(options: PriceOptions, config: ResolvedConfig): void {
         lines.push(`    [${period.id}] ${period.label}（${period.currency}）`);
         lines.push(`      ${t().price.window}: ${engine.describeWindow(period)}`);
         lines.push(`      ${t().price.tiers}: ${engine.describeTiers(period)}`);
-        const render = (components: readonly { label: string; rate: string; per: number }[]): string =>
-          components.map((component) => `${component.label} ${component.rate}`).join(' / ') + ` ${currencyOf(period.currency).symbol}`;
+        const render = (components: readonly RateComponent[]): string =>
+          components
+            .map((component) => {
+              // The card shows what the engine will actually charge: a tranche or
+              // a TTL multiplier is part of the price, not a footnote.
+              const notes: string[] = [];
+              for (const [tier, multiplier] of Object.entries(component.ttlMultipliers ?? {})) {
+                notes.push(t().rate.ttlMultiplier(tier, multiplier as string));
+              }
+              if (component.aboveThreshold !== undefined) {
+                notes.push(
+                  t().rate.overThreshold(String(component.aboveThreshold.tokens), component.aboveThreshold.rate),
+                );
+              }
+              const note = notes.length === 0 ? '' : `（${notes.join(', ')}）`;
+              return `${component.label} ${component.rate}${note}`;
+            })
+            .join(' / ') + ` ${currencyOf(period.currency).symbol}`;
         lines.push(`      ${t().price.offPeak}: ${render(period.offPeak)}`);
         if (period.peak !== null) lines.push(`      ${t().price.peak}: ${render(period.peak)}`);
         lines.push(`      ${t().price.source}: ${period.source}`);
@@ -546,6 +637,7 @@ export function buildProgram(): Command {
       .option('--subagents', t().help.subagents)
       .option('--cost', t().help.cost)
       .option('--models', t().help.models)
+      .option('--html <path>', t().help.html)
       .option('-p, --project-filter <selector>', t().help.projectFilter, collect)
       .option('-s, --session-filter <selector>', t().help.sessionFilter, collect)
       .option('-r, --repo-filter <selector>', t().help.repoFilter, collect)

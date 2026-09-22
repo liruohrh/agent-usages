@@ -18,9 +18,17 @@
 import { emptyBuckets, tokenBreakdown } from './core/buckets.ts';
 import { UserError, renderDiagnostic } from './i18n/errors.ts';
 import { t } from './i18n/index.ts';
-import { formatDecimal, parseDecimal } from './core/money.ts';
-import type { CostTotals, TokenBuckets, TokenTotals, UsageRecord } from './core/types.ts';
-import { counterForBasis, type CostBreakdown, type PricingEngine, type RateComponent, type RecordCost } from './pricing/index.ts';
+import { formatDecimal, MONEY_SCALE_DIGITS, parseDecimal, trimDecimal } from './core/money.ts';
+import type { CacheWriteTtl, CostTotals, TokenBuckets, TokenTotals, UsageRecord } from './core/types.ts';
+import {
+  counterForBasis,
+  type ComponentCharge,
+  type CostBreakdown,
+  type CostCharge,
+  type PricingEngine,
+  type RateComponent,
+  type RecordCost,
+} from './pricing/index.ts';
 
 /** Digits kept for money in the output: finer than any real per-request cost. */
 export const COST_DIGITS = 4;
@@ -44,6 +52,25 @@ export interface ExactCost {
 /** Report counters a charged component contributes tokens to. */
 type ReportCounter = 'cacheHitInputTokens' | 'cacheMissInputTokens' | 'outputTokens' | 'cacheWriteTokens';
 
+/**
+ * One component's tranche split inside a group, still exact.
+ *
+ * Only components whose money a second rate changed appear here, so the map is
+ * absent — not merely empty — for a rate card with no tranches at all.
+ */
+export interface GroupCharge {
+  /** Tokens billed at the component's own rate. */
+  baseTokens: number;
+  /** Tokens billed above the long-context threshold. */
+  excessTokens: number;
+  /** Money the excess tranche produced, at {@link AMOUNT_SCALE_DIGITS}. */
+  excessAmount: bigint;
+  /** Rate the excess was billed at, scaled by 1e9, or `null` when none was. */
+  excessRate: bigint | null;
+  /** Tokens per cache-write TTL tier whose multiplier scaled this component's rate. */
+  ttlTiers: Map<CacheWriteTtl, { tokens: number; multiplier: bigint }>;
+}
+
 /** One (model, period, tier) group plus the tokens that produced it. */
 export interface CostGroup {
   /** Model billed. */
@@ -60,6 +87,8 @@ export interface CostGroup {
   requests: number;
   /** Exact amount per component id. */
   amounts: Map<string, bigint>;
+  /** Tranche detail per component id, for components a second rate changed. */
+  charges: Map<string, GroupCharge>;
   /** Tokens attributed to each report counter. */
   counters: Record<ReportCounter, number>;
   /**
@@ -71,6 +100,117 @@ export interface CostGroup {
    * combined bill would move money between them.
    */
   reasoningTokens: number;
+}
+
+/**
+ * Add one request's tranche detail to a group's running total.
+ *
+ * Tokens and money add; the rates and multipliers are properties of the rate
+ * card, so they are carried rather than summed. Two different TTL tiers can meet
+ * in one band — the card may price both — and then neither multiplier describes
+ * the band's blended money, so both are dropped and the amounts stand alone.
+ */
+function addGroupCharge(target: GroupCharge, charge: ComponentCharge): void {
+  target.baseTokens += charge.baseTokens;
+  target.excessTokens += charge.excessTokens;
+  target.excessAmount += charge.excess;
+  target.excessRate = charge.excessRate ?? target.excessRate;
+  if (charge.ttlTier === null) return;
+  const existing = target.ttlTiers.get(charge.ttlTier);
+  target.ttlTiers.set(charge.ttlTier, {
+    tokens: (existing?.tokens ?? 0) + charge.ttlTokens,
+    multiplier: charge.ttlMultiplier,
+  });
+}
+
+/** Fold one group's tranche detail into another's, for merged groups. */
+function mergeGroupCharge(target: GroupCharge, source: GroupCharge): void {
+  target.baseTokens += source.baseTokens;
+  target.excessTokens += source.excessTokens;
+  target.excessAmount += source.excessAmount;
+  target.excessRate = source.excessRate ?? target.excessRate;
+  for (const [tier, entry] of source.ttlTiers) {
+    const existing = target.ttlTiers.get(tier);
+    target.ttlTiers.set(tier, {
+      tokens: (existing?.tokens ?? 0) + entry.tokens,
+      multiplier: entry.multiplier,
+    });
+  }
+}
+
+/**
+ * Turn a group's exact tranche totals into the report's display strings.
+ *
+ * `excessAmount` is rounded exactly like the component amounts it is a part of,
+ * so it never claims more than the line it belongs to.
+ */
+function displayCharges(
+  charges: ReadonlyMap<string, GroupCharge>,
+  convert: (value: bigint) => bigint,
+): Record<string, CostCharge> {
+  const displayed: Record<string, CostCharge> = {};
+  for (const [id, charge] of charges) {
+    // One tier is the normal case and the only one a single multiplier can
+    // describe; if a band ever mixes several, its money is reported without one.
+    let single: { tier: CacheWriteTtl; tokens: number; multiplier: bigint } | undefined;
+    if (charge.ttlTiers.size === 1) {
+      const [tier, entry] = [...charge.ttlTiers.entries()][0] as [
+        CacheWriteTtl,
+        { tokens: number; multiplier: bigint },
+      ];
+      single = { tier, tokens: entry.tokens, multiplier: entry.multiplier };
+    }
+    displayed[id] = {
+      baseTokens: charge.baseTokens,
+      excessTokens: charge.excessTokens,
+      excessAmount: renderRounded(convert(charge.excessAmount)),
+      excessRate: charge.excessRate === null ? null : renderRate(charge.excessRate),
+      ttlTier: single?.tier ?? null,
+      ttlTokens: single?.tokens ?? 0,
+      ttlMultiplier: single === undefined ? '1' : renderRate(single.multiplier),
+    };
+  }
+  return displayed;
+}
+
+/** Render a scaled rate as the decimal string it was published as. */
+function renderRate(value: bigint): string {
+  return trimDecimal(formatDecimal(value, MONEY_SCALE_DIGITS));
+}
+
+/**
+ * Add two bands' tranche views, component by component.
+ *
+ * Tokens and money add; a rate or multiplier is a property of the rate card and
+ * survives only while both sides agree on it, so a band that mixed two TTL tiers
+ * reports neither rather than one of them.
+ */
+function mergeChargeViews(
+  left: Readonly<Record<string, CostCharge>> | undefined,
+  right: Readonly<Record<string, CostCharge>> | undefined,
+  sum: (first: string, second: string) => string,
+): Record<string, CostCharge> | undefined {
+  if (left === undefined) return right === undefined ? undefined : { ...right };
+  if (right === undefined) return { ...left };
+  const merged: Record<string, CostCharge> = { ...left };
+  for (const [id, charge] of Object.entries(right)) {
+    const existing = merged[id];
+    if (existing === undefined) {
+      merged[id] = { ...charge };
+      continue;
+    }
+    const sameTier = existing.ttlTier === charge.ttlTier;
+    merged[id] = {
+      baseTokens: existing.baseTokens + charge.baseTokens,
+      excessTokens: existing.excessTokens + charge.excessTokens,
+      excessAmount: sum(existing.excessAmount, charge.excessAmount),
+      excessRate: existing.excessRate ?? charge.excessRate,
+      ttlTier: sameTier ? existing.ttlTier : null,
+      ttlTokens: sameTier ? existing.ttlTokens + charge.ttlTokens : 0,
+      ttlMultiplier: sameTier ? existing.ttlMultiplier : '1',
+    };
+  }
+  return merged;
 }
 
 /** One component's contribution, for the token/rate detail table. */
@@ -194,6 +334,7 @@ export function priceRecords(records: readonly UsageRecord[], engine: PricingEng
         resolution,
         requests: 0,
         amounts: new Map(),
+        charges: new Map(),
         counters: { cacheHitInputTokens: 0, cacheMissInputTokens: 0, outputTokens: 0, cacheWriteTokens: 0 },
         reasoningTokens: 0,
       };
@@ -205,6 +346,16 @@ export function priceRecords(records: readonly UsageRecord[], engine: PricingEng
       group.amounts.set(id, (group.amounts.get(id) ?? 0n) + amount);
       exact.byComponent.set(id, (exact.byComponent.get(id) ?? 0n) + amount);
       exact.total += amount;
+    }
+    // The tranche detail is carried, not re-derived: the engine already split
+    // the money, and the band has to agree with it to the last unit.
+    for (const [id, charge] of cost.charges ?? []) {
+      let entry = group.charges.get(id);
+      if (entry === undefined) {
+        entry = { baseTokens: 0, excessTokens: 0, excessAmount: 0n, excessRate: null, ttlTiers: new Map() };
+        group.charges.set(id, entry);
+      }
+      addGroupCharge(entry, charge);
     }
     // Attribute every charged component's tokens to a report counter, so the
     // totals a reader sees explain the amounts printed beside them.
@@ -262,12 +413,27 @@ export function mergeCosts(costs: readonly UsageCost[]): UsageCost {
       const key = `${group.model}\u0000${group.periodId}\u0000${group.tier}`;
       const existing = groups.get(key);
       if (existing === undefined) {
-        groups.set(key, { ...group, amounts: new Map(group.amounts), counters: { ...group.counters } });
+        groups.set(key, {
+          ...group,
+          amounts: new Map(group.amounts),
+          charges: new Map(
+            [...group.charges].map(([id, charge]) => [id, { ...charge, ttlTiers: new Map(charge.ttlTiers) }]),
+          ),
+          counters: { ...group.counters },
+        });
         continue;
       }
       existing.requests += group.requests;
       for (const [id, amount] of group.amounts) {
         existing.amounts.set(id, (existing.amounts.get(id) ?? 0n) + amount);
+      }
+      for (const [id, charge] of group.charges) {
+        let entry = existing.charges.get(id);
+        if (entry === undefined) {
+          entry = { baseTokens: 0, excessTokens: 0, excessAmount: 0n, excessRate: null, ttlTiers: new Map() };
+          existing.charges.set(id, entry);
+        }
+        mergeGroupCharge(entry, charge);
       }
       for (const counter of Object.keys(existing.counters) as ReportCounter[]) {
         existing.counters[counter] += group.counters[counter];
@@ -306,7 +472,8 @@ export function summarize(cost: UsageCost, convert: (value: bigint) => bigint = 
       amounts[id] = renderRounded(value);
       groupTotal += value;
     }
-    return {
+    const charges = group.charges.size === 0 ? undefined : displayCharges(group.charges, convert);
+    const band: CostBreakdown = {
       model: group.model,
       periodId: group.periodId,
       periodLabel: group.periodLabel,
@@ -317,6 +484,8 @@ export function summarize(cost: UsageCost, convert: (value: bigint) => bigint = 
       reasoningCost: renderRounded(groupReasoningShare(group, convert)),
       total: renderRounded(groupTotal),
     };
+    if (charges !== undefined) band.charges = charges;
+    return band;
   });
 
   // The totals are the sum of the bands, never a second rounding of the same
@@ -425,19 +594,25 @@ export function addSummaries(sets: readonly CostSummary[]): CostSummary {
       const key = `${band.model}\u0000${band.periodId}\u0000${band.tier}`;
       const existing = bands.get(key);
       if (existing === undefined) {
-        bands.set(key, { ...band, amounts: { ...band.amounts } });
+        bands.set(key, {
+          ...band,
+          amounts: { ...band.amounts },
+          ...(band.charges === undefined ? {} : { charges: { ...band.charges } }),
+        });
         continue;
       }
       const amounts: Record<string, string> = { ...existing.amounts };
       for (const [id, amount] of Object.entries(band.amounts)) {
         amounts[id] = sum(amounts[id] ?? '0.0000', amount);
       }
+      const charges = mergeChargeViews(existing.charges, band.charges, sum);
       bands.set(key, {
         ...existing,
         requests: existing.requests + band.requests,
         total: sum(existing.total, band.total),
         reasoningCost: sum(existing.reasoningCost, band.reasoningCost),
         amounts,
+        ...(charges === undefined ? {} : { charges }),
       });
     }
   }

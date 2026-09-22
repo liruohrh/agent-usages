@@ -107,3 +107,66 @@ export function stubProvider(): PricingProvider {
     },
   };
 }
+
+/** Boundary instants for {@link contextProvider}'s single flat period. */
+export const CONTEXT_AT = {
+  /** Any instant inside the context model's one period. */
+  any: Date.parse('2026-03-01T00:00:00Z'),
+} as const;
+
+/** The threshold the context model's miss and write components publish. */
+export const CONTEXT_THRESHOLD = 200_000;
+
+/**
+ * A provider whose card prices both new features.
+ *
+ * Kept apart from {@link stubProvider} so the older tests keep asserting against
+ * a card with neither: `input-miss` charges 1 per million up to
+ * {@link CONTEXT_THRESHOLD} and 2 beyond it, and `input-write` charges 5 per
+ * million for a default (5m) write and twice that for a 1h one.
+ */
+export function contextProvider(): PricingProvider {
+  const models = [
+    {
+      model: 'context-model',
+      aliases: ['context-model'],
+      periods: [
+        {
+          id: '2026-01-01',
+          label: 'long context, TTL-aware',
+          from: Date.parse('2026-01-01T00:00:00Z'),
+          to: null,
+          offPeak: [
+            {
+              ...perMillion('input-miss', 'miss', 'input', '1'),
+              aboveThreshold: { tokens: CONTEXT_THRESHOLD, rate: '2' },
+            },
+            {
+              ...perMillion('input-write', 'write', 'cacheWrite', '5'),
+              aboveThreshold: { tokens: CONTEXT_THRESHOLD, rate: '7' },
+              ttlMultipliers: { '1h': '2' },
+            },
+            perMillion('output', 'out', 'output', '10'),
+          ],
+          peak: null,
+          peakWindows: [],
+          utcOffset: 0,
+          currency: TEST_CURRENCY.code,
+          source: 'test',
+          note: 'long context + TTL',
+        },
+      ],
+    },
+  ] as const;
+
+  return {
+    id: 'stub-context',
+    label: 'Stub Context Vendor',
+    defaultModel: 'context-model',
+    models: () => models,
+    find: (model) => {
+      const wanted = model.trim().toLowerCase();
+      return models.find((price) => price.aliases.some((alias) => alias.toLowerCase() === wanted));
+    },
+  };
+}

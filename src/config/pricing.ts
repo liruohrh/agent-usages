@@ -14,9 +14,18 @@
 
 import { readFileSync } from 'node:fs';
 
-import { parseDecimal } from '../core/money.ts';
+import { MONEY_SCALE, parseDecimal } from '../core/money.ts';
 import { UserError, renderDiagnostic, type ErrorCode, type ErrorParams } from '../i18n/errors.ts';
-import type { BillingBasis, ModelPrice, PeakWindow, PricePeriod, PricingProvider, RateComponent } from '../pricing/contract.ts';
+import { CACHE_WRITE_TTLS, type CacheWriteTtl } from '../core/types.ts';
+import type {
+  AboveThreshold,
+  BillingBasis,
+  ModelPrice,
+  PeakWindow,
+  PricePeriod,
+  PricingProvider,
+  RateComponent,
+} from '../pricing/contract.ts';
 
 /** Where the shipped configuration lives, relative to this module. */
 const SHIPPED_PATH = new URL('../../config/pricing.json', import.meta.url);
@@ -113,6 +122,66 @@ function stamped(value: unknown, path: string): Stamped {
   return { instant: parsed, utcOffset };
 }
 
+/** Read a required decimal string that must be strictly positive. */
+function positiveDecimal(value: unknown, path: string): string {
+  const raw = text(value, path);
+  let parsed: bigint;
+  try {
+    parsed = parseDecimal(raw);
+  } catch {
+    throw new ConfigError(path, 'configNotDecimal', { value: JSON.stringify(raw) });
+  }
+  if (parsed <= 0n) throw new ConfigError(path, 'configPriceNotPositive', { value: JSON.stringify(raw) });
+  return raw;
+}
+
+/**
+ * Read a component's long-context tranche.
+ *
+ * Both fields are required once the block is present: a threshold without a rate
+ * (or the reverse) would silently price the excess at nothing or at the base
+ * rate, and neither is what the file says.
+ */
+function aboveThreshold(value: unknown, path: string): AboveThreshold {
+  const node = object(value, path);
+  if (node['tokens'] === undefined) throw new ConfigError(`${path}.tokens`, 'configMissingField', { field: 'tokens' });
+  const tokens = number(node['tokens'], `${path}.tokens`);
+  if (!Number.isSafeInteger(tokens) || tokens <= 0) {
+    throw new ConfigError(`${path}.tokens`, 'configPositiveInteger', { value: String(tokens) });
+  }
+  if (node['rate'] === undefined) throw new ConfigError(`${path}.rate`, 'configMissingField', { field: 'rate' });
+  return { tokens, rate: positiveDecimal(node['rate'], `${path}.rate`) };
+}
+
+/**
+ * Read a component's cache-write TTL multipliers.
+ *
+ * The base `rate` is the vendor's default (5-minute) write price, which is why a
+ * `5m` entry may only restate it as `"1"`: anything else would scale the price of
+ * every write that never named a TTL.
+ */
+function ttlMultipliers(value: unknown, path: string): Partial<Record<CacheWriteTtl, string>> {
+  const node = object(value, path);
+  const keys = Object.keys(node);
+  if (keys.length === 0) throw new ConfigError(path, 'configTtlNoTier', {});
+  const parsed: Partial<Record<CacheWriteTtl, string>> = {};
+  for (const key of keys) {
+    if (!CACHE_WRITE_TTLS.includes(key as CacheWriteTtl)) {
+      throw new ConfigError(`${path}.${key}`, 'configUnknownTtlTier', {
+        tier: JSON.stringify(key),
+        known: CACHE_WRITE_TTLS.join(' / '),
+      });
+    }
+    const tier = key as CacheWriteTtl;
+    const multiplier = positiveDecimal(node[key], `${path}.${key}`);
+    if (tier === '5m' && parseDecimal(multiplier) !== MONEY_SCALE) {
+      throw new ConfigError(`${path}.${key}`, 'configTtlDefaultNotOne', { value: JSON.stringify(multiplier) });
+    }
+    parsed[tier] = multiplier;
+  }
+  return parsed;
+}
+
 /** A rate component, as the vendor publishes it. */
 function component(value: unknown, path: string): RateComponent {
   const node = object(value, path);
@@ -121,15 +190,31 @@ function component(value: unknown, path: string): RateComponent {
   if (!BASES.includes(basis as BillingBasis)) {
     throw new ConfigError(`${path}.basis`, 'configUnknownBasis', { basis: JSON.stringify(basis), known: BASES.join(' / ') });
   }
-  const rate = text(node['rate'], `${path}.rate`);
-  try {
-    parseDecimal(rate);
-  } catch {
-    throw new ConfigError(`${path}.rate`, 'configNotDecimal', { value: JSON.stringify(rate) });
-  }
+  const rate = positiveDecimal(node['rate'], `${path}.rate`);
   const per = number(node['per'], `${path}.per`);
   if (!Number.isSafeInteger(per) || per <= 0) throw new ConfigError(`${path}.per`, 'configPositiveInteger', { value: String(per) });
-  return { id, label: text(node['label'], `${path}.label`), basis: basis as BillingBasis, rate, per };
+  const above = node['aboveThreshold'] === null || node['aboveThreshold'] === undefined
+    ? undefined
+    : aboveThreshold(node['aboveThreshold'], `${path}.aboveThreshold`);
+  const ttl = node['ttlMultipliers'] === null || node['ttlMultipliers'] === undefined
+    ? undefined
+    : ttlMultipliers(node['ttlMultipliers'], `${path}.ttlMultipliers`);
+  // A TTL multiplier reprices cache-write tokens, so the component has to bill
+  // them on their own; on a mixed basis the write share is not a quantity the
+  // engine can scale, and accepting it would quietly overcharge the input.
+  if (ttl !== undefined && basis !== 'cacheWrite') {
+    throw new ConfigError(`${path}.ttlMultipliers`, 'configTtlNeedsCacheWrite', {});
+  }
+  const parsed: RateComponent = {
+    id,
+    label: text(node['label'], `${path}.label`),
+    basis: basis as BillingBasis,
+    rate,
+    per,
+  };
+  if (above !== undefined) parsed.aboveThreshold = above;
+  if (ttl !== undefined) parsed.ttlMultipliers = ttl;
+  return parsed;
 }
 
 /** A peak window in the period's own timezone. */

@@ -68,6 +68,8 @@ export const en: Messages = {
       `${vendor} (${base}, converted at each record’s own date’s rate to ${display})`,
     anonymous: (vendor: string, base: string, rate: string) =>
       `${vendor} (${base}, converted at 1 ${base} = ${rate}, no target currency named)`,
+    overThreshold: (tokens: string, rate: string) => `${rate} above ${tokens} tokens`,
+    ttlMultiplier: (tier: string, multiplier: string) => `${tier} cache write ×${multiplier}`,
   },
   range: {
     all: 'all time',
@@ -143,6 +145,7 @@ export const en: Messages = {
     currency: 'currency to display (defaults to the system language: yuan for Chinese, dollars otherwise)',
     currencyRate: 'rate from 1 unit of the priced currency (usable alone; then no currency is named)',
     rateMode: 'latest (default, one rate throughout) or historical (each record’s own date)',
+    html: 'write the report to a path as one self-contained HTML file (inlined styles and chart, no scripts)',
     sessionCommand: 'session operations',
     sessionList: 'list every project and session (projects by first use, newest first; sessions newest first)',
     sessionListSubagents: 'list subagents on their own rows (folded into their parent by default)',
@@ -176,6 +179,22 @@ export const en: Messages = {
     subagentCount: (count: string) => count,
   },
 
+  html: {
+    chart: 'Tokens by project',
+    models: 'Models',
+    model: 'Model',
+    bands: 'Pricing bands',
+    band: 'Band',
+    window: 'In effect',
+    session: 'Session',
+    amount: 'Amount',
+    unitPrice: 'Unit price',
+    tips: 'Notes',
+    meta: (sessions: string, first: string, last: string) => `${sessions} sessions · first ${first} · last ${last}`,
+    written: (path: string) => `wrote ${path}`,
+    writeFailed: (path: string, reason: string) => `could not write ${path}: ${reason}`,
+  },
+
   errors: {
     configExpectsObject: (p: { value: string }) => `expected an object, got ${p.value}`,
     configExpectsArray: (p: { value: string }) => `expected an array, got ${p.value}`,
@@ -189,6 +208,15 @@ export const en: Messages = {
     configOffsetTooLarge: (p: { value: string }) => `offset beyond ±14:00: ${p.value}`,
     configUnknownBasis: (p: { basis: string; known: string }) => `unknown billing basis ${p.basis} (available: ${p.known})`,
     configNotDecimal: (p: { value: string }) => `not a decimal number: ${p.value}`,
+    configPriceNotPositive: (p: { value: string }) => `a rate or multiplier must be positive, got ${p.value}`,
+    configMissingField: (p: { field: string }) => `missing field ${p.field}`,
+    configUnknownTtlTier: (p: { tier: string; known: string }) =>
+      `unknown cache TTL tier ${p.tier} (available: ${p.known})`,
+    configTtlNeedsCacheWrite:
+      'ttlMultipliers is only allowed on a component whose basis is cacheWrite (no other basis has a separate write quantity to reprice)',
+    configTtlNoTier: 'ttlMultipliers needs at least one tier',
+    configTtlDefaultNotOne: (p: { value: string }) =>
+      `the 5m multiplier should be "1" (the component's own rate is already the 5m write price), got ${p.value}`,
     configPositiveInteger: (p: { value: string }) => `expected a positive integer, got ${p.value}`,
     configWindowHours: (p: { from: number; to: number }) =>
       `a window must satisfy 0 ≤ fromHour < toHour ≤ 24, got ${p.from}-${p.to}`,

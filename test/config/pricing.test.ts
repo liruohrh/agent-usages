@@ -26,6 +26,16 @@ function firstPeriod(document: Record<string, unknown>): Record<string, unknown>
   return providers[0]!.models[0]!.periods[0]!;
 }
 
+/** The off-peak card of {@link firstPeriod}, as a mutable list. */
+function firstCard(document: Record<string, unknown>): Record<string, unknown>[] {
+  return firstPeriod(document)['offPeak'] as Record<string, unknown>[];
+}
+
+/** A cache-write component the shipped DeepSeek card deliberately does not have. */
+function cacheWriteComponent(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: 'input-write', label: '缓存写入', basis: 'cacheWrite', rate: '3', per: 1_000_000, ...extra };
+}
+
 describe('parsePricingConfig', () => {
   it('reads the shipped file into providers', () => {
     const config = parsePricingConfig(shipped());
@@ -117,6 +127,95 @@ describe('parsePricingConfig', () => {
   it('rejects something that is not a configuration at all', () => {
     expect(() => parsePricingConfig('[]')).toThrow(ConfigError);
     expect(() => parsePricingConfig('{')).toThrow();
+  });
+});
+
+describe('long-context tranches', () => {
+  it('reads a tranche into the component it was written on', () => {
+    const document = shipped();
+    const card = firstCard(document);
+    card[2]!['aboveThreshold'] = { tokens: 200_000, rate: '4.5' };
+    const period = parsePricingConfig(document).providers[0]!.models[0]!.periods[0]!;
+    expect(period.offPeak[2]!.aboveThreshold).toEqual({ tokens: 200_000, rate: '4.5' });
+    // Every other component keeps the shape it had before the field existed.
+    expect(period.offPeak[0]!.aboveThreshold).toBeUndefined();
+  });
+
+  it('rejects a tranche that is missing a field or typed wrongly', () => {
+    const missingRate = shipped();
+    firstCard(missingRate)[2]!['aboveThreshold'] = { tokens: 200_000 };
+    expect(() => parsePricingConfig(missingRate)).toThrow(/aboveThreshold\.rate: 缺少字段 rate/);
+
+    const missingTokens = shipped();
+    firstCard(missingTokens)[2]!['aboveThreshold'] = { rate: '4' };
+    expect(() => parsePricingConfig(missingTokens)).toThrow(/aboveThreshold\.tokens: 缺少字段 tokens/);
+
+    const typedWrong = shipped();
+    firstCard(typedWrong)[2]!['aboveThreshold'] = { tokens: '200000', rate: '4' };
+    expect(() => parsePricingConfig(typedWrong)).toThrow(/aboveThreshold\.tokens: 应为数字/);
+
+    const notANumber = shipped();
+    firstCard(notANumber)[2]!['aboveThreshold'] = { tokens: 200_000, rate: '4元' };
+    expect(() => parsePricingConfig(notANumber)).toThrow(/aboveThreshold\.rate: 不是十进制数/);
+  });
+
+  it('rejects a threshold that is zero, negative, or fractional', () => {
+    for (const tokens of [0, -1, 1.5]) {
+      const document = shipped();
+      firstCard(document)[2]!['aboveThreshold'] = { tokens, rate: '4' };
+      expect(() => parsePricingConfig(document)).toThrow(/aboveThreshold\.tokens: 应为正整数/);
+    }
+  });
+
+  it('rejects a tranche rate that is not positive', () => {
+    const document = shipped();
+    firstCard(document)[2]!['aboveThreshold'] = { tokens: 200_000, rate: '-4' };
+    expect(() => parsePricingConfig(document)).toThrow(/aboveThreshold\.rate: 单价\/倍率必须为正/);
+  });
+});
+
+describe('cache-write TTL multipliers', () => {
+  it('reads multipliers only on a component that bills cache writes alone', () => {
+    const document = shipped();
+    firstCard(document).push(cacheWriteComponent({ ttlMultipliers: { '1h': '2.0' } }));
+    const period = parsePricingConfig(document).providers[0]!.models[0]!.periods[0]!;
+    expect(period.offPeak[3]!.ttlMultipliers).toEqual({ '1h': '2.0' });
+
+    const onInput = shipped();
+    firstCard(onInput)[2]!['ttlMultipliers'] = { '1h': '2' };
+    expect(() => parsePricingConfig(onInput)).toThrow(/只能写在 basis 为 cacheWrite 的组件上/);
+  });
+
+  it('rejects an unknown tier, an empty map, and a non-positive multiplier', () => {
+    const unknownTier = shipped();
+    firstCard(unknownTier).push(cacheWriteComponent({ ttlMultipliers: { '2h': '2' } }));
+    expect(() => parsePricingConfig(unknownTier)).toThrow(/未知的缓存 TTL 档位/);
+
+    const empty = shipped();
+    firstCard(empty).push(cacheWriteComponent({ ttlMultipliers: {} }));
+    expect(() => parsePricingConfig(empty)).toThrow(/至少要写一个档位/);
+
+    for (const multiplier of ['0', '-2', '2元']) {
+      const document = shipped();
+      firstCard(document).push(cacheWriteComponent({ ttlMultipliers: { '1h': multiplier } }));
+      expect(() => parsePricingConfig(document)).toThrow(/不是十进制数|必须为正/);
+    }
+
+    const notAString = shipped();
+    firstCard(notAString).push(cacheWriteComponent({ ttlMultipliers: { '1h': 2 } }));
+    expect(() => parsePricingConfig(notAString)).toThrow(/应为非空字符串/);
+  });
+
+  it('rejects a 5m multiplier that is not 1, since rate already is the 5m price', () => {
+    const document = shipped();
+    firstCard(document).push(cacheWriteComponent({ ttlMultipliers: { '5m': '1.5', '1h': '2' } }));
+    expect(() => parsePricingConfig(document)).toThrow(/5m 档的倍率应为 "1"/);
+
+    const explicit = shipped();
+    firstCard(explicit).push(cacheWriteComponent({ ttlMultipliers: { '5m': '1' } }));
+    expect(parsePricingConfig(explicit).providers[0]!.models[0]!.periods[0]!.offPeak[3]!.ttlMultipliers).toEqual({
+      '5m': '1',
+    });
   });
 });
 

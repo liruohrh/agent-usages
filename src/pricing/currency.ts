@@ -415,8 +415,19 @@ export function selectCurrency(
  * @returns a provider quoting the same prices in `target`.
  */
 export function convertProvider(provider: PricingProvider, target: CurrencyInfo, rate: string): PricingProvider {
-  const convert = (component: RateComponent): RateComponent =>
-    rate === '1' ? component : { ...component, rate: trimDecimal(multiplyDecimal(component.rate, rate)) };
+  const convert = (component: RateComponent): RateComponent => {
+    if (rate === '1') return component;
+    const converted: RateComponent = { ...component, rate: trimDecimal(multiplyDecimal(component.rate, rate)) };
+    // The long-context rate is a price like any other, so it converts with the
+    // base rate; a TTL multiplier is a ratio and stays as published.
+    if (component.aboveThreshold !== undefined) {
+      converted.aboveThreshold = {
+        tokens: component.aboveThreshold.tokens,
+        rate: trimDecimal(multiplyDecimal(component.aboveThreshold.rate, rate)),
+      };
+    }
+    return converted;
+  };
   const models = provider.models().map((price) => ({
     ...price,
     periods: price.periods.map((period) => ({

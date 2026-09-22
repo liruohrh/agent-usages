@@ -22,9 +22,10 @@ import { MONEY_SCALE, parseDecimal } from '../core/money.ts';
 import { UserError } from '../i18n/errors.ts';
 import type { Messages } from '../i18n/zh.ts';
 import { t } from '../i18n/index.ts';
-import type { TokenBuckets, UsageRecord } from '../core/types.ts';
+import type { CacheWriteTtl, TokenBuckets, UsageRecord } from '../core/types.ts';
 import {
   type BillingBasis,
+  type ComponentCharge,
   type CostBreakdown,
   type ModelPrice,
   type PeakWindow,
@@ -258,6 +259,126 @@ function rateOf(component: RateComponent): bigint {
   return parsed;
 }
 
+/**
+ * A rate variant memoized per component and multiplier.
+ *
+ * Same reasoning as {@link rateOf}: a TTL multiplier is a constant of the rate
+ * card, so a report over a million records should not re-parse it a million
+ * times.
+ */
+const scaledRateCache = new WeakMap<RateComponent, Map<string, bigint>>();
+
+/** Multiply a scaled rate by a scaled multiplier, exactly, and memoize it. */
+function scaleRate(component: RateComponent, rate: bigint, multiplier: bigint): bigint {
+  if (multiplier === MONEY_SCALE) return rate;
+  let variants = scaledRateCache.get(component);
+  if (variants === undefined) {
+    variants = new Map();
+    scaledRateCache.set(component, variants);
+  }
+  const key = `${rate}\u0000${multiplier}`;
+  const cached = variants.get(key);
+  if (cached !== undefined) return cached;
+  const scaled = (rate * multiplier) / MONEY_SCALE;
+  variants.set(key, scaled);
+  return scaled;
+}
+
+/** What the caller knows about one request beyond its token counts. */
+export interface ChargeContext {
+  /** TTL tier the provider reported for this request's cache writes. */
+  cacheWriteTtl?: CacheWriteTtl | undefined;
+}
+
+/** The multiplier a component publishes for a TTL tier, scaled; 1× when it names none. */
+function ttlMultiplierOf(component: RateComponent, tier: CacheWriteTtl | null): bigint {
+  if (tier === null || component.ttlMultipliers === undefined) return MONEY_SCALE;
+  const published = component.ttlMultipliers[tier];
+  if (published === undefined) return MONEY_SCALE;
+  return parseRate(published);
+}
+
+/**
+ * Charge one component for one request's tokens.
+ *
+ * Pure and total: the quantity a component bills is split once at its own
+ * long-context threshold, each tranche is charged at its own rate, and the two
+ * amounts are added as scaled integers — so `base + excess` is exactly the
+ * component's charge, with no rounding introduced by the split beyond the
+ * per-tranche truncation the arithmetic already does. The cache-write TTL tier
+ * scales the rate of every tranche it covers, because a 1-hour write is priced
+ * relative to the same card's 5-minute write, excess included.
+ *
+ * A component with no `aboveThreshold` never produces an excess tranche, and a
+ * request with no (or an unpriced) TTL tier is billed at the published rate
+ * unchanged, so a card that uses neither feature takes exactly the path it did
+ * before either existed.
+ *
+ * @param component - the rate to charge.
+ * @param tokens - the request's token buckets.
+ * @param context - the request's TTL tier, when the provider reported one.
+ * @returns the charge, split by what produced it.
+ */
+export function chargeComponent(
+  component: RateComponent,
+  tokens: TokenBuckets,
+  context: ChargeContext = {},
+): ComponentCharge {
+  const quantity = basisQuantity(component.basis, tokens);
+  // A TTL only exists for tokens that are cache writes, and only a component
+  // that bills them alone can be repriced by it; config validation says so too.
+  const declared = component.basis === 'cacheWrite' ? (context.cacheWriteTtl ?? null) : null;
+  const multiplier = ttlMultiplierOf(component, declared);
+  // A tier that multiplies by one changes nothing, and reporting it would
+  // suggest the money depended on a TTL the rate card does not price.
+  const ttlTier = multiplier === MONEY_SCALE ? null : declared;
+  const baseRate = scaleRate(component, rateOf(component), multiplier);
+  const threshold = component.aboveThreshold?.tokens;
+  const baseTokens = threshold === undefined ? quantity : Math.min(quantity, threshold);
+  const excessTokens = quantity - baseTokens;
+  const base = charge(baseTokens, baseRate, component.per);
+  let excess = 0n;
+  let excessRate: bigint | null = null;
+  if (excessTokens > 0 && component.aboveThreshold !== undefined) {
+    excessRate = scaleRate(component, parseRate(component.aboveThreshold.rate), multiplier);
+    excess = charge(excessTokens, excessRate, component.per);
+  }
+  return {
+    base,
+    excess,
+    total: base + excess,
+    baseTokens,
+    excessTokens,
+    excessRate,
+    ttlTier,
+    ttlTokens: ttlTier === null ? 0 : quantity,
+    ttlMultiplier: multiplier,
+  };
+}
+
+/**
+ * Add two charges for one component id.
+ *
+ * A rate card may name the same id twice within one tier (nothing forbids it,
+ * and the amounts map has always summed them), so the tranche detail has to
+ * follow: the money is the sum, and a TTL tier survives only when both charges
+ * were priced under the same one.
+ */
+function mergeCharges(left: ComponentCharge, right: ComponentCharge): ComponentCharge {
+  const ttlTier = left.ttlTier === right.ttlTier ? left.ttlTier : null;
+  return {
+    base: left.base + right.base,
+    excess: left.excess + right.excess,
+    total: left.total + right.total,
+    baseTokens: left.baseTokens + right.baseTokens,
+    excessTokens: left.excessTokens + right.excessTokens,
+    excessRate: right.excessRate ?? left.excessRate,
+    ttlTier,
+    ttlTokens: ttlTier === null ? 0 : left.ttlTokens + right.ttlTokens,
+    ttlMultiplier: right.ttlTier === null ? left.ttlMultiplier : right.ttlMultiplier,
+  };
+}
+
 /** The default engine implementation. */
 class Engine implements PricingEngine {
   readonly provider: PricingProvider;
@@ -357,16 +478,30 @@ class Engine implements PricingEngine {
     if (rate === undefined) return undefined;
     const factor = this.factorFor(record.time);
     const amounts = new Map<string, bigint>();
+    let charges: Map<string, ComponentCharge> | undefined;
     let total = 0n;
     for (const component of rate.components) {
-      const charged = charge(basisQuantity(component.basis, record.tokens), rateOf(component), component.per);
-      // Truncating at the arithmetic scale: a record is never worth less than a
-      // billionth of a currency unit, so this cannot lose a visible amount.
-      const amount = factor === undefined ? charged : (charged * factor) / MONEY_SCALE;
+      const charged = chargeComponent(component, record.tokens, { cacheWriteTtl: record.cacheWriteTtl });
+      // Each tranche is converted and truncated on its own so the parts a report
+      // shows still add up to the whole it charges; with no conversion factor —
+      // the common case — this is the identity, not an approximation.
+      const base = factor === undefined ? charged.base : (charged.base * factor) / MONEY_SCALE;
+      const excess = factor === undefined ? charged.excess : (charged.excess * factor) / MONEY_SCALE;
+      const amount = base + excess;
       amounts.set(component.id, (amounts.get(component.id) ?? 0n) + amount);
       total += amount;
+      // Only a tranche or a TTL multiplier makes the split worth carrying: an
+      // unchanged rate card keeps the per-record maps exactly as they were.
+      if (charged.excessTokens > 0 || charged.ttlTier !== null) {
+        charges ??= new Map();
+        const priced: ComponentCharge = { ...charged, base, excess, total: amount };
+        const previous = charges.get(component.id);
+        charges.set(component.id, previous === undefined ? priced : mergeCharges(previous, priced));
+      }
     }
-    return { total, amounts, rate };
+    const cost: RecordCost = { total, amounts, rate };
+    if (charges !== undefined) cost.charges = charges;
+    return cost;
   }
 
   describeWindow(period: PricePeriod): string {

@@ -92,6 +92,10 @@ export const zh = {
     /** A rate given without naming the currency it converts to. */
     anonymous: (vendor: string, base: string, rate: string) =>
       `${vendor}（${base}，按 1 ${base} = ${rate} 折算，未指定目标货币）`,
+    /** `超出 200000 tokens 部分 6`: the long-context tranche of one rate card item. */
+    overThreshold: (tokens: string, rate: string) => `超出 ${tokens} tokens 部分 ${rate}`,
+    /** `1h 缓存写入 ×2`: a cache-write TTL multiplier on one rate card item. */
+    ttlMultiplier: (tier: string, multiplier: string) => `${tier} 缓存写入 ×${multiplier}`,
   },
   /** Time ranges: presets, offsets, and how a range reads in a heading. */
   range: {
@@ -178,6 +182,7 @@ export const zh = {
     currency: '显示货币（默认按系统语言选，中文人民币、英文美元）',
     currencyRate: '1 单位计价货币折算为目标货币的汇率（可单独使用，此时不显示货币）',
     rateMode: 'latest（默认，全程一个汇率）或 historical（按每条记录当天的汇率）',
+    html: '把报告写成一个自包含的 HTML 文件（内联样式与条形图、无脚本），写到指定路径',
     sessionCommand: '会话相关操作',
     sessionList: '列出所有项目与会话（项目按首个会话时间降序，会话按时间降序）',
     sessionListSubagents: '将子代理单独列出（默认并入其父会话）',
@@ -215,6 +220,36 @@ export const zh = {
     subagentCount: (count: string) => count,
   },
 
+  /** The HTML report. */
+  html: {
+    /** Caption above the per-project bars. */
+    chart: '各项目 token 总量',
+    /** Heading of a per-model table. */
+    models: '各模型明细',
+    /** Column heading of a model name. */
+    model: '模型',
+    /** Heading of the folded pricing-band table. */
+    bands: '计价区间',
+    /** Column heading of the band itself: period, tier and model. */
+    band: '区间',
+    /** Column heading of when a band applied. */
+    window: '生效',
+    /** Column heading of a session row. */
+    session: '会话',
+    /** Column heading of an amount. */
+    amount: '金额',
+    /** Column heading of a rate card. */
+    unitPrice: '单价',
+    /** Heading of the warning list. */
+    tips: '提示',
+    /** `会话 12 · 首次 2026-07-01 · 最近 2026-07-09`. */
+    meta: (sessions: string, first: string, last: string) => `会话 ${sessions} · 首次 ${first} · 最近 ${last}`,
+    /** `已写入 <path>`. */
+    written: (path: string) => `已写入 ${path}`,
+    /** `无法写入 <path>: <reason>`. */
+    writeFailed: (path: string, reason: string) => `无法写入 ${path}: ${reason}`,
+  },
+
   /** Every diagnostic, keyed by code, so a caller can throw one and translate it later. */
   errors: {
     /* ---- configuration files ---- */
@@ -230,6 +265,13 @@ export const zh = {
     configOffsetTooLarge: (p: { value: string }) => `偏移超出 ±14:00：${p.value}`,
     configUnknownBasis: (p: { basis: string; known: string }) => `未知的计费基准 ${p.basis}（可用：${p.known}）`,
     configNotDecimal: (p: { value: string }) => `不是十进制数：${p.value}`,
+    configPriceNotPositive: (p: { value: string }) => `单价/倍率必须为正，收到 ${p.value}`,
+    configMissingField: (p: { field: string }) => `缺少字段 ${p.field}`,
+    configUnknownTtlTier: (p: { tier: string; known: string }) => `未知的缓存 TTL 档位 ${p.tier}（可用：${p.known}）`,
+    configTtlNeedsCacheWrite: 'ttlMultipliers 只能写在 basis 为 cacheWrite 的组件上（其它基准没有单独的缓存写入量可调价）',
+    configTtlNoTier: 'ttlMultipliers 至少要写一个档位',
+    configTtlDefaultNotOne: (p: { value: string }) =>
+      `5m 档的倍率应为 "1"（组件自身的 rate 就是 5 分钟写入价），收到 ${p.value}`,
     configPositiveInteger: (p: { value: string }) => `应为正整数，收到 ${p.value}`,
     configWindowHours: (p: { from: number; to: number }) =>
       `时间窗应为 0 ≤ fromHour < toHour ≤ 24，收到 ${p.from}-${p.to}`,
