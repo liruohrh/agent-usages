@@ -5,7 +5,7 @@
 | 维度 | 作用 | 当前支持 |
 | --- | --- | --- |
 | **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness） |
-| **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek 官方） |
+| **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek） |
 
 两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱。因此新增任何一方都只是「一个模块 + 一条注册项」，核心层（聚合、报表、CLI）不需要改动。
 
@@ -47,7 +47,7 @@ export interface AgentAdapter {
 `src/config/pricing.ts` 负责解析与校验）：
 
 ```jsonc
-{ "id": "deepseek", "label": "DeepSeek 官方", "defaultModel": "deepseek-flash",
+{ "id": "deepseek", "label": "DeepSeek", "defaultModel": "deepseek-flash",
   "models": [{ "model": "deepseek-flash", "aliases": ["deepseek-chat", "..."],
                "periods": [{ "id": "2026-09-10", "from": "2026-09-10T12:00:00+08:00", "to": null,
                              "currency": "CNY",   // 只要代码，符号内置；时钟取自 from 的偏移

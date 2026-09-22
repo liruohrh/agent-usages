@@ -312,7 +312,7 @@ describe('usage', () => {
     const { stdout } = await cli(['usage']);
     expect(stdout).toContain('Agent 用量统计');
     expect(stdout).toContain('DeepSeek Harness (DSH)');
-    expect(stdout).toContain('DeepSeek 官方');
+    expect(stdout).toContain('DeepSeek');
     expect(stdout).toContain('演示会话');
     // The fixture is one project with one session, so both aggregate levels
     // collapse and a single metric line remains.
@@ -502,7 +502,7 @@ describe('price', () => {
   it('prints the schedule with its sources, without reading any data', async () => {
     const { code, stdout } = await cli(['price'], { HOME: '/nowhere' });
     expect(code).toBe(0);
-    expect(stdout).toContain('DeepSeek 官方');
+    expect(stdout).toContain('DeepSeek');
     expect(stdout).toContain('deepseek-flash');
     expect(stdout).toContain('0.02');
     expect(stdout).toContain('api-docs.deepseek.com');
@@ -610,7 +610,7 @@ describe('price filters', () => {
 
   it('lists every provider with --all', async () => {
     const { stdout } = await cli(['price', '--all', '--current']);
-    expect(stdout).toContain('DeepSeek 官方');
+    expect(stdout).toContain('DeepSeek');
   });
 });
 

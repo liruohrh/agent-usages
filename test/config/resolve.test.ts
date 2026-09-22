@@ -41,7 +41,7 @@ function userOverride(): Record<string, unknown> {
       providers: [
         {
           id: 'deepseek',
-          label: 'DeepSeek 官方',
+          label: 'DeepSeek',
           defaultModel: 'deepseek-flash',
           models: [
             {

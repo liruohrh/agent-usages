@@ -95,7 +95,7 @@ describe('readUserConfig', () => {
           providers: [
             {
               id: 'deepseek',
-              label: 'DeepSeek 官方',
+              label: 'DeepSeek',
               defaultModel: 'deepseek-flash',
               models: [
                 {
@@ -196,7 +196,7 @@ describe('mergeProviders', () => {
     const overrides = [
       {
         id: 'deepseek',
-        label: 'DeepSeek 官方',
+        label: 'DeepSeek',
         defaultModel: 'deepseek-flash',
         models: [
           {
@@ -221,7 +221,7 @@ describe('mergeProviders', () => {
     const merged = mergeProviders(base, [
       {
         id: 'deepseek',
-        label: 'DeepSeek 官方',
+        label: 'DeepSeek',
         defaultModel: 'deepseek-flash',
         models: [
           {

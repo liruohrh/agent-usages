@@ -272,7 +272,7 @@ pnpm link --global && agent-usages usage
   "updates": { "pricing": true, "rates": false },   // 默认值
   "pricing": {                    // 覆盖厂商的某些价格区间，其余仍用默认表
     "version": 1, "updatedAt": "2026-09-21",
-    "providers": [{ "id": "deepseek", "label": "DeepSeek 官方", "defaultModel": "deepseek-flash",
+    "providers": [{ "id": "deepseek", "label": "DeepSeek", "defaultModel": "deepseek-flash",
       "models": [{ "model": "deepseek-flash", "aliases": ["deepseek-flash"],
         "periods": [{ "id": "my-price", "label": "我的价", "from": "2026-09-10T12:00:00+08:00", "to": null,
                       "currency": "CNY",
