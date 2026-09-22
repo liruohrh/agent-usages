@@ -319,7 +319,7 @@ export const en: Messages = {
     codexNoData: (p: { source: string }) =>
       `no Codex rollouts under ${p.source}; point --home at the Codex home (default ~/.codex) or set CODEX_HOME`,
     sideQuestionsUncounted: (p: { count: string; agent: string }) =>
-      `${p.count} side interaction(s) cannot be counted (${p.agent}): /btw questions run in a throwaway session that never reaches a session log, so their tokens stay out of every report`,
+      `${p.count} side interaction(s) found (${p.agent}): /btw questions run in a throwaway session that never reaches a session log; only a total token count exists (no cache split), so they are reported but never priced`,
     codexSessionNoun: 'sessions',
     codexNotes: (): readonly string[] => [
       'Usage comes from Codex’s own rollouts: the token_count events in ~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl.',

@@ -45,15 +45,30 @@
 
 fork 因此既不会重复计费（只取增量），也不会被折叠成"1 个子代理"（不算 childIds），但它在报告里是可识别的独立会话。
 
-## 已知盲区：`/btw`
+## `/btw` 旁路提问：token 能数，但不能计价
 
-Codex 0.155.1 实测：`/btw <问题>` **不写 rollout**，那一轮的 token 磁盘上不存在。
+`/btw` 走 `thread/fork` 出的**临时线程**：不写 rollout，`state_5.sqlite.threads` 没有行，
+`thread_history_1.sqlite` 的 `thread_items`/`thread_turns` 也没有它 —— 逐库核对过。
 
-- 输入只在 `~/.codex/history.jsonl`（`session_id` / `ts` / `text`，**无用量字段**）；
-- 全天 rollout 目录里**没有**该 thread 的 `rollout-*.jsonl`（按 id 与正文 grep 都是 0 命中）；
-- 内部日志 `~/.codex/logs_2.sqlite` 只留下 `app_server.request{otel.name="thread/fork"} → session_loop{thread_id=…}: op: TurnInput` 这样的轨迹，**整表没有 token 数字**。
+**但它的 token 记在内部日志里**：`~/.codex/logs_2.sqlite` 的 `logs.feedback_log_body`
+每个 turn 一行
 
-机制上它是「fork 一个临时 thread 跑一轮」，与 Claude Code 的 `/btw` 属同一类盲区：本工具（以及任何基于 rollout 的统计）都无法计入。若你要精确统计，只能避免用 `/btw` 提问，或向 Codex 侧反馈让临时 thread 也落盘。
+```
+session_task.run:run_turn: post sampling token usage turn_id=01a0ca87-…   total_usage_tokens=48556 auto_compact_scope_tokens=48556 … model=deepseek-flash
+```
+
+按 `thread_id` 聚合即可拿到每次旁路提问的总量（实测：`01a0ca62` = 1 轮 35,538；
+`01a0ca87` = 2 轮 48,556 + 48,568）。
+
+局限有两条，所以本工具**只提示、不计价**：
+
+- **只有 `total_usage_tokens`**，没有 input / cache-read / cache-write / reasoning 拆分；
+  DeepSeek 的缓存命中价与未命中价差 50 倍，用总量硬算金额会错得离谱。
+- 同样的日志行对**有 rollout 的线程也存在**，所以只能用于"没有 rollout 的线程"，
+  否则与 rollout 增量双计。
+
+适配器目前的行为：从 `history.jsonl` 认出这类会话并给出提示
+（`检测到 N 处旁路交互…`）；把 token 合计接进报告是可做的下一步（需要读 SQLite）。
 
 ## 已知坑：`multi_agent_version` 记为 `v2` 时子 agent 收不到任务
 
