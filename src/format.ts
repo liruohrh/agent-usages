@@ -234,9 +234,10 @@ function ratioSuffix(part: number, whole: number): string {
  * billed as a whole, so `O` and `R` share it (`O + R = O/T`); and the aggregates
  * are sums of the figures beside them, never a second bill. `T` deliberately
  * carries no money of its own — the total at the end of the line is its money,
- * and printing both would say the same number twice. `I/W` appears only when a
- * provider actually wrote to the cache, since until then it is a column of
- * zeroes.
+ * and printing both would say the same number twice. `I/W` and `R` appear only
+ * when the provider actually reported them: for a node that never wrote to the
+ * cache, or never reported reasoning, the column would be a row of zeroes. When
+ * `R` is absent, `O` already equals `O/T`.
  */
 function metricsLine(tokens: TokenTotals, amounts: MoneyBreakdown, requests: number, symbol: string): string {
   const counts = tokenBreakdown(tokens);
@@ -245,7 +246,9 @@ function metricsLine(tokens: TokenTotals, amounts: MoneyBreakdown, requests: num
   items.push(`I/C ${compact(counts.inputHit)}${ratioSuffix(counts.inputHit, counts.inputTotal)} ${money(amounts.inputHit, symbol)}`);
   items.push(`I/T ${compact(counts.inputTotal)} ${money(amounts.inputTotal, symbol)}`);
   items.push(`O ${compact(counts.outputOnly)} ${money(amounts.outputOnly, symbol)}`);
-  items.push(`R ${compact(counts.reasoning)}${ratioSuffix(counts.reasoning, counts.outputTotal)} ${money(amounts.reasoning, symbol)}`);
+  if (counts.reasoning > 0) {
+    items.push(`R ${compact(counts.reasoning)}${ratioSuffix(counts.reasoning, counts.outputTotal)} ${money(amounts.reasoning, symbol)}`);
+  }
   items.push(`O/T ${compact(counts.outputTotal)} ${money(amounts.outputTotal, symbol)}`);
   items.push(`T ${compact(counts.total)}`);
   items.push(`Q ${count(requests)}`);

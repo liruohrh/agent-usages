@@ -319,7 +319,9 @@ describe('usage', () => {
     expect(stdout).toContain('I/M 1.00M');
     expect(stdout).toContain('I/C 1.00M / 50.0%');
     expect(stdout).toContain('I/T 2.00M');
-    expect(stdout).toContain('R 0 ');
+    // The fixture never reasons, so `R` is left out rather than printed as 0 —
+    // the same rule `I/W` follows.
+    expect(stdout).not.toContain(' · R ');
     expect(stdout).toContain('Q 1 · ¥5.02');
     expect(stdout.match(/ · Q /g)).toHaveLength(1);
   });
@@ -405,8 +407,10 @@ describe('text output alignment', () => {
     expect(metrics.length).toBeGreaterThan(0);
     for (const line of metrics) {
       const labels = line.trim().split(' · ').map((segment) => segment.split(' ')[0] ?? '');
-      expect(labels.slice(0, 8)).toEqual(['I/M', 'I/C', 'I/T', 'O', 'R', 'O/T', 'T', 'Q']);
-      expect(labels[8]?.startsWith('¥')).toBe(true);
+      // `I/W` and `R` are conditional, so the fixture (no cache writes, no
+      // reasoning) shows the seven always-on labels plus the money.
+      expect(labels.slice(0, 7)).toEqual(['I/M', 'I/C', 'I/T', 'O', 'O/T', 'T', 'Q']);
+      expect(labels[7]?.startsWith('¥')).toBe(true);
     }
   });
 });

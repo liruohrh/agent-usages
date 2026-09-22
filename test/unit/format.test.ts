@@ -193,6 +193,33 @@ describe('formatUsageReport', () => {
     expect(text).not.toContain('  First I ');
   });
 
+  it('hides R on a node whose provider never reported reasoning', () => {
+    // `I/W` and `R` are both "only when it happened": a zero column says
+    // nothing, and with R absent `O` already equals `O/T`.
+    const tokens = { ...emptyBuckets(), input: 10, output: 40 };
+    const text = render(
+      report({
+        requests: 1,
+        tokens,
+        cost: cost('1.0000'),
+        projects: [
+          projectRow({
+            id: 'demo',
+            requests: 1,
+            tokens,
+            cost: cost('1.0000'),
+            own: totals(tokens, 1, '1.0000'),
+            spawned: totals(emptyBuckets(), 0, '0.0000', 0),
+            total: totals(tokens, 1, '1.0000'),
+            sessionReports: [sessionRow({ id: 's1', title: 'No reasoning', requests: 1, tokens, cost: cost('1.0000') })],
+          }),
+        ],
+      }),
+    );
+    expect(text).not.toContain(' · R ');
+    expect(text).toContain('· O 40 ¤0.00 · O/T 40 ¤0.00 ·');
+  });
+
   it('walks 总 → 项目 → 会话 as indented lines', () => {
     const text = render(
       report({
