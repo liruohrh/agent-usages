@@ -110,6 +110,28 @@ describe('reading a Claude Code home', () => {
     expect(parent?.childIds).toEqual([AGENT]);
   });
 
+  it('drops the history a fork copied from its source', async () => {
+    // `claude --fork-session` copies the source's entries — same `message.id`,
+    // no back-pointer — so the inherited calls are recognised by their ids.
+    const project = join(home, 'projects', '-tmp-demo');
+    const forkId = 'ffffffff-0000-4000-8000-00000000000f';
+    const fork = [
+      JSON.stringify({ type: 'user', uuid: 'u2', sessionId: forkId, timestamp: '2026-09-23T00:10:00.000Z', cwd: '/tmp/demo' }),
+      assistant('f1', '2026-09-23T00:10:01.000Z', 'deepseek-flash', 1_000, 100, 'msg-a1'),
+      assistant('f2', '2026-09-23T00:10:02.000Z', 'deepseek-flash', 3_000, 70, 'msg-new'),
+    ].join('\n');
+    await writeFile(join(project, `${forkId}.jsonl`), `${fork}\n`);
+
+    const data = await claudeAgent.load({ home });
+    const forked = data.sessions.find((session) => session.id === forkId);
+    const source = data.sessions.find((session) => session.id === SESSION);
+    // Only the call the fork made itself is billed here.
+    expect(forked?.records.map((record) => record.id)).toEqual([`${forkId}:msg-new`]);
+    expect(forked?.parentId).toBe(SESSION);
+    expect(forked?.isSubagent).toBe(false);
+    expect(source?.childIds).toEqual([AGENT]);
+  });
+
   it('groups sessions under the project their cwd names', async () => {
     const data = await claudeAgent.load({ home });
     expect(data.agent).toBe('claude');

@@ -46,7 +46,7 @@ export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-flash
 
 ## fork / rewind（已实测）
 
-- **`--fork-session` 原样复制源会话的条目**：源 17 个 `uuid` → fork 22 个，**交集 17（100%）**，且**没有任何 back-pointer**（无 `forkedFrom`/`parentSession`，行内 `sessionId` 全是新的），fork 也不复制 `subagents/`，但它的 `cost-state` 仍带着源会话的子 agent 桶。**因此按文件求和会把历史算 N 遍**——工具目前无法自动识别这种复制（没有可用的来源字段），用 `--fork-session` 时请只统计其中一个会话，或等我们加上"跨文件 uuid 重叠"启发式。
+- **`--fork-session` 原样复制源会话的条目**：源 17 个 `uuid` → fork 22 个，**交集 17（100%）**，且**没有任何 back-pointer**（无 `forkedFrom`/`parentSession`，行内 `sessionId` 全是新的），fork 也不复制 `subagents/`，但它的 `cost-state` 仍带着源会话的子 agent 桶。**因此按文件求和会把历史算 N 遍**。工具按"一次 API 调用一个 `message.id`"识别这种复制：同一项目里，某个 id 已被更早的文件计过费，就说明当前文件那一条是复制来的历史，不计费；该会话仍照常列出（自己的标题、路径、新产生的请求），并作为**来源会话的延续**（`parentId` 指向它、不算子代理、不进源的 `childIds`）。源文件已删除时该 id 无人认领，记录保留。
 - **`--resume-session-at <uuid>`** 是就地分支：不新建文件，向同一文件**追加**。
 - **`/rewind`（非交互入口是隐藏 flag `--rewind-files`）不改写 JSONL**：只追加（实测 26 → 28 行），被回滚轮次的 token 仍留在文件里——所以统计到的是"实际花过的钱"。
 - 本机另有一处事实：`cost-state` 即 `/cost` 的数据源，两者数字一致。

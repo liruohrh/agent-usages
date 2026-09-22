@@ -95,6 +95,8 @@ interface ScannedSession {
   title: string | null;
   /** One record per billed assistant entry, in file order. */
   records: UsageRecord[];
+  /** `message.id` behind each record, in the same order. */
+  messageIds: string[];
 }
 
 /**
@@ -116,6 +118,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   let createdAt: number | null = null;
   let title: string | null = null;
   const records: UsageRecord[] = [];
+  const messageIds: string[] = [];
   // One API response is written as one entry per content block, and every one of
   // them repeats the same `usage` — counting entries would bill each request two
   // or three times. `message.id` identifies the call, so it is the key.
@@ -151,6 +154,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     const messageId = asString(message['id']) ?? asString(entry['uuid']) ?? `line${line}`;
     if (billed.has(messageId)) continue;
     billed.add(messageId);
+    messageIds.push(messageId);
     createdAt ??= time;
     records.push({
       id: `${id ?? fallbackId}:${messageId}`,
@@ -161,7 +165,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     });
   }
   if (id === undefined && cwd === null && records.length === 0) return undefined;
-  return { id: id ?? fallbackId, cwd, createdAt, title, records };
+  return { id: id ?? fallbackId, cwd, createdAt, title, records, messageIds };
 }
 
 /** Directory entries, or an empty list when the directory cannot be read. */
@@ -280,10 +284,39 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
 
   const sessions: SessionRecord[] = [];
   const projectOfSession = new Map<string, string>();
+  // `--fork-session` copies the source's entries verbatim — same `message.id`,
+  // no back-pointer — so the copy is recognised by the calls it repeats. One
+  // message id is one API call, so an id billed by an earlier file is inherited
+  // history, not a new request. The fork keeps its own title, cwd and records,
+  // and is reported as a continuation of the session it came from.
+  const billedBy = new Map<string, string>();
   for (const [projectKey, found] of walked) {
-    for (const entry of found) {
+    const ordered = [...found].sort(
+      (left, right) =>
+        (left.session.records[0]?.time ?? left.session.createdAt ?? 0) -
+        (right.session.records[0]?.time ?? right.session.createdAt ?? 0),
+    );
+    for (const entry of ordered) {
       if (sessions.some((session) => session.id === entry.session.id)) continue;
-      const session = buildSession(entry);
+      const records: UsageRecord[] = [];
+      const messageIds: string[] = [];
+      let inheritedFrom: string | null = null;
+      entry.session.records.forEach((record, index) => {
+        const messageId = entry.session.messageIds[index] as string;
+        const previous = billedBy.get(messageId);
+        if (previous !== undefined && previous !== entry.session.id) {
+          inheritedFrom ??= previous;
+          return;
+        }
+        if (previous === undefined) billedBy.set(messageId, entry.session.id);
+        records.push(record);
+        messageIds.push(messageId);
+      });
+      const session = buildSession({
+        ...entry,
+        session: { ...entry.session, records, messageIds },
+        parentId: inheritedFrom ?? entry.parentId,
+      });
       sessions.push(session);
       projectOfSession.set(session.id, projectKey);
     }
@@ -294,7 +327,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     if (session.parentId === null) continue;
     const parent = byId.get(session.parentId);
     if (parent === undefined) continue;
-    parent.childIds.push(session.id);
+    if (session.isSubagent) parent.childIds.push(session.id);
     session.parentKnown = true;
   }
   for (const session of sessions) session.childIds.sort();
