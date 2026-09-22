@@ -9,3 +9,4 @@
 | [DeepSeek 价格表](pricing/deepseek.md) | 生效区间、峰谷时段、选取规则、计费口径与来源链接 |
 | [输出与格式](output.md) | 各表的列、token 统计口径、对齐规则、合计行 |
 | [配置与更新](config.md) | config/ 两份文件、用户覆盖、每日懒更新与 update/check-config 的实现 |
+| [国际化](i18n.md) | 语言如何选择、文案目录、诊断码与警告结构、哪些不翻译 |

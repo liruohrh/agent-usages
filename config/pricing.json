@@ -347,28 +347,28 @@
             },
             {
               "id": "2026-01-01",
-              "label": "V3.2（deepseek-chat / deepseek-reasoner）统一价",
+              "label": "V3.2 (deepseek-chat / deepseek-reasoner), one price",
               "from": "2026-01-01T00:00:00+08:00",
               "to": "2026-04-24T00:00:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.028",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.28",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "0.42",
                   "per": 1000000
@@ -377,32 +377,32 @@
               "peak": null,
               "peakWindows": [],
               "source": "https://web.archive.org/web/20260323134549/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "V3.2 统一价（美元表）。"
+              "note": "V3.2's single price, as published in dollars."
             },
             {
               "id": "2026-04-24",
-              "label": "V4-Flash 预览版上线价",
+              "label": "V4-Flash preview launch price",
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.028",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.14",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "0.28",
                   "per": 1000000
@@ -411,32 +411,32 @@
               "peak": null,
               "peakWindows": [],
               "source": "https://web.archive.org/web/20260424030643/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "预览版上线价（美元表）。"
+              "note": "Preview launch price, as published in dollars."
             },
             {
               "id": "2026-04-26",
-              "label": "V4-Flash 缓存命中降价",
+              "label": "V4-Flash cache-hit price cut",
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.0028",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.14",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "0.28",
                   "per": 1000000
@@ -445,32 +445,32 @@
               "peak": null,
               "peakWindows": [],
               "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "缓存命中价降至 1/10（美元表）。"
+              "note": "Cache-hit price cut to a tenth, as published in dollars."
             },
             {
               "id": "2026-08-17",
-              "label": "V4-Flash（正式版）峰谷定价",
+              "label": "V4-Flash (GA), peak/off-peak pricing",
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.007",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.22",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "0.66",
                   "per": 1000000
@@ -479,21 +479,21 @@
               "peak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.014",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.44",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "1.32",
                   "per": 1000000
@@ -512,32 +512,32 @@
                 }
               ],
               "source": "https://web.archive.org/web/20260816161307/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "首次启用峰谷定价（美元表）；此阶段高峰时段未限定工作日。"
+              "note": "Peak/off-peak pricing began here (dollar list); at this stage the peak hours were not limited to weekdays."
             },
             {
               "id": "2026-08-23",
-              "label": "V4-Flash（正式版）峰谷定价（周末全天低谷）",
+              "label": "V4-Flash (GA), peak/off-peak pricing (weekends off-peak all day)",
               "from": "2026-08-23T00:00:00+08:00",
               "to": "2026-09-10T12:00:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.007",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.22",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "0.66",
                   "per": 1000000
@@ -546,21 +546,21 @@
               "peak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.014",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.44",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "1.32",
                   "per": 1000000
@@ -591,32 +591,32 @@
                 }
               ],
               "source": "https://web.archive.org/web/20260822130627/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "周末全天低谷（美元表）；单价不变。"
+              "note": "Weekends off-peak all day (dollar list); the rates themselves did not change."
             },
             {
               "id": "2026-09-10",
-              "label": "V4.1-Flash（deepseek-flash）峰谷定价",
+              "label": "V4.1-Flash (deepseek-flash), peak/off-peak pricing",
               "from": "2026-09-10T12:00:00+08:00",
               "to": null,
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.003",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.15",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "0.6",
                   "per": 1000000
@@ -625,21 +625,21 @@
               "peak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.006",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.3",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "1.2",
                   "per": 1000000
@@ -670,7 +670,7 @@
                 }
               ],
               "source": "https://api-docs.deepseek.com/quick_start/pricing",
-              "note": "V4.1-Flash 上线并同步降价（美元表）。"
+              "note": "V4.1-Flash launched with a matching price cut, in dollars."
             }
           ]
         },
@@ -930,28 +930,28 @@
             },
             {
               "id": "2026-04-24",
-              "label": "V4-Pro 预览版上线价",
+              "label": "V4-Pro preview launch price",
               "from": "2026-04-24T00:00:00+08:00",
               "to": "2026-04-26T20:15:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.145",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "1.74",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "3.48",
                   "per": 1000000
@@ -960,32 +960,32 @@
               "peak": null,
               "peakWindows": [],
               "source": "https://web.archive.org/web/20260424030643/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "V4-Pro 预览版上线价（美元表，list price）。"
+              "note": "V4-Pro preview launch price, list price in dollars."
             },
             {
               "id": "2026-04-26",
-              "label": "V4-Pro 限时 2.5 折",
+              "label": "V4-Pro limited-time 25% of list",
               "from": "2026-04-26T20:15:00+08:00",
               "to": "2026-06-01T00:00:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.003625",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.435",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "0.87",
                   "per": 1000000
@@ -994,32 +994,32 @@
               "peak": null,
               "peakWindows": [],
               "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "活动价（美元表）。"
+              "note": "Promotional price, as published in dollars."
             },
             {
               "id": "2026-06-01",
-              "label": "V4-Pro 永久降价（list 价的 1/4）",
+              "label": "V4-Pro permanent cut (1/4 of list)",
               "from": "2026-06-01T00:00:00+08:00",
               "to": "2026-08-17T00:00:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.003625",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.435",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "0.87",
                   "per": 1000000
@@ -1028,32 +1028,32 @@
               "peak": null,
               "peakWindows": [],
               "source": "https://web.archive.org/web/20260607093431/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "活动价转为常态价（美元表）。"
+              "note": "The promotional price became the standard one, in dollars."
             },
             {
               "id": "2026-08-17",
-              "label": "V4-Pro（正式版）峰谷定价",
+              "label": "V4-Pro (GA), peak/off-peak pricing",
               "from": "2026-08-17T00:00:00+08:00",
               "to": "2026-08-23T00:00:00+08:00",
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.022",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.66",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "1.98",
                   "per": 1000000
@@ -1062,21 +1062,21 @@
               "peak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.044",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "1.32",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "3.96",
                   "per": 1000000
@@ -1095,32 +1095,32 @@
                 }
               ],
               "source": "https://web.archive.org/web/20260816161307/https://api-docs.deepseek.com/quick_start/pricing/",
-              "note": "峰谷定价（美元表）；此阶段高峰时段未限定工作日。"
+              "note": "Peak/off-peak pricing in dollars; at this stage the peak hours were not limited to weekdays."
             },
             {
               "id": "2026-08-23",
-              "label": "V4-Pro（正式版）峰谷定价（周末全天低谷）",
+              "label": "V4-Pro (GA), peak/off-peak pricing (weekends off-peak all day)",
               "from": "2026-08-23T00:00:00+08:00",
               "to": null,
               "currency": "USD",
               "offPeak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.022",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "0.66",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "1.98",
                   "per": 1000000
@@ -1129,21 +1129,21 @@
               "peak": [
                 {
                   "id": "input-hit",
-                  "label": "缓存命中输入",
+                  "label": "cache-hit input",
                   "basis": "cacheRead",
                   "rate": "0.044",
                   "per": 1000000
                 },
                 {
                   "id": "input-miss",
-                  "label": "缓存未命中输入",
+                  "label": "cache-miss input",
                   "basis": "inputAndCacheWrite",
                   "rate": "1.32",
                   "per": 1000000
                 },
                 {
                   "id": "output",
-                  "label": "输出",
+                  "label": "output",
                   "basis": "output",
                   "rate": "3.96",
                   "per": 1000000
@@ -1174,7 +1174,7 @@
                 }
               ],
               "source": "https://api-docs.deepseek.com/quick_start/pricing",
-              "note": "沿用周末全天低谷规则（美元表）。"
+              "note": "Keeps the weekend off-peak rule, as published in dollars."
             }
           ]
         }
