@@ -690,3 +690,66 @@ describe('historical rate mode', () => {
     expect(Number(parsed.totals.cost['total'])).toBeGreaterThan(0);
   });
 });
+
+describe('language', () => {
+  /** A config directory that pins the output language. */
+  function homeWith(language: string): Record<string, string> {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-usages-lang-'));
+    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    writeFileSync(
+      join(dir, 'agent-usages', 'config.json'),
+      JSON.stringify({ version: 1, language, updates: { pricing: false, rates: false } }),
+      'utf8',
+    );
+    return { XDG_CONFIG_HOME: dir };
+  }
+
+  it('speaks the configured language, whatever the machine locale is', async () => {
+    const { stdout } = await cli(['usage'], homeWith('en'));
+    const lines = stdout.split('\n');
+    expect(lines[0]).toBe('Agent usage');
+    expect(lines[1]).toBe('Agent     dsh (DeepSeek Harness (DSH))');
+    // The header and the tree's own labels are English; a session title from the
+    // fixture is data and is echoed as written.
+    expect(lines.slice(0, 5).join('\n')).not.toMatch(/[一-龥]/);
+    expect(stdout).toContain('total ·');
+    expect(stdout).toContain('I/M 1.00M');
+  });
+
+  it('localises the other commands and their help', async () => {
+    const env = homeWith('en');
+    expect((await cli(['usage', '--help'], env)).stdout).toContain('token usage and cost');
+    expect((await cli(['price', '--currency', 'USD', '--current'], env)).stdout).toContain('Default model');
+    expect((await cli(['agents'], env)).stdout).toContain('Agents (--agent):');
+    expect((await cli(['check-config'], env)).stdout).toContain('ok');
+    expect((await cli(['update', 'nope'], env)).stderr).toMatch(/unknown update target/);
+  });
+
+  it('keeps the numbers and identifiers identical across languages', async () => {
+    // The point of the separation: only prose changes. Labels inside JSON that
+    // are still prose (the range label, warnings) are excluded on purpose.
+    const pick = (body: string): Record<string, unknown> => {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      return {
+        totals: parsed['totals'],
+        currency: parsed['currency'],
+        rateInfo: parsed['rateInfo'],
+        models: parsed['models'],
+        subagents: parsed['subagents'],
+      };
+    };
+    const zh = pick((await cli(['usage', '--json'], homeWith('zh'))).stdout);
+    const en = pick((await cli(['usage', '--json'], homeWith('en'))).stdout);
+    expect(en).toEqual(zh);
+  });
+
+  it('falls back to Chinese when the locale has no opinion', async () => {
+    const { stdout } = await cli(['usage'], { LANG: 'C' });
+    expect(stdout).toContain('Agent 用量统计');
+  });
+
+  it('serves other languages with English', async () => {
+    const { stdout } = await cli(['usage'], { LANG: 'ja_JP.UTF-8' });
+    expect(stdout).toContain('Agent usage');
+  });
+});

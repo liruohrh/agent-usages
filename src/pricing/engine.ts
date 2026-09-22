@@ -19,6 +19,7 @@
  */
 
 import { MONEY_SCALE, parseDecimal } from '../core/money.ts';
+import { t } from '../i18n/index.ts';
 import type { TokenBuckets, UsageRecord } from '../core/types.ts';
 import {
   type BillingBasis,
@@ -368,15 +369,16 @@ class Engine implements PricingEngine {
 
   describeWindow(period: PricePeriod): string {
     const from = formatInstant(period.from, period.utcOffset);
-    const to = period.to === null ? '至今' : formatInstant(period.to, period.utcOffset);
-    return `${from} → ${to} (${offsetLabel(period.utcOffset)})`;
+    const to = period.to === null ? t().period.toNow : formatInstant(period.to, period.utcOffset);
+    return t().period.window(from, to, offsetLabel(period.utcOffset));
   }
 
   describeTiers(period: PricePeriod): string {
-    if (period.peak === null || period.peakWindows.length === 0) return '不分峰谷（统一价格）';
+    const labels = t().period;
+    if (period.peak === null || period.peakWindows.length === 0) return labels.flat;
     const windows = period.peakWindows
       .map((window) => `${clockLabel(window.fromHour * 3600)}-${clockLabel(window.toHour * 3600)}`)
-      .join('、');
+      .join(labels.listJoin);
     const everyDay = period.peakWindows.every((window) => window.weekdays === null);
     const weekdaysOnly = period.peakWindows.every(
       (window) =>
@@ -385,8 +387,8 @@ class Engine implements PricingEngine {
         !window.weekdays.includes(0) &&
         !window.weekdays.includes(6),
     );
-    const days = everyDay ? '每天' : weekdaysOnly ? '周一至周五' : '指定星期';
-    return `${days} ${windows}（${offsetLabel(period.utcOffset)}）`;
+    const days = everyDay ? labels.everyDay : weekdaysOnly ? labels.weekdays : labels.someDays;
+    return labels.tiers(days, windows, offsetLabel(period.utcOffset));
   }
 
   describeBasis(basis: BillingBasis): string {

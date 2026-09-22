@@ -11,6 +11,8 @@
  * an explicit offset is honoured exactly as written.
  */
 
+import { t } from './i18n/index.ts';
+
 /** Resolved half-open instant range. */
 export interface TimeRange {
   /** Inclusive lower bound, or `null` for unbounded. */
@@ -176,10 +178,9 @@ function shiftAnchor(anchor: Date, preset: RangePreset, amount: number): Date {
  * @returns the range covering the whole current period.
  */
 export function presetRange(preset: RangePreset, now: Date = new Date()): TimeRange {
-  const labels: Record<RangePreset, string> = { today: '今日', week: '本周', month: '本月', year: '今年' };
   const start = shiftAnchor(now, preset, 0);
   const end = shiftAnchor(now, preset, 1);
-  return { from: start.getTime(), to: end.getTime(), label: labels[preset] };
+  return { from: start.getTime(), to: end.getTime(), label: t().range.presets[preset] };
 }
 
 /**
@@ -200,11 +201,10 @@ export function presetFromToken(token: string, now: Date = new Date()): TimeRang
   const start = shiftAnchor(now, preset, offset);
   const end = shiftAnchor(start, preset, 1);
   const base = presetRange(preset, now).label;
-  const direction = offset > 0 ? '后' : '前';
   return {
     from: start.getTime(),
     to: end.getTime(),
-    label: `${base}${direction}${Math.abs(offset)}${preset === 'today' ? '天' : preset === 'week' ? '周' : preset === 'month' ? '个月' : '年'}`,
+    label: t().range.offset(base, offset > 0 ? 'forward' : 'back', Math.abs(offset), t().range.unit[preset]),
   };
 }
 
@@ -225,7 +225,7 @@ export interface RangeInput {
 export function resolveRange(input: RangeInput = {}): TimeRange {
   const now = input.now ?? new Date();
   const spec = input.spec?.trim() ?? '';
-  if (spec.length === 0) return { from: null, to: null, label: '全部时间' };
+  if (spec.length === 0) return { from: null, to: null, label: t().range.all };
 
   const preset = presetFromToken(spec, now);
   if (preset !== undefined) return preset;
@@ -237,7 +237,7 @@ export function resolveRange(input: RangeInput = {}): TimeRange {
   if (parts.length === 1) {
     // A single instant is a lower bound: "from here on".
     const text = spec;
-    return { from: parseInstant(text).instant, to: null, label: `${text} 起` };
+    return { from: parseInstant(text).instant, to: null, label: t().range.from(text) };
   }
   const lower = parts[0]?.trim() ?? '';
   const upper = parts[1]?.trim() ?? '';
@@ -247,7 +247,11 @@ export function resolveRange(input: RangeInput = {}): TimeRange {
     throw new Error('时间范围的起始时间不能晚于结束时间');
   }
   // Equal bounds are a legal, empty range: the same instant twice excludes it.
-  return { from, to, label: `${lower.length > 0 ? lower : '起始'} → ${upper.length > 0 ? upper : '现在'}` };
+  return {
+    from,
+    to,
+    label: t().range.between(lower.length > 0 ? lower : t().range.openStart, upper.length > 0 ? upper : t().range.openEnd),
+  };
 }
 
 /**

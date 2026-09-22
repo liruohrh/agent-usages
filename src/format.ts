@@ -540,7 +540,10 @@ export function formatUsageReport(
       : labels.rate.equation(rate.base, displayRate(rate.rate), rate.display, rate.source, rate.date);
   const header = [
     labels.app.usage,
-    headerLine(labels.header.title, options.agentLabel === undefined ? first.result.agent : `${first.result.agent}（${options.agentLabel}）`),
+    headerLine(
+      labels.header.title,
+      options.agentLabel === undefined ? first.result.agent : labels.header.agentName(first.result.agent, options.agentLabel),
+    ),
     headerLine(labels.header.dataDir, first.result.source),
     sections.length === 1
       ? headerLine(labels.header.range, first.range.label)
@@ -559,21 +562,26 @@ export function formatUsageReport(
  * @returns the text to print.
  */
 export function formatSessionList(result: SessionListResult, agentLabel?: string): string {
+  const labels = t();
   const sections: string[] = [];
   sections.push(
     [
-      'Agent 会话列表',
-      labeled('Agent', agentLabel === undefined ? result.agent : `${result.agent}（${agentLabel}）`),
-      labeled('数据目录', result.source),
-      labeled('项目数', count(result.projects.length)),
-      labeled('会话数', count(result.totalSessions)),
+      labels.app.sessions,
+      labeled(labels.header.title, agentLabel === undefined ? result.agent : labels.header.agentName(result.agent, agentLabel)),
+      labeled(labels.header.dataDir, result.source),
+      labeled(labels.list.projects, count(result.projects.length)),
+      labeled(labels.list.sessions, count(result.totalSessions)),
     ].join('\n'),
   );
   for (const project of result.projects) {
     sections.push(
       [
         `▸ ${project.name}  ${project.path}`,
-        `  ${project.sessionCount === project.sessions.length ? `会话 ${count(project.sessions.length)}` : `会话 ${count(project.sessionCount)}（显示 ${count(project.sessions.length)} 行，子代理已并入父会话）`}　最近 ${dayLabel(project.lastUsage)}　最早 ${dayLabel(project.firstUsage)}`,
+        `  ${labels.list.sessionCount(
+          count(project.sessions.length),
+          count(project.sessionCount),
+          project.sessionCount !== project.sessions.length,
+        )}  ${labels.list.span(dayLabel(project.lastUsage), dayLabel(project.firstUsage))}`,
       ].join('\n'),
     );
     // A directory listing, not a cost report: token figures live in `usage`,
@@ -581,7 +589,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
     // made this table too wide to read.
     sections.push(
       table(
-        ['会话 ID', '标题', '首次', '最近', '子代理', '请求'],
+        [labels.list.sessionId, labels.list.title, labels.list.firstUsage, labels.list.lastUsage, labels.list.subagents, labels.list.requests],
         project.sessions.map((session) => [
           `${session.nested ? '  ↳ ' : ''}${session.id}`,
           `${session.nested ? '  ' : ''}${session.title ?? '(无标题)'}`,
@@ -594,7 +602,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
         // A folded row already contains its subagents, so summing the rows would
         // count them twice; the total therefore comes from the sessions in scope.
         [
-          '合计',
+          labels.list.total,
           '',
           dayLabel(project.firstUsage),
           dayLabel(project.lastUsage),
@@ -605,7 +613,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
     );
   }
   if (result.warnings.length > 0) {
-    sections.push(['提示:', ...result.warnings.map((warning) => `  - ${warning}`)].join('\n'));
+    sections.push([labels.section.tips, ...result.warnings.map((warning) => `  - ${warning}`)].join('\n'));
   }
   return `${sections.join('\n\n')}\n`;
 }

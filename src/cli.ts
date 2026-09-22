@@ -25,7 +25,7 @@ import {
 } from './pricing/index.ts';
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
-import { resolveLanguage, setLanguage } from './i18n/index.ts';
+import { resolveLanguage, setLanguage, t } from './i18n/index.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -233,7 +233,7 @@ async function runUsage(options: UsageOptions): Promise<void> {
     process.exitCode = EXIT_ERROR;
     return;
   }
-  const ranges = [{ label: range.from === null && range.to === null ? '总' : range.label, range }];
+  const ranges = [{ label: range.from === null && range.to === null ? t().scope.total : range.label, range }];
 
   const rate: UsageQuery['rate'] = {
     base: display.base,
@@ -330,12 +330,12 @@ function runPrice(options: PriceOptions, config: ResolvedConfig): void {
     const currencies = providerCurrencies(provider);
     const listed = currencies.filter((code) => wanted === undefined || code === wanted);
     if (listed.length === 0) {
-      lines.push(`▸ ${provider.label}（${provider.id}）没有 ${wanted} 的价格`);
+      lines.push(t().price.missing(provider.label, provider.id, wanted ?? ''));
       lines.push('');
       continue;
     }
-    lines.push(`▸ ${provider.label}（${provider.id}，${listed.join(' / ')} / 百万 tokens）`);
-    lines.push(`  默认价格模型: ${provider.defaultModel ?? '（无，未知模型不计价）'}`);
+    lines.push(t().price.provider(provider.label, provider.id, listed.join(' / ')));
+    lines.push(`  ${t().price.defaultModel}: ${provider.defaultModel ?? t().price.noDefaultModel}`);
     for (const price of provider.models()) {
       // A currency filter narrows the list; `--current` narrows it to the period
       // in effect now, which is what a price question is usually about.
@@ -347,23 +347,23 @@ function runPrice(options: PriceOptions, config: ResolvedConfig): void {
       if (shown.length === 0) continue;
       lines.push(`\n  ${price.model}`);
       if (price.aliases.length > 1) {
-        lines.push(`    别名: ${price.aliases.filter((alias) => alias !== price.model).join('、')}`);
+        lines.push(`    ${t().price.aliases}: ${price.aliases.filter((alias) => alias !== price.model).join(t().period.listJoin)}`);
       }
       for (const period of shown) {
         lines.push(`    [${period.id}] ${period.label}（${period.currency}）`);
-        lines.push(`      生效: ${engine.describeWindow(period)}`);
-        lines.push(`      峰谷: ${engine.describeTiers(period)}`);
+        lines.push(`      ${t().price.window}: ${engine.describeWindow(period)}`);
+        lines.push(`      ${t().price.tiers}: ${engine.describeTiers(period)}`);
         const render = (components: readonly { label: string; rate: string; per: number }[]): string =>
           components.map((component) => `${component.label} ${component.rate}`).join(' / ') + ` ${currencyOf(period.currency).symbol}`;
-        lines.push(`      空闲: ${render(period.offPeak)}`);
-        if (period.peak !== null) lines.push(`      高峰: ${render(period.peak)}`);
-        lines.push(`      来源: ${period.source}`);
-        lines.push(`      说明: ${period.note}`);
+        lines.push(`      ${t().price.offPeak}: ${render(period.offPeak)}`);
+        if (period.peak !== null) lines.push(`      ${t().price.peak}: ${render(period.peak)}`);
+        lines.push(`      ${t().price.source}: ${period.source}`);
+        lines.push(`      ${t().price.note}: ${period.note}`);
       }
     }
     lines.push('');
   }
-  lines.push('说明: 价格单位为「单价 / 百万 tokens」，币种见每个区间的括号；推理 token 已计入输出，不另行计费。');
+  lines.push(t().price.footnote);
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
@@ -373,7 +373,7 @@ function updateKinds(target: string): UpdateKind[] {
   if (wanted === 'all' || wanted === '') return ['pricing', 'rates'];
   if (wanted === 'prices' || wanted === 'pricing' || wanted === '价格' || wanted === '价格表') return ['pricing'];
   if (wanted === 'rates' || wanted === 'rate' || wanted === '汇率') return ['rates'];
-  throw new Error(`未知的更新目标 "${target}"；可用：all、prices、rates`);
+  throw new Error(t().update.unknownTarget(target));
 }
 
 /**
@@ -396,7 +396,8 @@ async function runUpdate(target: string, options: { force?: boolean; writeConfig
     ...(options.force === true ? { force: true } : {}),
   });
   for (const outcome of outcomes) {
-    process.stdout.write(`${outcome.kind === 'pricing' ? '价格表' : '汇率  '}  ${outcome.detail}\n`);
+    const label = outcome.kind === 'pricing' ? t().update.pricing : t().update.rates;
+    process.stdout.write(`${label}  ${outcome.detail}\n`);
   }
   if (options.writeConfig === true && kinds.includes('rates')) {
     process.stdout.write(`${writeRatesToRepo()}\n`);
@@ -414,7 +415,7 @@ async function runUpdate(target: string, options: { force?: boolean; writeConfig
  */
 function writeRatesToRepo(): string {
   const cached = cachedConfigText('rates');
-  if (cached === undefined) return '没有可写回的汇率（先运行一次 update rates）';
+  if (cached === undefined) return t().update.noRatesToWrite;
   const current = JSON.parse(readFileSync(new URL('../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
   const fetched = JSON.parse(cached) as Record<string, unknown>;
   const before = (current['table'] ?? {}) as Record<string, string>;
@@ -433,8 +434,8 @@ function writeRatesToRepo(): string {
   };
   const path = fileURLToPath(new URL('../config/rates.json', import.meta.url));
   writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
-  const held = kept === 0 ? '' : `，另有 ${kept} 个源未报价的币种沿用原值`;
-  return `已写回 ${path}（${Object.keys(after).length} 个币种，汇率日期 ${String(fetched['updatedAt'])}${held}）；check-config 通过后提交即可`;
+  const held = kept === 0 ? '' : t().update.heldCurrencies(kept);
+  return t().update.wroteBack(path, String(Object.keys(after).length), String(fetched['updatedAt']), held);
 }
 
 /** The `check-config` command implementation. */
@@ -446,7 +447,7 @@ function runCheckConfig(json: boolean): void {
   ] as const) {
     try {
       parse();
-      results.push({ file, ok: true, detail: '通过' });
+      results.push({ file, ok: true, detail: t().check.passed });
     } catch (error) {
       results.push({ file, ok: false, detail: (error as Error).message });
     }
@@ -463,19 +464,19 @@ function runCheckConfig(json: boolean): void {
 
 /** The `agents` command implementation. */
 function runAgents(options: GlobalOptions): void {
-  const lines = ['支持的 agent（--agent）:'];
+  const lines = [t().agents.header];
   for (const adapter of AGENT_ADAPTERS) {
-    const source = adapter.defaultSource(process.env) ?? '（无法自动确定）';
+    const source = adapter.defaultSource(process.env) ?? t().agents.unknownSource;
     lines.push(`  ▸ ${adapter.id}  ${adapter.label}`);
-    lines.push(`      默认数据目录: ${source}`);
-    if (adapter.envVars.length > 0) lines.push(`      环境变量: ${adapter.envVars.join('、')}`);
+    lines.push(`      ${t().agents.defaultSource}: ${source}`);
+    if (adapter.envVars.length > 0) lines.push(`      ${t().agents.envVars}: ${adapter.envVars.join(t().period.listJoin)}`);
     for (const note of adapter.notes()) lines.push(`      · ${note}`);
   }
   lines.push('');
-  lines.push('支持的计价来源（--provider）:');
+  lines.push(t().agents.providers);
   for (const provider of PRICING_PROVIDERS) {
     lines.push(`  ▸ ${provider.id}  ${provider.label}（${providerCurrencies(provider).join(' / ')}）`);
-    lines.push(`      模型: ${provider.models().map((price) => price.model).join('、')}`);
+    lines.push(`      ${t().agents.models}: ${provider.models().map((price) => price.model).join(t().period.listJoin)}`);
   }
   if (options.json === true) {
     process.stdout.write(
@@ -513,11 +514,11 @@ function runAgents(options: GlobalOptions): void {
 /** Register the options every command shares. */
 function commonOptions(command: Command): Command {
   return command
-    .option('--agent <id>', 'agent 类型（默认自动探测；见 `agents`）')
-    .option('--home <dir>', 'agent 的数据目录（默认用该 agent 的环境变量或标准位置）')
-    .option('--provider <id>', '计价来源（默认按 agent 选择；见 `agents`）')
-    .option('--json', '以 JSON 输出')
-    .option('--no-update', '本次不检查价格表/汇率更新，直接用本地缓存');
+    .option('--agent <id>', t().help.agent)
+    .option('--home <dir>', t().help.home)
+    .option('--provider <id>', t().help.provider)
+    .option('--json', t().help.json)
+    .option('--no-update', t().help.noUpdate);
 }
 
 /** Build the commander program. */
@@ -527,24 +528,24 @@ export function buildProgram(): Command {
   const program = new Command();
   program
     .name('agent-usages')
-    .description('统计 coding agent 的 token 消耗与费用')
+    .description(t().help.program)
     .version('0.2.0');
   commonOptions(program);
 
   commonOptions(
     program
       .command('usage', { isDefault: true })
-      .description('计算 token 消耗与费用')
-      .option('--range <spec>', '时间范围：today/week/month/year（可加偏移，如 month-1）或 "起始..结束"（左闭右开）')
-      .option('--subagent', '每个项目与会话额外拆成 总 / 自身 / 子代理')
-      .option('--subagents', '在 --subagent 之外，把每个子代理也单独列出')
-      .option('--cost', '附上计价区间：每段自己的指标行与单价（按计费项）')
-      .option('--models', '把用了多个模型的节点逐个模型展开')
-      .option('-p, --project-filter <selector>', '只统计指定项目：id、名称或路径（支持 * 通配；可重复）', collect)
-      .option('-s, --session-filter <selector>', '只统计指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；支持 * 通配；可重复）', collect)
-      .option('--currency <code>', '显示货币（默认按系统语言选，中文人民币、英文美元）')
-      .option('--currency-rate <rate>', '1 单位计价货币折算为目标货币的汇率（可单独使用，此时不显示货币）', parseRateOption)
-      .option('--rate-mode <mode>', 'latest（默认，全程一个汇率）或 historical（按每条记录当天的汇率）'),
+      .description(t().help.usage)
+      .option('--range <spec>', t().help.range)
+      .option('--subagent', t().help.subagent)
+      .option('--subagents', t().help.subagents)
+      .option('--cost', t().help.cost)
+      .option('--models', t().help.models)
+      .option('-p, --project-filter <selector>', t().help.projectFilter, collect)
+      .option('-s, --session-filter <selector>', t().help.sessionFilter, collect)
+      .option('--currency <code>', t().help.currency)
+      .option('--currency-rate <rate>', t().help.currencyRate, parseRateOption)
+      .option('--rate-mode <mode>', t().help.rateMode),
   )
     .allowExcessArguments(false)
     .action(async (options: UsageOptions, command: Command) => {
@@ -553,28 +554,28 @@ export function buildProgram(): Command {
 
   program
     .command('update')
-    .description('更新价格表与汇率（默认两者都更新）')
-    .argument('[target]', '要更新的内容：all（默认）/ prices / rates', 'all')
-    .option('--force', '忽略"今天已经检查过"，立即检查')
-    .option('--write-config', '把拉到的汇率写回仓库的 config/rates.json，供 review 后提交')
+    .description(t().help.update)
+    .argument('[target]', t().help.updateTarget, 'all')
+    .option('--force', t().help.updateForce)
+    .option('--write-config', t().help.updateWrite)
     .action(async (target: string, options: { force?: boolean; writeConfig?: boolean }) => {
       await runUpdate(target, options);
     });
 
   program
     .command('check-config')
-    .description('校验 config/ 下的价格表与汇率表（改完提交前跑一次）')
-    .option('--json', '以 JSON 输出')
+    .description(t().help.checkConfig)
+    .option('--json', t().help.json)
     .action((options: { json?: boolean }, command: Command) => {
       runCheckConfig(withGlobals(command, options).json === true);
     });
 
-  const sessionCommand = commonOptions(program.command('session').description('会话相关操作'));
+  const sessionCommand = commonOptions(program.command('session').description(t().help.sessionCommand));
   commonOptions(
     sessionCommand
       .command('list')
-      .description('列出所有项目与会话（项目按首个会话时间降序，会话按时间降序）')
-      .option('--subagents', '将子代理单独列出（默认并入其父会话）')
+      .description(t().help.sessionList)
+      .option('--subagents', t().help.sessionListSubagents)
       .option('-p, --project-filter <selector>', '只列出指定项目（可重复）', collect)
       .option('-s, --session-filter <selector>', '只列出指定会话：id、唯一前缀或标题（标题需完全一致，忽略前后空格；可重复）', collect),
   ).action(async (options: SessionListOptions, command: Command) => {
@@ -584,15 +585,15 @@ export function buildProgram(): Command {
   commonOptions(
     program
       .command('price')
-      .description('显示价格表与生效区间（不读取任何数据）')
-      .option('--all', '列出全部计价来源')
-      .option('--currency <code>', '只看某个币种的价格表，如 CNY / USD')
-      .option('--current', '只看当前生效的区间'),
+      .description(t().help.price)
+      .option('--all', t().help.priceAll)
+      .option('--currency <code>', t().help.priceCurrency)
+      .option('--current', t().help.priceCurrent),
   ).action(async (options: PriceOptions, command: Command) => {
     runPrice(withGlobals(command, options), await resolveConfig({ noUpdate: true }));
   });
 
-  commonOptions(program.command('agents').description('列出支持的 agent 与计价来源')).action(
+  commonOptions(program.command('agents').description(t().help.agents)).action(
     (options: GlobalOptions, command: Command) => {
       runAgents(withGlobals(command, options));
     },
@@ -608,14 +609,19 @@ export function buildProgram(): Command {
  * is only a fallback for runtimes that cannot resolve one.
  */
 function systemLocaleFromEnv(): string | undefined {
+  const fromEnv = (process.env['LC_ALL'] ?? process.env['LC_MESSAGES'] ?? process.env['LANG'])?.trim();
+  if (fromEnv !== undefined && fromEnv.length > 0) {
+    // `C` and `POSIX` are the user saying they have no locale, not a claim to be
+    // English — and `Intl` would answer with its own default, so it is not asked.
+    return /^(c|posix)$/i.test(fromEnv) ? undefined : fromEnv;
+  }
   try {
     const resolved = Intl.DateTimeFormat().resolvedOptions().locale;
     if (resolved.length > 0) return resolved;
   } catch {
-    // Fall through to the environment.
+    // No locale available at all.
   }
-  const fromEnv = process.env['LC_ALL'] ?? process.env['LC_MESSAGES'] ?? process.env['LANG'];
-  return fromEnv === undefined || fromEnv.trim().length === 0 ? undefined : fromEnv.trim();
+  return undefined;
 }
 
 /** Run the CLI. */
