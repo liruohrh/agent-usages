@@ -818,6 +818,23 @@ describe('serve', () => {
         };
         expect(summary.agents).toEqual([]);
         expect(summary.totals.requests).toBe(0);
+
+        // A request for an agent the server was narrowed away from is not a
+        // request for "every agent": the intersection is empty, and an empty
+        // selection must stay empty instead of falling back to the whole file.
+        const overlap = (await (await fetch(`${url}/api/dashboard?agent=dsh`)).json()) as {
+          agents: unknown[];
+          projects: unknown[];
+          totals: { requests: number; cost: { total: string } };
+          loadedAgents: unknown[];
+        };
+        expect(overlap.agents).toEqual([]);
+        expect(overlap.projects).toEqual([]);
+        expect(overlap.totals.requests).toBe(0);
+        expect(overlap.totals.cost.total).toBe('0.0000');
+        // The file holds no pi at all, so the narrowed provenance block is empty
+        // too — it describes what is being served, never the file's contents.
+        expect(overlap.loadedAgents).toEqual([]);
       } finally {
         await stop(other);
       }

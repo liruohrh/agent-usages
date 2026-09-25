@@ -1391,10 +1391,10 @@ export function filterDashboard(dashboard: Dashboard, query: DashboardQuery = {}
     projects,
     repos: dashboard.repos
       .filter((repo) => repo.projects.some((id) => keptIds.has(id)))
-      .map((repo) => ({
-        ...repo,
-        agentTotals: repo.agentTotals.filter((totals) => agents.size === 0 || agents.has(totals.id)),
-      })),
+      .map((repo) => {
+        const kept = repo.agentTotals.filter((totals) => agents.size === 0 || agents.has(totals.id));
+        return { ...repo, agentTotals: kept, agents: kept.map((totals) => totals.id) };
+      }),
     timeseries: {
       day: dashboard.timeseries.day.filter(
         (point) => keptIds.has(point.projectId) && (agents.size === 0 || agents.has(point.agent)),
@@ -1409,6 +1409,32 @@ export function filterDashboard(dashboard: Dashboard, query: DashboardQuery = {}
   const index = detailIndex.get(dashboard);
   if (index !== undefined) detailIndex.set(filtered, index);
   return filtered;
+}
+
+/**
+ * The dashboard with nothing selected.
+ *
+ * `filterDashboard` reads an empty agent list as "no filter", which is what the
+ * HTTP layer wants (no `?agent=` means every agent). A caller that narrowed the
+ * server itself — `serve --snapshot … --agent pi` — has the opposite problem: an
+ * intersection that ends up empty must answer with *nothing*, or the response
+ * would hand back exactly the agents the flag excluded.
+ *
+ * @param dashboard - the dashboard the query was made against.
+ * @returns a dashboard whose every figure is zero.
+ */
+function emptyDashboard(dashboard: Dashboard): Dashboard {
+  return {
+    ...dashboard,
+    generatedAt: Date.now(),
+    agents: [],
+    totals: totalsOf([], { projects: 0, workspaces: 0 }),
+    projects: [],
+    repos: [],
+    timeseries: { day: [], hour: [] },
+    models: [],
+    bands: [],
+  };
 }
 
 /** Fold the sparse long-form series into one point per bucket. */
@@ -1705,6 +1731,10 @@ async function openSnapshotStore(path: string, options: ScanOptions): Promise<Da
         rangeTo: range.to,
       };
       const narrowed = narrow(query.agents);
+      // `filterDashboard` reads "no agents" as "no filter", so an intersection
+      // that came out empty (`--agent pi` with `?agent=dsh`) is answered with an
+      // empty dashboard instead — otherwise the whole file would go out.
+      if (narrowed !== undefined && narrowed.length === 0) return emptyDashboard(built);
       return filterDashboard(built, narrowed === undefined ? query : { ...query, agents: narrowed });
     },
     timeseries(query = {}) {
