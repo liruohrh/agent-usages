@@ -49,129 +49,30 @@ export interface RankedEntry {
  * *shows* is always the same three columns — Q, the token total, and the money
  * with its share — so the numbers stay in the same place as the sort changes.
  */
-export interface RankedColumn {
-  key: string;
-  label: string;
-  hint: string;
-  /** The comparable number. */
-  value: (entry: RankedEntry) => number;
-  /** What the cell shows. */
-  render: (entry: RankedEntry, symbol: string) => ReactNode;
-  /** Column width in the row grid. */
-  width: string;
-  /** Drawn only when at least one row has a non-zero value. */
-  optional?: boolean;
-}
-
 /** The billed-bucket total, which is what `T` means everywhere else. */
 export function billedTokens(tokens: TokenBuckets): number {
   return tokens.input + tokens.cacheRead + tokens.cacheWrite + tokens.output;
 }
 
 /**
- * The columns every entity shares, in the order they are drawn.
+ * The smallest share a non-zero piece may have on a bar.
  *
- * Every one of them is sortable: the figures a ranking is compared on are Q, each
- * bucket, the token total, the cache money and the money — and the reader picks
- * which one orders the list by clicking its header.
- */
-export const COMMON_COLUMNS: RankedColumn[] = [
-  {
-    key: 'requests',
-    label: 'Q',
-    hint: '请求数',
-    width: '4.5rem',
-    value: (entry) => entry.requests,
-    render: (entry) => formatTokens(entry.requests),
-  },
-  {
-    key: 'input',
-    label: 'I/M',
-    hint: '未命中缓存的输入',
-    width: '5rem',
-    value: (entry) => entry.tokens.input,
-    render: (entry) => formatTokens(entry.tokens.input, true),
-  },
-  {
-    key: 'cacheRead',
-    label: 'I/C',
-    hint: '缓存命中输入（tokens），括号里是它在本行的占比',
-    width: '6.5rem',
-    value: (entry) => entry.tokens.cacheRead,
-    render: (entry) => (
-      <>
-        {formatTokens(entry.tokens.cacheRead, true)}
-        {billedTokens(entry.tokens) > 0 && (
-          <span className="ml-1 text-[11px] text-faint">
-            {formatShare(entry.tokens.cacheRead / billedTokens(entry.tokens))}
-          </span>
-        )}
-      </>
-    ),
-  },
-  {
-    key: 'cacheWrite',
-    label: 'I/W',
-    hint: '缓存写入输入',
-    width: '5rem',
-    optional: true,
-    value: (entry) => entry.tokens.cacheWrite,
-    render: (entry) => formatTokens(entry.tokens.cacheWrite, true),
-  },
-  {
-    key: 'output',
-    label: 'O',
-    hint: '输出（不含思考）',
-    width: '5rem',
-    value: (entry) => Math.max(0, entry.tokens.output - entry.tokens.reasoning),
-    render: (entry) => formatTokens(Math.max(0, entry.tokens.output - entry.tokens.reasoning), true),
-  },
-  {
-    key: 'reasoning',
-    label: 'R',
-    hint: '思考（输出的一部分，O 里已扣除）',
-    width: '4.5rem',
-    optional: true,
-    value: (entry) => entry.tokens.reasoning,
-    render: (entry) => formatTokens(entry.tokens.reasoning, true),
-  },
-  {
-    key: 'tokens',
-    label: '总 token',
-    hint: '计费桶 token 合计 = I/M + I/C + I/W + O + R',
-    width: '6rem',
-    value: (entry) => billedTokens(entry.tokens),
-    render: (entry) => formatTokens(billedTokens(entry.tokens), true),
-  },
-  {
-    key: 'cacheCost',
-    label: '缓存金额',
-    hint: '缓存命中这条计费项花掉的钱',
-    width: '6.5rem',
-    value: (entry) => Number(entry.cost.cacheHitInputCost),
-    render: (entry, symbol) => formatCost(entry.cost.cacheHitInputCost, symbol),
-  },
-  {
-    key: 'cost',
-    label: '费用',
-    hint: '总费用，后面小字是占本列表合计的比例',
-    width: '9rem',
-    value: (entry) => Number(entry.cost.total),
-    render: (entry, symbol) => <>{formatCost(entry.cost.total, symbol)}</>,
-  },
-];
-
-/**
- * What this row is made of: its own tokens, bucket by bucket.
- *
- * Always the full width, because the question here is composition, not size —
- * mixing the two in one bar is what made the old one unreadable (a segment was
- * `share × length`, a number that means nothing). Every non-zero bucket keeps at
- * least {@link MIN_SEGMENT} of the width, so a bucket worth 0.2% is still visible
- * rather than crushed to nothing by the 99.5% next to it.
+ * Cache-hit input is usually more than 99% of a row's tokens, so an honest
+ * proportional stack would leave every other piece at zero pixels wide.
  */
 const MIN_SEGMENT = 0.012;
 
+/**
+ * What the bar means, said once, in the header.
+ *
+ * The bar is the row's *own* composition and nothing else: always the full width,
+ * because size is what the numbers and the sort are for. Drawing size and
+ * composition in one bar made every segment the product of two unrelated things.
+ */
+const BAR_RULE =
+  '条 = 这一行自己的 token 构成：按五个互不重叠的计费项切开（I/M、I/C、I/W、O、R），整条 = 这一行的 100%。某项为 0 时不画；某段不足 1.2% 时保留 1.2% 以便看清。条下的每个数字都能点，点谁按谁排序。';
+
+/** What this row is made of, as a full-width stack of its own tokens. */
 function CompositionBar({
   tokens,
   cost,
@@ -182,13 +83,14 @@ function CompositionBar({
   symbol: string;
 }): React.ReactElement {
   const total = billedTokens(tokens);
-  // Five disjoint pieces: cache write and reasoning show up whenever the provider
-  // reported them (`O` is output without reasoning, so nothing is counted twice).
   const pieces = tokenPieces(tokens, cost).filter((piece) => piece.tokens > 0);
   const floors = pieces.length * MIN_SEGMENT;
   const scale = pieces.length === 0 ? 0 : 1 - floors;
   return (
-    <span className="flex h-3 w-full overflow-hidden rounded-full bg-raised" title="这一行的 token 构成（整条 = 本行 100%）">
+    <span
+      className="flex h-4 w-full overflow-hidden rounded-full bg-raised ring-1 ring-line ring-inset"
+      title="这一行的 token 构成（整条 = 本行 100%）"
+    >
       {pieces.map((piece) => {
         const share = total === 0 ? 0 : piece.tokens / total;
         return (
@@ -205,14 +107,44 @@ function CompositionBar({
 }
 
 /**
- * What the bar means, said once, in the header.
+ * A figure the list can be ordered by.
  *
- * It is the row's *own* composition and nothing else: always the full width,
- * because size is what the numbers and the sort are for. Drawing size and
- * composition in one bar made every segment the product of two unrelated things.
+ * The same list drives two things: the sort dropdown in the header, and the
+ * clickable chips under each bar (click `I/C` on any row to order the list by it).
  */
-const BAR_RULE =
-  '每行的条就是这一行自己：把它的 token 按计费桶切开（I/M、I/C、I/W、O、R，互不重叠），整条 = 这一行的 100%。它不表示大小——大小看右边的数字与排序。某项为 0 时不画；某段不足 1.2% 时保留 1.2% 以便看清。';
+export interface SortMetric {
+  key: string;
+  label: string;
+  hint: string;
+  /** The comparable number. */
+  value: (entry: RankedEntry) => number;
+  /** Drawn only when at least one row has a non-zero value. */
+  optional?: boolean;
+}
+
+/** Every figure a row carries, in the order the chips show them. */
+export const SORT_METRICS: SortMetric[] = [
+  { key: 'requests', label: 'Q', hint: '请求数', value: (entry) => entry.requests },
+  { key: 'input', label: 'I/M', hint: '未命中缓存的输入', value: (entry) => entry.tokens.input },
+  { key: 'cacheRead', label: 'I/C', hint: '缓存命中输入', value: (entry) => entry.tokens.cacheRead },
+  { key: 'cacheWrite', label: 'I/W', hint: '缓存写入输入', value: (entry) => entry.tokens.cacheWrite, optional: true },
+  {
+    key: 'output',
+    label: 'O',
+    hint: '输出（不含思考）',
+    value: (entry) => Math.max(0, entry.tokens.output - entry.tokens.reasoning),
+  },
+  { key: 'reasoning', label: 'R', hint: '思考（输出的一部分，O 里已扣除）', value: (entry) => entry.tokens.reasoning, optional: true },
+  { key: 'tokens', label: '总 token', hint: '计费桶 token 合计', value: (entry) => billedTokens(entry.tokens) },
+  {
+    key: 'cacheCost',
+    label: '缓存金额',
+    hint: '缓存命中这条计费项花掉的钱',
+    value: (entry) => Number(entry.cost.cacheHitInputCost),
+  },
+  { key: 'cost', label: '费用', hint: '总费用', value: (entry) => Number(entry.cost.total) },
+  { key: 'recent', label: '最近', hint: '最后一次计费时间', value: (entry) => entry.lastUsage ?? 0 },
+];
 
 /** The per-bucket table an expanded row shows: tokens, share and money. */
 export function BucketDetail({
@@ -275,16 +207,20 @@ export function BucketDetail({
 }
 
 /**
- * The leaderboard itself: one row per entry, an order picked by clicking a column
- * header, and a bar per row that shows only that row's own composition.
+ * The leaderboard itself.
  *
- * @param props - the entries, the columns, and how to draw an expanded row.
+ * One row per entry: a rank, the name, **one bar that is that row's own token
+ * composition**, the figures under the bar as clickable chips, and three figures
+ * pinned on the right (Q, total tokens, money) so the eye can run down a column.
+ * Any metric orders the list — the dropdown in the header, or a click on that
+ * metric's chip in any row.
+ *
+ * @param props - the entries, the sort default, and how to draw an expanded row.
  */
 export function RankedList({
   entries,
   symbol,
   title,
-  columns = COMMON_COLUMNS,
   defaultSort = 'cost',
   emptyText = '当前范围没有数据。',
   baseline,
@@ -294,7 +230,6 @@ export function RankedList({
   entries: readonly RankedEntry[];
   symbol: string;
   title: string;
-  columns?: readonly RankedColumn[];
   defaultSort?: string;
   emptyText?: string;
   /** An extra control in the header (filters, toggles). */
@@ -307,27 +242,23 @@ export function RankedList({
   const [desc, setDesc] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
 
-  // A column whose value is zero everywhere (no cache writes, no reasoning) is a
-  // column of dashes: it appears as soon as one row has one.
-  const shown = columns.filter(
-    (column) => column.optional !== true || entries.some((entry) => column.value(entry) > 0),
-  );
-  const sortColumn = shown.find((column) => column.key === sortKey) ?? shown[0];
+  // A figure that is zero everywhere (no cache writes, no reasoning) is not worth
+  // a chip; it appears as soon as one row has one.
+  const metrics = SORT_METRICS.filter((metric) => metric.optional !== true || entries.some((entry) => metric.value(entry) > 0));
+  const metric = metrics.find((candidate) => candidate.key === sortKey) ?? metrics[0];
 
   const rows = useMemo(() => {
-    if (sortColumn === undefined) return [];
-    const sorted = [...entries].sort(
-      (left, right) => (desc ? -1 : 1) * (sortColumn.value(left) - sortColumn.value(right)),
-    );
+    if (metric === undefined) return [];
+    const sorted = [...entries].sort((left, right) => (desc ? -1 : 1) * (metric.value(left) - metric.value(right)));
     return limit === undefined ? sorted : sorted.slice(0, limit);
-  }, [entries, sortColumn, desc, limit]);
+  }, [entries, metric, desc, limit]);
 
   const totalCost = rows.reduce((sum, entry) => sum + Number(entry.cost.total), 0);
-  const totalRequests = rows.reduce((sum, entry) => sum + entry.requests, 0);
   const totalTokens = rows.reduce((sum, entry) => sum + billedTokens(entry.tokens), 0);
-  const grid = `1.5rem minmax(14rem, 1fr) ${shown.map((column) => column.width).join(' ')}`;
+  const totalRequests = rows.reduce((sum, entry) => sum + entry.requests, 0);
+  /** Right-hand columns: the three figures a reader scans down. */
+  const grid = '1.5rem minmax(13rem, 1fr) 4.5rem 6rem 9rem';
 
-  /** Sort by a column, flipping the direction when it is already the sort. */
   const sortBy = (key: string): void => {
     if (key === sortKey) setDesc((value) => !value);
     else {
@@ -342,6 +273,23 @@ export function RankedList({
       actions={
         <>
           {baseline}
+          <label className="flex items-center gap-1 text-[11px] text-muted">
+            排序
+            <select
+              value={sortKey}
+              onChange={(event) => {
+                setSortKey(event.target.value);
+                setDesc(true);
+              }}
+              className="rounded border border-line bg-panel px-1 py-0.5 text-[11px] text-fg"
+            >
+              {metrics.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             onClick={() => setDesc((value) => !value)}
@@ -353,11 +301,10 @@ export function RankedList({
         </>
       }
     >
-      {rows.length === 0 || sortColumn === undefined ? (
+      {rows.length === 0 || metric === undefined ? (
         <p className="py-8 text-center text-[13px] text-faint">{emptyText}</p>
       ) : (
         <>
-          {/* The baseline, then the sortable headers. */}
           <div className="mb-1 border-b border-line pb-2 text-[12px]">
             <div className="grid items-center gap-3" style={{ gridTemplateColumns: grid }}>
               <span />
@@ -371,32 +318,28 @@ export function RankedList({
                 <span>
                   <span className="tnum text-fg">{formatTokens(totalRequests)}</span> 请求
                 </span>
-                <span className="flex flex-wrap items-center gap-x-3">
-                  {BUCKETS.map((piece) => (
-                    <span key={piece.key} className="flex items-center gap-1">
-                      <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: piece.color }} />
-                      {piece.short}
+                <span className="flex flex-wrap items-center gap-x-2.5">
+                  {BUCKETS.map((bucket) => (
+                    <span key={bucket.key} className="flex items-center gap-1">
+                      <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: bucket.color }} />
+                      {bucket.short}
                     </span>
                   ))}
                 </span>
               </span>
-              {shown.map((column) => (
-                <button
-                  key={column.key}
-                  type="button"
-                  onClick={() => sortBy(column.key)}
-                  title={`${column.hint}（点击排序）`}
-                  className={`whitespace-nowrap text-right hover:text-fg ${
-                    column.key === sortKey ? 'font-medium text-accent' : 'text-faint'
-                  }`}
-                >
-                  {column.label} <span className="text-[9px]">{column.key === sortKey ? (desc ? '▼' : '▲') : '↕'}</span>
-                </button>
-              ))}
+              <span className="text-right text-faint" title="请求数">
+                Q
+              </span>
+              <span className="text-right text-faint" title="计费桶 token 合计">
+                总 token
+              </span>
+              <span className="text-right text-faint" title="总费用，后面的小字是占本列表合计的比例">
+                费用
+              </span>
             </div>
             <p className="mt-1.5 text-[11px] leading-5 text-faint" title={BAR_RULE}>
-              条 = 这一行自己的 token 构成（整条 100%，<span className="text-muted">不表示大小</span>）；
-              每个指标都能排序：<span className="text-muted">点表头</span>升/降序。大小看数字。
+              条 = 这一行自己的 token 构成（整条 100%，<span className="text-muted">不表示大小</span>，大小看数字）；
+              条下每个指标都能点，点谁按谁排序，当前排序是「{metric.label} {desc ? '降序' : '升序'}」。
             </p>
           </div>
 
@@ -443,20 +386,59 @@ export function RankedList({
                           <span className="shrink-0 text-[11px] text-muted">{formatInstant(entry.lastUsage)}</span>
                         )}
                       </span>
+
+                      {/* The bar: this row's own composition, and nothing else. */}
                       <span className="mt-1.5 block">
                         <CompositionBar tokens={entry.tokens} cost={entry.cost} symbol={symbol} />
                       </span>
-                    </span>
-                    {shown.map((column) => (
-                      <span
-                        key={column.key}
-                        className={`tnum whitespace-nowrap text-right text-[13px] ${
-                          column.key === sortKey ? 'font-medium text-accent' : 'text-fg'
-                        }`}
-                      >
-                        {column.render(entry, symbol)}
+
+                      {/* Every figure, under the bar; click one to order by it. */}
+                      <span className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+                        {metricChips(entry, symbol).map((chip) => (
+                          <button
+                            key={chip.key}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              sortBy(chip.key);
+                            }}
+                            title={chip.hint}
+                            className={`flex items-center gap-1 whitespace-nowrap rounded px-1 text-[11px] hover:bg-raised ${
+                              chip.key === sortKey ? 'bg-accent-soft text-accent' : ''
+                            }`}
+                          >
+                            {chip.color !== undefined && (
+                              <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: chip.color }} />
+                            )}
+                            <span className={chip.key === sortKey ? '' : 'text-faint'}>{chip.label}</span>
+                            <span className={`tnum ${chip.key === sortKey ? 'text-accent' : 'text-muted'}`}>{chip.value}</span>
+                            {chip.extra !== undefined && <span className="tnum text-faint">{chip.extra}</span>}
+                            {chip.key === sortKey && <span className="text-[9px]">{desc ? '▼' : '▲'}</span>}
+                          </button>
+                        ))}
                       </span>
-                    ))}
+                    </span>
+
+                    {/* The three figures to run down: requests, tokens, money. */}
+                    <span className="tnum whitespace-nowrap text-right text-[13px] text-fg">
+                      {formatTokens(entry.requests)}
+                    </span>
+                    <span className="tnum whitespace-nowrap text-right text-[13px] text-fg">
+                      {formatTokens(billedTokens(entry.tokens), true)}
+                    </span>
+                    <span className="tnum whitespace-nowrap text-right text-[13px]">
+                      <span className={sortKey === 'cost' ? 'font-medium text-accent' : 'text-fg'}>
+                        {formatCost(entry.cost.total, symbol)}
+                      </span>
+                      {totalCost > 0 && (
+                        <>
+                          {' '}
+                          <span className="text-[11px] text-faint">
+                            {formatShare(Number(entry.cost.total) / totalCost)}
+                          </span>
+                        </>
+                      )}
+                    </span>
                   </div>
                   {expanded && (
                     <div className="px-1 pb-3">
@@ -472,6 +454,58 @@ export function RankedList({
       )}
     </Card>
   );
+}
+
+/** One clickable figure under a bar. */
+interface MetricChip {
+  key: string;
+  label: string;
+  hint: string;
+  value: string;
+  extra?: string | undefined;
+  color?: string | undefined;
+}
+
+/**
+ * The figures under a row's bar, in the CLI's order.
+ *
+ * The five buckets the bar is made of come first (each with the colour it is drawn
+ * in), then the totals; `I/C` carries its share, `费用` carries its share of the
+ * list. Zero-valued pieces are left out — the bar does not draw them either.
+ */
+function metricChips(entry: RankedEntry, symbol: string): MetricChip[] {
+  const total = billedTokens(entry.tokens);
+  const chips: MetricChip[] = tokenPieces(entry.tokens, entry.cost)
+    .filter((piece) => piece.tokens > 0)
+    .map((piece) => ({
+      key: piece.key,
+      label: piece.short,
+      hint: `${piece.label}：${formatTokens(piece.tokens, true)} tokens · ${formatCost(piece.money, symbol)}（点击按它排序）`,
+      value: formatTokens(piece.tokens, true),
+      ...(piece.key === 'cacheRead' && total > 0 ? { extra: formatShare(piece.tokens / total) } : {}),
+      color: piece.color,
+    }));
+  chips.push(
+    {
+      key: 'tokens',
+      label: '总 token',
+      hint: '计费桶 token 合计（点击按它排序）',
+      value: formatTokens(total, true),
+    },
+    {
+      key: 'cacheCost',
+      label: '缓存金额',
+      hint: '缓存命中这条计费项花掉的钱（点击按它排序）',
+      value: formatCost(entry.cost.cacheHitInputCost, symbol),
+    },
+    {
+      key: 'cost',
+      label: '费用',
+      hint: '总费用（点击按它排序）',
+      value: formatCost(entry.cost.total, symbol),
+    },
+  );
+  return chips;
 }
 
 /** The agents of a scope, as a ranking. */

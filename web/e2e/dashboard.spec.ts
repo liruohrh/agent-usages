@@ -102,38 +102,40 @@ function numberOf(text: string): number {
   return Number(text.replace(/[^\d.]/g, ''));
 }
 
-/** The sortable column labels of the first ranking card on screen. */
-async function columnLabels(page: Page): Promise<string[]> {
-  return (await page.locator('main section div.grid button').allInnerTexts()).map((text) =>
-    text.replace(/[↕▼▲]/g, '').trim(),
-  );
+/** The chip labels under the first row's bar: every figure the row shows. */
+async function chipLabels(page: Page): Promise<string[]> {
+  return page
+    .locator('main ol > li')
+    .first()
+    .locator('button')
+    .evaluateAll((buttons) =>
+      buttons
+        .map((button) => (button.textContent ?? '').replace(/[\d.,万亿¥%▲▼]/g, '').trim())
+        .filter((label) => label.length > 0),
+    );
 }
 
-/**
- * The first count in a cell, with the UI's compact units understood: `9.7亿` is
- * 970 million, and a trailing percentage (the cache-hit share beside `I/C`) is not
- * part of the number.
- */
-function firstCount(text: string): number {
-  const match = /([\d.,]+)\s*(亿|万)?/.exec(text.replace(/,/g, ''));
-  if (match === null) return Number.NaN;
-  const base = Number(match[1]);
-  if (match[2] === '亿') return base * 1e8;
-  if (match[2] === '万') return base * 1e4;
-  return base;
-}
-
-/** One ranking row's figures, keyed by column label. */
-async function rowValues(page: Page, index: number): Promise<Record<string, number>> {
-  const labels = await columnLabels(page);
-  const cells = await page
+/** The three figures pinned on the right of a row: Q, tokens, money. */
+async function rowFigures(page: Page, index: number): Promise<number[]> {
+  return page
     .locator('main ol > li')
     .nth(index)
     .evaluate((item) => {
       const row = item.firstElementChild;
-      return [...(row?.children ?? [])].slice(2).map((cell) => cell.textContent ?? '');
+      const cells = [...(row?.children ?? [])].slice(-3);
+      return cells.map((cell) => {
+        const text = (cell.textContent ?? '').replace(/,/g, '');
+        const match = /([\d.]+)\s*(亿|万)?/.exec(text);
+        if (match === null) return Number.NaN;
+        const base = Number(match[1]);
+        return match[2] === '亿' ? base * 1e8 : match[2] === '万' ? base * 1e4 : base;
+      });
     });
-  return Object.fromEntries(labels.map((label, order) => [label, firstCount(cells[order] ?? '')]));
+}
+
+/** The sort dropdown in the ranking card's header. */
+function sortSelect(page: Page): Locator {
+  return page.locator('main section header select');
 }
 
 /** Switch to one of the scope's tabs. */
@@ -299,11 +301,13 @@ test.describe('the project and agent rankings', () => {
 
     const dearest = [...dashboard.projects].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rows.first()).toContainText(dearest?.name ?? '');
-    // Every figure has its own column, including the buckets.
-    const labels = await columnLabels(page);
-    for (const column of ['Q', 'I/M', 'I/C', 'O', '总 token', '缓存金额', '费用']) {
-      expect(labels, `column ${column}`).toContain(column);
+    // Every figure is a chip under the bar, and the rows carry the three
+    // right-hand figures (Q, tokens, money).
+    const chips = await chipLabels(page);
+    for (const column of ['I/M', 'I/C', 'O', '总 token', '缓存金额', '费用']) {
+      expect(chips, `chip ${column}`).toContain(column);
     }
+    expect(await rowFigures(page, 0)).toHaveLength(3);
     // Expanding shows the bucket table with money per bucket.
     await rows.first().click();
     const detail = await rows.first().locator('table tbody tr').allInnerTexts();
@@ -319,8 +323,8 @@ test.describe('the project and agent rankings', () => {
 
     const dearest = [...dashboard.agents].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rows.first()).toContainText(dearest?.label ?? '');
-    // Sorting is by column header now.
-    await page.locator('main section div.grid button').filter({ hasText: /^总 token/ }).first().click();
+    // Sorting is by the dropdown (or by clicking a chip).
+    await sortSelect(page).selectOption({ label: '总 token' });
     const mostTokens = [...dashboard.agents].sort(
       (left, right) =>
         right.tokens.input + right.tokens.output + right.tokens.cacheRead + right.tokens.cacheWrite -
@@ -441,71 +445,64 @@ test.describe('a session', () => {
 test.describe('the session leaderboard', () => {
   /** One row of the leaderboard, by index. */
   const rowAt = (page: Page, index: number): Locator => page.locator('main ol > li').nth(index);
-  /** A sortable column header, by label. */
-  const header = (page: Page, label: string): Locator =>
-    page.locator('main section div.grid button').filter({ hasText: new RegExp(`^${label}`) }).first();
 
-  test('ranks every session, with a column per figure', async ({ page }) => {
+  test('shows every figure under the bar, and three on the right', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
     const rows = page.locator('main ol > li');
     await expect(rows).toHaveCount(sessions.length);
 
-    // Every figure is a column, and every column sorts.
-    const labels = (await page.locator('main section div.grid button').allInnerTexts()).map((text) =>
-      text.replace(/[↕▼▲]/g, '').trim(),
-    );
-    for (const column of ['Q', 'I/M', 'I/C', 'O', '总 token', '缓存金额', '费用']) {
-      expect(labels, `column ${column}`).toContain(column);
+    // Under the bar: the buckets the row is made of, then the totals.
+    const chips = await chipLabels(page);
+    for (const label of ['I/M', 'I/C', 'O', '总 token', '缓存金额', '费用']) {
+      expect(chips, `chip ${label}`).toContain(label);
     }
 
+    // On the right: Q, the token total, the money with its share.
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
-    // Each column shows this session's own figure.
-    const values = await rowValues(page, 0);
-    // Counts are printed compactly, so compare within the rounding they carry.
-    const close = (shown: number, actual: number | undefined): number =>
-      Math.abs(shown - (actual ?? 0)) / Math.max(1, actual ?? 1);
-    expect(values['Q']).toBe(dearest?.requests);
-    expect(close(values['I/C'] ?? Number.NaN, dearest?.tokens.cacheRead)).toBeLessThan(0.02);
-    expect(close(values['总 token'] ?? Number.NaN, dearest ? billed(dearest) : 0)).toBeLessThan(0.02);
-    expect(close(values['缓存金额'] ?? Number.NaN, Number(dearest?.cost.cacheHitInputCost ?? 0))).toBeLessThan(0.01);
-    expect(close(values['费用'] ?? Number.NaN, Number(dearest?.cost.total ?? 0))).toBeLessThan(0.01);
+    const [requests, tokens, cost] = await rowFigures(page, 0);
+    expect(requests).toBe(dearest?.requests);
+    const close = (shown: number | undefined, actual: number | undefined): number =>
+      Math.abs((shown ?? 0) - (actual ?? 0)) / Math.max(1, actual ?? 1);
+    expect(close(tokens, dearest ? billed(dearest) : 0)).toBeLessThan(0.02);
+    expect(close(cost, Number(dearest?.cost.total ?? 0))).toBeLessThan(0.01);
+    // The money cell carries its share of the list right after the amount.
+    expect(await rowAt(page, 0).innerText()).toMatch(/¥[\d.,]+\s+\d+(\.\d+)?%/);
   });
 
-  test('sorts by any column on click', async ({ page }) => {
+  test('every figure can order the list — chip or dropdown', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
-    const firstTitle = async (): Promise<string> => (await rowAt(page, 0).innerText()).split('\n')[0] ?? '';
-
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    const mostTokens = [...sessions].sort((left, right) => billed(right) - billed(left))[0];
-    const mostCache = [...sessions].sort(
-      (left, right) => Number(right.cost.cacheHitInputCost) - Number(left.cost.cacheHitInputCost),
-    )[0];
+    const mostCacheRead = [...sessions].sort((left, right) => right.tokens.cacheRead - left.tokens.cacheRead)[0];
     const mostRequests = [...sessions].sort((left, right) => right.requests - left.requests)[0];
+    const mostTokens = [...sessions].sort((left, right) => billed(right) - billed(left))[0];
 
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
-    await header(page, '总 token').click();
-    await expect(rowAt(page, 0)).toContainText(mostTokens?.title ?? '');
-    await header(page, '缓存金额').click();
-    await expect(rowAt(page, 0)).toContainText(mostCache?.title ?? '');
-    await header(page, 'Q').click();
-    await expect(rowAt(page, 0)).toContainText(mostRequests?.title ?? '');
 
-    // Clicking the same header again flips the direction.
-    await header(page, '费用').click();
+    // A chip is a sort control: clicking `I/C` in any row orders by cache reads.
+    await rowAt(page, 0).locator('button').filter({ hasText: /^I\/C/ }).first().click();
+    await expect(rowAt(page, 0)).toContainText(mostCacheRead?.title ?? '');
+
+    // The dropdown covers everything else, including figures not always on screen.
+    await sortSelect(page).selectOption({ label: 'Q' });
+    await expect(rowAt(page, 0)).toContainText(mostRequests?.title ?? '');
+    await sortSelect(page).selectOption({ label: '总 token' });
+    await expect(rowAt(page, 0)).toContainText(mostTokens?.title ?? '');
+
+    // Same figure twice flips the direction.
     await page.locator('main section header').getByRole('button', { name: /降序|升序/ }).click();
     const cheapest = [...sessions].sort((left, right) => Number(left.cost.total) - Number(right.cost.total))[0];
+    await sortSelect(page).selectOption({ label: '费用' });
+    await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
+    await page.locator('main section header').getByRole('button', { name: /降序|升序/ }).click();
     await expect(rowAt(page, 0)).toContainText(cheapest?.title ?? '');
-    expect(await firstTitle()).not.toBe('');
   });
 
   test('each row draws its own composition, including reasoning', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
-    // The row whose bar carries the most pieces: the one with reasoning and, if
-    // any, cache writes — both must be drawn, not hidden behind output.
     const withReasoning = sessions.filter((session) => session.tokens.reasoning > 0)[0];
 
     const segments = async (index: number): Promise<{ width: number; title: string }[]> =>
@@ -517,15 +514,15 @@ test.describe('the session leaderboard', () => {
 
     const all = await segments(0);
     expect(all.length).toBeGreaterThanOrEqual(2);
-    // The bar is a 100% stack of that row's own tokens.
+    // The bar is a 100% stack of that row's own tokens, and it is visible.
     const sum = all.reduce((total, segment) => total + segment.width, 0);
     expect(sum).toBeGreaterThan(99);
     expect(sum).toBeLessThan(101);
+    const height = await page.locator('main ol > li span.h-4').first().boundingBox();
+    expect(height?.height ?? 0).toBeGreaterThanOrEqual(12);
 
     if (withReasoning !== undefined) {
-      const index = sessions
-        .map((session) => session.title)
-        .indexOf(withReasoning.title);
+      const index = sessions.map((session) => session.title).indexOf(withReasoning.title);
       const found = await segments(Math.max(0, index));
       expect(found.map((segment) => segment.title.slice(0, 2))).toContain('R ');
     }
