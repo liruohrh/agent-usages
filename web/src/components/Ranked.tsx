@@ -79,56 +79,66 @@ export const COMMON_MEASURES: Measure[] = [
 const ROW_GRID = 'grid grid-cols-[1.5rem_minmax(0,1fr)_4.5rem_6rem_9rem] gap-3';
 
 /**
- * A stacked composition bar that stays readable when one bucket dominates.
+ * How big this row is, against the biggest row.
  *
- * Each non-zero bucket keeps at least {@link MIN_SEGMENT} of the width, so a
- * bucket worth 0.2% of the tokens is still a visible sliver instead of nothing —
- * the honest reading ("cache-hit input is almost all of it") is carried by the
- * chips beside the bar, not by a bar that looks monochrome.
+ * One colour, one number: the fill is `this row's measure ÷ the largest row's`,
+ * so the biggest entry in the list is a full bar and everything else is read
+ * against it. It is deliberately *not* a share of the totals — that figure is the
+ * percentage beside the money.
+ */
+function SizeBar({ weight, label }: { weight: number; label: string }): React.ReactElement {
+  return (
+    <span className="flex h-1.5 w-full overflow-hidden rounded-full bg-raised" title={label}>
+      <span className="h-full rounded-full bg-accent" style={{ width: `${Math.max(0, Math.min(1, weight)) * 100}%` }} />
+    </span>
+  );
+}
+
+/**
+ * What this row is made of: its own tokens, bucket by bucket.
+ *
+ * Always the full width, because the question here is composition, not size —
+ * mixing the two in one bar is what made the old one unreadable (a segment was
+ * `share × length`, a number that means nothing). Every non-zero bucket keeps at
+ * least {@link MIN_SEGMENT} of the width, so a bucket worth 0.2% is still visible
+ * rather than crushed to nothing by the 99.5% next to it.
  */
 const MIN_SEGMENT = 0.012;
 
-/** The buckets a row actually used, in display order. */
-function usedBuckets(tokens: TokenBuckets): typeof BUCKETS {
-  return BUCKETS.filter((bucket) => tokens[bucket.key] > 0);
-}
-
-/** The composition bar plus the chips that name every bucket it drew. */
 function CompositionBar({
   tokens,
   cost,
   symbol,
-  weight,
 }: {
   tokens: TokenBuckets;
   cost: CostTotals;
   symbol: string;
-  /** How long the whole bar is, 0…1, relative to the biggest row. */
-  weight: number;
 }): React.ReactElement {
   const total = billedTokens(tokens);
   const used = usedBuckets(tokens);
-  // A bucket that is present but tiny keeps a visible sliver; the rest share what
-  // is left, so the bar still adds up to the row's weight.
-  const floors = used.length * MIN_SEGMENT;
-  const scale = weight <= floors ? MIN_SEGMENT : (weight - floors) / (1 - floors);
   const money = bucketMoney(tokens, cost);
+  const floors = used.length * MIN_SEGMENT;
+  const scale = used.length === 0 ? 0 : (1 - floors) / 1;
   return (
-    <span className="flex h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-raised">
+    <span className="flex h-2.5 w-full overflow-hidden rounded-full bg-raised">
       {used.map((bucket) => {
         const share = total === 0 ? 0 : tokens[bucket.key] / total;
-        const width = MIN_SEGMENT + share * scale * (1 - floors);
         return (
           <span
             key={bucket.key}
             className="h-full"
-            style={{ width: `${width * 100}%`, backgroundColor: bucket.color }}
-            title={`${bucket.short} ${bucket.label}：${formatTokens(tokens[bucket.key], true)} tokens（${formatShare(share)}）· ${formatCost(money[bucket.key] ?? '0', symbol)}`}
+            style={{ width: `${(MIN_SEGMENT + share * scale) * 100}%`, backgroundColor: bucket.color }}
+            title={`${bucket.short} ${bucket.label}：${formatTokens(tokens[bucket.key], true)} tokens（占本行 ${formatShare(share)}）· ${formatCost(money[bucket.key] ?? '0', symbol)}`}
           />
         );
       })}
     </span>
   );
+}
+
+/** The buckets a row actually used, in display order. */
+function usedBuckets(tokens: TokenBuckets): typeof BUCKETS {
+  return BUCKETS.filter((bucket) => bucket.key !== 'reasoning' && tokens[bucket.key] > 0);
 }
 
 /**
@@ -171,7 +181,7 @@ function BucketChips({ tokens }: { tokens: TokenBuckets }): React.ReactElement {
  * the totals is the small percentage beside the money.
  */
 const BAR_RULE =
-  '条长 = 这一行的「当前排序指标」÷ 列表里最大那一行的同一个指标（最大的那行占满）；不是占合计的比例——占合计的比例写在费用后面的小字里。分段 = 这一行自己的四个计费桶构成（I/M、I/C、I/W、O，按 token 占比），每段不足 1.2% 时保留 1.2%。';
+  '上条 = 大小：这一行的当前排序指标 ÷ 列表里最大那一行的同一个指标（最大的那行占满）。下条 = 构成：这一行自己的 token 按计费桶切开，整条 = 这一行的 100%，每段不足 1.2% 时保留 1.2% 以便看清。两条互不相干，各看各的问题。';
 
 /** The per-bucket table an expanded row shows: tokens, share and money. */
 export function BucketDetail({
@@ -333,9 +343,6 @@ export function RankedList({
                       {bucket.short}
                     </span>
                   ))}
-                  <span className="text-[11px] text-faint" title={BAR_RULE}>
-                    ⓘ 条的算法
-                  </span>
                 </span>
               </span>
               <span className={`text-right ${measure.column === 'requests' ? 'text-accent' : ''}`} title="请求数">
@@ -348,6 +355,11 @@ export function RankedList({
                 费用
               </span>
             </div>
+            <p className="mt-1.5 text-[11px] leading-5 text-faint" title={BAR_RULE}>
+              每行两条：<span className="text-muted">上条 = 大小</span>，这一行的「{measure.label}」÷ 列表里最大那一行的同一个指标
+              （最大的那行占满，不是占合计的比例）；<span className="text-muted">下条 = 构成</span>，
+              这一行的 token 按计费桶切开，整条就是这一行的 100%——两条各看各的问题，互不相乘。
+            </p>
           </div>
 
           <ol className="divide-y divide-line">
@@ -394,8 +406,12 @@ export function RankedList({
                           <span className="shrink-0 text-[11px] text-muted">{formatInstant(entry.lastUsage)}</span>
                         )}
                       </span>
-                      <span className="mt-1.5 flex items-center gap-3">
-                        <CompositionBar tokens={entry.tokens} cost={entry.cost} symbol={symbol} weight={weight} />
+                      <span className="mt-1.5 block space-y-1">
+                        <SizeBar
+                          weight={weight}
+                          label={`${measure.label}：这一行 ${formatTokens(measure.value(entry), true)}，最大的一行 ${formatTokens(max, true)}（${formatShare(max === 0 ? 0 : measure.value(entry) / max)}）`}
+                        />
+                        <CompositionBar tokens={entry.tokens} cost={entry.cost} symbol={symbol} />
                       </span>
                       <span className="mt-1 block">
                         <BucketChips tokens={entry.tokens} />

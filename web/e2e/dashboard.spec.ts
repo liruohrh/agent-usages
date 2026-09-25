@@ -486,6 +486,41 @@ test.describe('the session leaderboard', () => {
     await expect(page.locator('main ol > li').first().locator('table')).toHaveCount(0);
   });
 
+  test('draws size and composition as two separate bars', async ({ page }) => {
+    await page.goto('/?view=sessions');
+    const sessions = rootSessions(await apiDashboard(page));
+    const byCost = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total));
+
+    /** The width of a row's size bar and of each composition segment, in percent. */
+    const bars = async (index: number): Promise<{ size: number; segments: number[] }> =>
+      page.locator('main ol > li').nth(index).evaluate((row) => {
+        const spans = [...row.querySelectorAll('span')];
+        const fill = spans.find((span) => span.className.includes('bg-accent') && span.style.width.length > 0);
+        const size = fill === undefined ? -1 : Number(fill.style.width.replace('%', ''));
+        const colored = spans.filter((span) => span.style.backgroundColor.length > 0 && span.style.width.length > 0);
+        return { size, segments: colored.map((span) => Number(span.style.width.replace('%', ''))) };
+      });
+
+    // The size bar is the row's value against the largest row's: the top row fills
+    // it, and the next row is its own share of that maximum.
+    const first = await bars(0);
+    expect(first.size).toBeCloseTo(100, 1);
+    const second = await bars(1);
+    expect(second.size).toBeCloseTo((Number(byCost[1]?.cost.total) / Number(byCost[0]?.cost.total)) * 100, 1);
+
+    // The composition bar is a 100% stack of that row's own tokens, so its
+    // segments add up to the whole bar — the two encodings never multiply.
+    const sum = first.segments.reduce((total, width) => total + width, 0);
+    expect(sum).toBeGreaterThan(99);
+    expect(sum).toBeLessThan(101);
+
+    // The header says both, in words.
+    const header = await page.locator('main section div.grid').first().locator('xpath=following-sibling::p[1]').innerText();
+    expect(header).toContain('大小');
+    expect(header).toContain('构成');
+    expect(header).toContain('不是占合计的比例');
+  });
+
   test('still offers the column view for anyone who wants it', async ({ page }) => {
     await page.goto('/?view=sessions');
     await page.locator('main section header').getByRole('button', { name: '表格视图' }).click();
