@@ -269,12 +269,15 @@ test.describe('the usage tab', () => {
     await page.goto('/?view=usage');
     const table = cardOf(page, '按 agent 分列');
     await expect(table.locator('thead th').first()).toBeVisible();
+    const detailed = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.trim());
+    for (const column of ['agent', '会话（子）', 'Q', 'I/M', 'I/C', 'I/T', 'O', 'O/T', 'T', '费用', '占比']) {
+      expect(detailed, `column ${column}`).toContain(column);
+    }
+
+    await table.getByRole('button', { name: '精简列' }).click();
     const summary = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.trim());
     expect(summary).toEqual(['agent', '会话（子）', 'Q', 'T', '费用', '占比']);
-
-    await table.getByRole('button', { name: '展开分桶' }).click();
-    const detailed = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.trim());
-    for (const column of ['I/M', 'I/C', 'I/T', 'O', 'O/T']) expect(detailed).toContain(column);
+    await table.getByRole('button', { name: '全部列' }).click();
 
     const firstBucket = table.locator('tbody tr').first().locator('td').nth(3);
     const asTokens = await firstBucket.innerText();
@@ -337,8 +340,10 @@ test.describe('the session comparison', () => {
     const table = cardStartingWith(page, '会话');
     await expect(table.locator('tbody tr')).toHaveCount(sessions.length);
 
+    // Every indicator is on screen by default — hiding buckets behind a toggle is
+    // what made the comparison view useless.
     const head = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.replace(/[↕▼▲]/g, '').trim());
-    for (const column of ['会话', '项目', 'agent', 'Q', 'I/C', '缓存金额', 'T', '费用']) {
+    for (const column of ['会话', '项目', 'agent', 'Q', 'I/M', 'I/C', 'O', 'T', '缓存金额', '费用', '最后使用']) {
       expect(head, `column ${column}`).toContain(column);
     }
 
@@ -378,14 +383,18 @@ test.describe('the session comparison', () => {
     await expect(firstRow()).toContainText(byCacheMoney?.title ?? '');
   });
 
-  test('unfolds the per-bucket columns on request', async ({ page }) => {
+  test('can be reduced to the main columns, then restored', async ({ page }) => {
     await page.goto('/?view=sessions');
     const table = cardStartingWith(page, '会话');
-    await table.getByRole('button', { name: '展开分桶' }).click();
-    const head = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.replace(/[↕▼▲]/g, '').trim());
-    for (const column of ['I/M', 'I/W', 'O', 'R', '最后使用']) {
-      expect(head, `column ${column}`).toContain(column);
-    }
+    const head = async (): Promise<string[]> =>
+      (await table.locator('thead th').allInnerTexts()).map((cell) => cell.replace(/[↕▼▲]/g, '').trim());
+
+    await table.getByRole('button', { name: '精简列' }).click();
+    const compact = await head();
+    expect(compact).toContain('Q');
+    expect(compact).not.toContain('I/M');
+    await table.getByRole('button', { name: '全部列' }).click();
+    expect(await head()).toContain('I/M');
   });
 
   test('the overview ranks the dearest sessions and links to the table', async ({ page }) => {
@@ -431,13 +440,12 @@ test.describe('layout', () => {
     await expectStacked(page, '本会话模型明细', '本会话计价区间');
   });
 
-  test('a wide window needs no horizontal scrolling inside the summary tables', async ({ page }) => {
+  test('the summary tables fit at 1440, the wide ones scroll inside their card', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     for (const [view, title] of [
       ['overview', '构成'],
       ['usage', '这部分的用量'],
       ['usage', '按 agent 分列'],
-      ['sessions', '会话'],
     ] as const) {
       await page.goto(`/?view=${view}`);
       const card = cardStartingWith(page, title);
@@ -448,6 +456,17 @@ test.describe('layout', () => {
         .evaluate((table) => ({ table: table.scrollWidth, wrapper: table.parentElement?.clientWidth ?? 0 }));
       expect(measured.table, `${view}/${title} fits its card`).toBeLessThanOrEqual(measured.wrapper + 1);
     }
+
+    // The comparison table carries twelve columns; at 1440 it scrolls inside its
+    // own card, and the page itself must never scroll sideways.
+    await page.goto('/?view=sessions');
+    const measured = await cardStartingWith(page, '会话')
+      .locator('table')
+      .first()
+      .evaluate((table) => ({ table: table.scrollWidth, wrapper: table.parentElement?.clientWidth ?? 0 }));
+    expect(measured.table).toBeGreaterThan(0);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, 'the page stays inside the window').toBeLessThanOrEqual(1);
   });
 
   test('no width makes the page scroll sideways', async ({ page }) => {

@@ -52,7 +52,7 @@ export function AgentTable({
   // Balanced default: the five figures a reader compares, plus the money and its
   // share. The rest of the CLI's columns are one click away rather than always on
   // screen — 13 live columns at 12px is what made this table feel cramped.
-  const [detailed, setDetailed] = useState(false);
+  const [detailed, setDetailed] = useState(true);
   const totalCost = agents.reduce((total, agent) => total + Number(agent.cost.total), 0);
   const totals = agents.reduce(
     (sum, agent) => ({
@@ -113,8 +113,9 @@ export function AgentTable({
             type="button"
             onClick={() => setDetailed((value) => !value)}
             className={`rounded border px-2 py-0.5 text-[11px] ${detailed ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
+            title={detailed ? '只留请求/总量/费用/占比' : '显示每个计费桶'}
           >
-            {detailed ? '收起分桶' : '展开分桶'}
+            {detailed ? '精简列' : '全部列'}
           </button>
           <div className="flex overflow-hidden rounded border border-line">
             {(
@@ -358,7 +359,9 @@ export function SessionTable({
   showProject?: boolean;
 }): React.ReactElement {
   const [flat, setFlat] = useState(false);
-  const [detailed, setDetailed] = useState(false);
+  // Everything is visible unless the reader asks for fewer columns: hiding
+  // indicators behind a toggle is what made the comparison view useless.
+  const [compact, setCompact] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'cost', desc: true });
   const ids = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
 
@@ -374,7 +377,16 @@ export function SessionTable({
 
   const shown = rows.slice(0, limit);
   const totalCost = rows.reduce((sum, session) => sum + Number(session.cost.total), 0);
-  const columns = COLUMNS.filter((column) => (detailed ? true : column.always));
+  // A bucket column whose value is zero for every row would be a column of
+  // dashes; it appears as soon as one row has one.
+  const hasWrite = rows.some((session) => session.tokens.cacheWrite > 0);
+  const hasReasoning = rows.some((session) => session.tokens.reasoning > 0);
+  const columns = COLUMNS.filter(
+    (column) =>
+      (column.key !== 'cacheWrite' || hasWrite) &&
+      (column.key !== 'reasoning' || hasReasoning) &&
+      (!compact || column.always),
+  );
 
   /** Sort by `key`, flipping the direction when it is already the sort. */
   const sortBy = (key: SortKey): void =>
@@ -388,10 +400,11 @@ export function SessionTable({
           <span className="hidden text-[11px] text-faint sm:inline">点表头排序</span>
           <button
             type="button"
-            onClick={() => setDetailed((value) => !value)}
-            className={`rounded border px-2 py-0.5 text-[11px] ${detailed ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
+            onClick={() => setCompact((value) => !value)}
+            className={`rounded border px-2 py-0.5 text-[11px] ${compact ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
+            title={compact ? '恢复全部指标列' : '只留主列（表格更窄）'}
           >
-            {detailed ? '收起分桶' : '展开分桶'}
+            {compact ? '全部列' : '精简列'}
           </button>
           <button
             type="button"
@@ -405,7 +418,7 @@ export function SessionTable({
       }
     >
       <div className="max-h-[32rem] overflow-auto">
-        <table className="w-full min-w-[54rem] border-collapse text-[13px]">
+        <table className="w-full min-w-[76rem] border-collapse text-[13px]">
           <thead className="sticky top-0 bg-panel">
             <tr className="text-[11px] text-faint">
               {columns.map((column) => (

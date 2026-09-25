@@ -251,6 +251,8 @@ function TopSessions({
   );
   const rows = [...roots].sort((left, right) => Number(right.cost.total) - Number(left.cost.total)).slice(0, 8);
   const total = roots.reduce((sum, session) => sum + Number(session.cost.total), 0);
+  const hasWrite = roots.some((session) => session.tokens.cacheWrite > 0);
+  const hasReasoning = roots.some((session) => session.tokens.reasoning > 0);
   const billed = (session: SessionNode): number =>
     session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite + session.tokens.output;
   return (
@@ -266,14 +268,18 @@ function TopSessions({
         <p className="py-6 text-center text-[13px] text-faint">当前范围没有会话。</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[46rem] border-collapse text-[13px]">
+          <table className="w-full min-w-[62rem] border-collapse text-[13px]">
             <thead>
               <tr className="text-[11px] text-faint">
                 <th className="px-2 py-1.5 text-left font-medium">会话</th>
                 {showProject && <th className="px-2 py-1.5 text-left font-medium">项目</th>}
                 <th className="px-2 py-1.5 text-left font-medium">agent</th>
                 <th className="px-2 py-1.5 text-right font-medium" title="请求数">Q</th>
+                <th className="px-2 py-1.5 text-right font-medium" title="未命中缓存的输入">I/M</th>
                 <th className="px-2 py-1.5 text-right font-medium" title="缓存命中输入">I/C</th>
+                {hasWrite && <th className="px-2 py-1.5 text-right font-medium" title="缓存写入输入">I/W</th>}
+                <th className="px-2 py-1.5 text-right font-medium" title="输出（含思考）">O</th>
+                {hasReasoning && <th className="px-2 py-1.5 text-right font-medium" title="其中思考">R</th>}
                 <th className="px-2 py-1.5 text-right font-medium" title="缓存命中这条计费项的钱">缓存金额</th>
                 <th className="px-2 py-1.5 text-right font-medium" title="token 总计（计费桶）">T</th>
                 <th className="px-2 py-1.5 text-right font-medium">费用</th>
@@ -300,12 +306,20 @@ function TopSessions({
                     <AgentBadge id={session.agent} small />
                   </td>
                   <td className="tnum px-2 py-2 text-right">{formatTokens(session.requests)}</td>
+                  <td className="tnum px-2 py-2 text-right">{formatTokens(session.tokens.input, true)}</td>
                   <td className="tnum px-2 py-2 text-right">
                     {formatTokens(session.tokens.cacheRead, true)}
                     <span className="ml-1 text-[11px] text-faint">
                       {billed(session) === 0 ? '' : formatShare(session.tokens.cacheRead / billed(session))}
                     </span>
                   </td>
+                  {hasWrite && (
+                    <td className="tnum px-2 py-2 text-right">{formatTokens(session.tokens.cacheWrite, true)}</td>
+                  )}
+                  <td className="tnum px-2 py-2 text-right">{formatTokens(session.tokens.output, true)}</td>
+                  {hasReasoning && (
+                    <td className="tnum px-2 py-2 text-right">{formatTokens(session.tokens.reasoning, true)}</td>
+                  )}
                   <td className="tnum px-2 py-2 text-right">{formatCost(session.cost.cacheHitInputCost, symbol)}</td>
                   <td className="tnum px-2 py-2 text-right">{formatTokens(billed(session), true)}</td>
                   <td className="tnum px-2 py-2 text-right">
