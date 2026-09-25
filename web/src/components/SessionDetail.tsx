@@ -110,7 +110,9 @@ export function SessionDetailPanel({
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+      {/* Stacked like the project overview: six and seven columns side by side
+          do not fit half a window, and a squeezed table is worse than a taller page. */}
+      <div className="space-y-3">
         <ModelTable models={detail.models} symbol={symbol} title="本会话模型明细" />
         <BandTable bands={detail.bands} symbol={symbol} title="本会话计价区间" />
       </div>

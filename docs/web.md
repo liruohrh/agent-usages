@@ -285,9 +285,9 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 pnpm install                                        # 2 个 workspace 包
 pnpm --filter web build                             # tsc --noEmit && vite build
 pnpm web:snapshot                                   # 生成离线 fixture（不入库，先跑一次）
-pnpm web:smoke                                      # 离线快照，37 项断言
-node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 75 项
-pnpm web:e2e                                        # 真浏览器：5 条，起服务 + 切项目/会话 + 量布局
+pnpm web:smoke                                      # 离线快照，44 项断言
+node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 89 项
+pnpm web:e2e                                        # 真浏览器：6 条，起服务 + 切项目/会话 + 量布局
 CI=true pnpm typecheck                              # 根 tsconfig 覆盖 src/serve/**
 CI=true pnpm test                                   # 488 个用例
 ```

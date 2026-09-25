@@ -164,18 +164,35 @@ test.describe('scope switching', () => {
 });
 
 test.describe('layout', () => {
-  test('the detail tables are stacked, not side by side', async ({ page }) => {
-    await page.goto('/');
-    const models = await cardOf(page, '模型明细').boundingBox();
-    const bands = await cardOf(page, '计价区间明细').boundingBox();
-    expect(models).not.toBeNull();
-    expect(bands).not.toBeNull();
-    if (models === null || bands === null) return;
+  /** Two cards must line up on the left, have the same width, and stack. */
+  async function expectStacked(page: Page, above: string, below: string): Promise<void> {
+    const first = await cardOf(page, above).boundingBox();
+    const second = await cardOf(page, below).boundingBox();
+    expect(first, `${above} is on screen`).not.toBeNull();
+    expect(second, `${below} is on screen`).not.toBeNull();
+    if (first === null || second === null) return;
+    expect(Math.abs(first.x - second.x), 'same left edge').toBeLessThanOrEqual(1);
+    expect(Math.abs(first.width - second.width), 'same width').toBeLessThanOrEqual(1);
+    expect(second.y, `${below} starts below ${above}`).toBeGreaterThanOrEqual(first.y + first.height - 1);
+  }
 
-    // Left edges line up, the second card sits below the first, same width.
-    expect(Math.abs(models.x - bands.x)).toBeLessThanOrEqual(1);
-    expect(bands.y).toBeGreaterThanOrEqual(models.y + models.height - 1);
-    expect(Math.abs(models.width - bands.width)).toBeLessThanOrEqual(1);
+  test('the project overview stacks its detail tables', async ({ page }) => {
+    await page.goto('/');
+    await expectStacked(page, '模型明细', '计价区间明细');
+  });
+
+  test('a session stacks its own detail tables too', async ({ page }) => {
+    await page.goto('/');
+    const project = (await apiDashboard(page)).projects[0];
+    test.skip(project === undefined, 'needs at least one project');
+    if (project === undefined) return;
+    await selectProject(page, project.name);
+
+    const link = page.locator('main a[href^="/s/"]').first();
+    test.skip((await link.count()) === 0, 'no billed session to open');
+    await link.click();
+    await expect(cardOf(page, '本会话模型明细')).toBeVisible();
+    await expectStacked(page, '本会话模型明细', '本会话计价区间');
   });
 
   test('a wide window needs no horizontal scrolling inside the tables', async ({ page }) => {

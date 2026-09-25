@@ -187,6 +187,38 @@ async function exercise(base, { live }) {
   const badRange = await call(base, '/api/summary?range=2026-01-01..2026-02-02..2026-03-03');
   check('非法 range → 400 JSON', badRange.status === 400 && typeof badRange.body?.error?.message === 'string', `HTTP ${badRange.status}`);
 
+  // The detail tables the UI draws: one row per identity, and the rows add up to
+  // the totals they sit under. A row per session both duplicates the identity
+  // (which is the React key) and leaves the tables short.
+  const dashboard = await call(base, '/api/dashboard');
+  check('GET /api/dashboard → 200', dashboard.status === 200, `HTTP ${dashboard.status}`);
+  const models = dashboard.body?.models ?? [];
+  const bands = dashboard.body?.bands ?? [];
+  const identity = (row, parts) => parts.map((part) => row?.[part] ?? '').join('|');
+  const unique = (keys) => new Set(keys).size === keys.length;
+  const requestSum = (rows) => rows.reduce((total, row) => total + (row?.requests ?? 0), 0);
+  const modelKey = (row) => identity(row, ['agent', 'projectId', 'model']);
+  const bandKey = (row) => identity(row, ['agent', 'projectId', 'model', 'periodId', 'tier']);
+  check('模型明细非空', models.length > 0);
+  check('模型明细一行一个 (agent, 项目, 模型)', models.length > 0 && unique(models.map(modelKey)));
+  check('计价区间一行一个 (agent, 项目, 模型, 区间, 档位)', bands.length > 0 && unique(bands.map(bandKey)));
+  check(
+    'Σ 模型行请求 === 总计请求',
+    requestSum(models) === summary.body?.totals?.requests,
+    `${requestSum(models)} vs ${summary.body?.totals?.requests}`,
+  );
+  check(
+    'Σ 区间行请求 === 总计请求',
+    requestSum(bands) === summary.body?.totals?.requests,
+    `${requestSum(bands)} vs ${summary.body?.totals?.requests}`,
+  );
+  const short = (dashboard.body?.projects ?? []).filter((project) => requestSum(project.models) !== project.requests);
+  check(
+    '每个项目 Σ 模型行请求 === 项目请求',
+    short.length === 0,
+    short.map((project) => `${project.id}: ${requestSum(project.models)} vs ${project.requests}`).join('; '),
+  );
+
   const shell = await fetch(base);
   const html = await shell.text();
   check('GET / → 200 HTML', shell.status === 200 && (shell.headers.get('content-type') ?? '').includes('text/html'), `HTTP ${shell.status}`);

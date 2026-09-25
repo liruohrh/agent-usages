@@ -1047,9 +1047,14 @@ function draftsFromResult(result: UsageResult, labels: AgentLabelSource): Drafts
     draft.lastUsage = report.lastUsage;
 
     // Model and price-band rows come from the sessions that *root* a delegation
-    // subtree: a subagent's money is already inside its parent's row, so adding
-    // both would count it twice. A subagent whose parent is out of range is a
-    // root of its own and is counted here.
+    // subtree: a subagent's money is already inside its parent's row (the parent's
+    // records are folded with its children's), so listing both would count it
+    // twice. "Roots" is therefore narrow: only a session that is a subagent *and*
+    // whose parent is in this report has its usage counted elsewhere. A subagent
+    // whose parent is out of range, and a fork that carries a `parentId` without
+    // being a descendant (the report bills it independently), each speak for
+    // themselves — dropping them leaves the tables short of the totals they sit
+    // under.
     const reported = new Set((report.sessionReports ?? []).map((session) => session.id));
     for (const session of report.sessionReports ?? []) {
       const node = sessionNode(session, draft.id, draft.name, report.path);
@@ -1057,7 +1062,8 @@ function draftsFromResult(result: UsageResult, labels: AgentLabelSource): Drafts
       draft.reports.set(node.uid, session);
       const workspace = workspaceDraft(draft, node.workspace, report);
       workspace.sessions.push(node);
-      if (session.isSubagent || (session.parentId !== null && reported.has(session.parentId))) continue;
+      const foldedIntoParent = session.isSubagent && session.parentId !== null && reported.has(session.parentId);
+      if (foldedIntoParent) continue;
       for (const model of session.models) draft.models.push(modelRow(session.agent, draft.id, model));
       for (const band of session.bands) draft.bands.push(bandRow(session.agent, draft.id, band));
     }
