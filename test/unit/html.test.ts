@@ -205,6 +205,100 @@ describe('renderHtmlReport', () => {
     expect(html).toContain('>3<');
   });
 
+  it('gives every figure column a width, so a title cannot steal one', () => {
+    const html = render(
+      report({
+        requests: 3,
+        tokens: SMALL,
+        cost: cost('1.0000'),
+        projects: [pricedProject('demo', '1.0000')],
+      }),
+    );
+    expect(html).toContain('table-layout: fixed');
+    expect(html).toMatch(/table \{[^}]*width: 100%[^}]*table-layout: fixed[^}]*\}/);
+    expect(html).toContain('.scroll { overflow-x: auto; }');
+    // 标题 + 五个桶 + T + 请求 + 金额 + 首次/最近：一列一个 col，顺序即列序。
+    expect(html).toContain(
+      '<colgroup><col class="c-name">' +
+        '<col class="c-num">'.repeat(6) +
+        '<col class="c-count"><col class="c-money"><col class="c-date"><col class="c-date"></colgroup>',
+    );
+    // 数字列仍是右对齐、不换行的等宽数字，固定列宽不会把它们挤断。
+    expect(html).toMatch(/td\.num, th\.num \{[^}]*text-align: right[^}]*tabular-nums[^}]*white-space: nowrap/);
+  });
+
+  it('clamps a long title to two lines while keeping the whole string', () => {
+    // 会话标题可以是一段说明接一条没有空格的路径（本地数据最长 85 字符，
+    // 报告里的问题出现过 200+）；自动布局下它会挤掉数字列，所以只画两行，
+    // 但一个字都不能丢。
+    const long = `[pi] 去看这个会话， /home/user/.zcode/cli/rollout/model-io-sess_a7f341ac-f54c-4b9e-90a1-${'0'.repeat(120)}`;
+    expect(long.length).toBeGreaterThan(200);
+    const html = render(
+      report({
+        requests: 1,
+        tokens: SMALL,
+        cost: cost('1.0000'),
+        projects: [
+          projectRow({
+            id: 'demo',
+            requests: 1,
+            tokens: SMALL,
+            cost: cost('1.0000'),
+            sessionReports: [sessionRow({ id: 's', title: long, requests: 1, tokens: SMALL, cost: cost('1.0000') })],
+          }),
+        ],
+      }),
+    );
+    // 完整原文在 title 里，也在可见文本里：截断只发生在绘制层。
+    expect(html).toContain(`title="${long}"`);
+    expect(html).toContain(`<span class="clamp">${long}</span>`);
+    expect(html).toMatch(/<td class="name" title="\[pi\][^"]*"><span class="name-line"><span class="clamp">/);
+    expect(html).toMatch(/\.clamp \{[^}]*display: -webkit-box[^}]*overflow-wrap: anywhere/);
+    expect(html).toContain('-webkit-line-clamp: 2');
+  });
+
+  it('keeps a session badge outside the clamp, where the cut cannot hide it', () => {
+    const html = render(
+      report({
+        requests: 1,
+        projects: [
+          projectRow({
+            id: 'demo',
+            requests: 1,
+            sessionReports: [sessionRow({ id: 's', title: 'x'.repeat(300), archived: true, subagentCount: 2 })],
+          }),
+        ],
+      }),
+    );
+    expect(html).toMatch(/<span class="clamp">x+<\/span><span class="badge">/);
+    // 徽标和标题抢一行，折行会把 "2 个子代理" 拆成半句话。
+    expect(html).toMatch(/\.badge \{[^}]*white-space: nowrap/);
+  });
+
+  it('sizes the band window and its rate card instead of letting them push the figures', () => {
+    // 区间窗口最长实测 113 字符、费率卡 60 字符上下；固定布局里若还 nowrap，
+    // 它们会盖住右边的数字列，所以这两列必须在自己的宽度内换行。
+    const band = {
+      model: 'demo-model',
+      periodId: '2026-08-16',
+      periodLabel: '正式版',
+      window: 'V4.1-Flash (demo-model), peak/off-peak pricing（2026-08-16 12:00 → 至今 (UTC+08:00)）',
+      tier: 'flat' as const,
+      resolution: 'exact' as const,
+      requests: 3,
+      tokens: SMALL,
+      cost: cost('1.0000'),
+      components: [{ id: 'input-miss', label: '未命中', rate: '1', per: 1_000_000, tokens: 10, amount: '1.0000' }],
+    };
+    const html = render(report({ requests: 3, tokens: SMALL, cost: cost('1.0000'), bands: [band] }));
+    expect(html).toContain(
+      '<colgroup><col class="c-name"><col class="c-window">' +
+        '<col class="c-num">'.repeat(6) +
+        '<col class="c-count"><col class="c-money"><col class="c-rates"></colgroup>',
+    );
+    expect(html).toMatch(/td\.rates, td\.wrap \{[^}]*overflow-wrap: anywhere/);
+  });
+
   it('carries no script and no external resource', () => {
     const html = render(
       report({

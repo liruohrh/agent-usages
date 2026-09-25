@@ -49,6 +49,54 @@ export interface HtmlOptions {
  */
 const BUCKETS: readonly string[] = ['I/M', 'I/C', 'I/W', 'O', 'R'];
 
+/**
+ * A column's width class, the stylesheet's `col.c-<name>`.
+ *
+ * The widths themselves are CSS because they are layout facts, not data; what
+ * belongs here is that every table names all of its columns. `table-layout:
+ * fixed` sizes columns it is not told about by sharing what is left equally,
+ * which would move the figures every time a title changed.
+ */
+type Column = 'name' | 'num' | 'count' | 'money' | 'date' | 'window' | 'rates';
+
+/** The columns every figure table shares: title, five buckets, their total, requests, money. */
+const FIGURE_COLUMNS: readonly Column[] = ['name', ...BUCKETS.map((): Column => 'num'), 'num', 'count', 'money'];
+
+/** One table's column plan: the `<colgroup>` classes in order, and the head cells after 金额. */
+interface TableShape {
+  /** One entry per column. */
+  columns: readonly Column[];
+  /** Extra `<th>` cells after 金额, already escaped; one per trailing column. */
+  heads?: readonly string[];
+}
+
+/** The shape of a figure table, with extra columns (and their head cells) after 金额. */
+function figureShape(trailing: readonly Column[] = [], heads: readonly string[] = []): TableShape {
+  return { columns: [...FIGURE_COLUMNS, ...trailing], heads };
+}
+
+/** The `<colgroup>` that carries the column widths to a fixed-layout table. */
+function colGroup(columns: readonly Column[]): string {
+  return `<colgroup>${columns.map((column) => `<col class="c-${column}">`).join('')}</colgroup>`;
+}
+
+/**
+ * A title cell: at most two visible lines, the whole string in `title`.
+ *
+ * A session title is whatever a human typed when the session opened — a
+ * paragraph, or a path with no space in it — so the cell must stop growing
+ * without losing anything: the clamp shortens what is drawn, `title` keeps every
+ * character one hover away, and the stylesheet breaks a path that has nowhere to
+ * break. Badges stay outside the clamp, because one that is clipped away is
+ * information the row no longer has.
+ */
+function titleCell(full: string, shown: string, badges = '', className = 'name'): string {
+  return (
+    `<td class="${className}" title="${escapeHtml(full)}">` +
+    `<span class="name-line"><span class="clamp">${shown}</span>${badges}</span></td>`
+  );
+}
+
 /** The five bucket values, in the same order as {@link BUCKETS}. */
 function bucketValues(counts: TokenBreakdown): number[] {
   return [counts.inputMiss, counts.inputHit, counts.inputWrite, counts.outputOnly, counts.reasoning];
@@ -109,8 +157,11 @@ function dateHead(): string[] {
 }
 
 /** A token table, scrollable so a narrow window never shears the columns. */
-function tokenTable(first: string, rows: string, trailing: readonly string[] = []): string {
-  return `<div class="scroll"><table>${tokenHead(first, trailing)}<tbody>${rows}</tbody></table></div>`;
+function tokenTable(first: string, rows: string, shape: TableShape = figureShape()): string {
+  return (
+    `<div class="scroll"><table>${colGroup(shape.columns)}` +
+    `${tokenHead(first, shape.heads ?? [])}<tbody>${rows}</tbody></table></div>`
+  );
 }
 
 /** One node's headline figures: the five buckets, their total, requests, money. */
@@ -145,7 +196,7 @@ function modelTable(models: readonly ModelBreakdown[], symbol: string): string {
   const rows = models
     .map(
       (model) =>
-        `<tr><td>${escapeHtml(model.model)}</td>${bucketCells(model.tokens)}${sumCells(
+        `<tr>${titleCell(model.model, escapeHtml(model.model))}${bucketCells(model.tokens)}${sumCells(
           model.tokens,
           model.requests,
           model.cost.total,
@@ -198,14 +249,13 @@ function sessionRows(session: SessionReport, options: HtmlOptions): string[] {
       ? `<span class="badge">${escapeHtml(labels.tree.subagents(count(session.subagentCount)))}</span>`
       : '') +
     (split ? `<span class="badge">${escapeHtml(labels.scope.total)}</span>` : '');
-  const name = `${session.isSubagent ? '<span class="nested">↳</span>' : ''}${escapeHtml(
-    session.title ?? labels.tree.untitled,
-  )}${badges}`;
+  const shown = session.title ?? labels.tree.untitled;
+  const name = `${session.isSubagent ? '<span class="nested">↳</span>' : ''}${escapeHtml(shown)}`;
   const dates =
     `<td class="date">${escapeHtml(dayLabel(session.firstUsage))}</td>` +
     `<td class="date">${escapeHtml(dayLabel(session.lastUsage))}</td>`;
   const rows = [
-    `<tr><td class="name${session.isSubagent ? ' subagent' : ''}">${name}</td>${bucketCells(
+    `<tr>${titleCell(shown, name, badges, `name${session.isSubagent ? ' subagent' : ''}`)}${bucketCells(
       session.total.tokens,
     )}${sumCells(
       session.total.tokens,
@@ -275,7 +325,7 @@ function projectCard(project: ProjectReport, options: HtmlOptions): string {
   ];
   if (rows.length > 0) {
     const body = orderedSessions(rows).flatMap((session) => sessionRows(session, options)).join('');
-    blocks.push(tokenTable(labels.html.session, body, dateHead()));
+    blocks.push(tokenTable(labels.html.session, body, figureShape(['date', 'date'], dateHead())));
   }
   blocks.push('</article>');
   return blocks.join('\n');
@@ -294,11 +344,13 @@ function bandTable(bands: readonly BandSummary[], symbol: string, historical: bo
   const unit = historical ? labels.rate.vendorCard : labels.rate.perMillion(symbol);
   const rows = bands
     .map((band) => {
+      const title = bandTitle(band);
       const rates = band.components
         .map((component) => `${escapeHtml(component.label)} ${escapeHtml(displayRate(component.rate))}`)
         .join(' · ');
       return (
-        `<tr><td>${escapeHtml(bandTitle(band))}</td><td class="wrap">${escapeHtml(bandWindow(band))}</td>` +
+        `<tr>${titleCell(title, escapeHtml(title))}` +
+        `<td class="wrap">${escapeHtml(bandWindow(band))}</td>` +
         bucketCells(band.tokens) +
         sumCells(band.tokens, band.requests, band.cost.total, symbol) +
         `<td class="rates">${rates}</td></tr>`
@@ -314,7 +366,10 @@ function bandTable(bands: readonly BandSummary[], symbol: string, historical: bo
     `<th class="num">${escapeHtml(labels.html.amount)}</th>`,
     `<th>${escapeHtml(labels.html.unitPrice)}（${escapeHtml(unit)}）</th>`,
   ].join('');
-  const table = `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  // A band window runs to 100+ characters and a rate card lists every component,
+  // so both columns wrap inside a declared width instead of pushing the figures.
+  const columns: readonly Column[] = ['name', 'window', ...FIGURE_COLUMNS.slice(1), 'rates'];
+  const table = `<div class="scroll"><table>${colGroup(columns)}<thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
   return `<details class="fold"><summary>${escapeHtml(labels.html.bands)}</summary>${table}</details>`;
 }
 
@@ -420,18 +475,40 @@ h3 { margin: 0 0 6px; font-size: 15px; }
 .stat-label { color: var(--muted); font-size: 11px; }
 .stat-value { font-variant-numeric: tabular-nums; font-weight: 600; }
 .scroll { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* A title may be 200 characters or a path with nowhere to break; in auto layout
+   it took the width it wanted and the figures beside it wrapped. Fixed layout
+   gives every declared column the width its class asks for, so the title column
+   is the only one that moves. The percentages keep the figures legible down to
+   the min-width; below it the scroll box scrolls instead of shearing the
+   numbers, and a 5.5% figure column still holds 901.3M at 84em. */
+table { width: 100%; min-width: 84em; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+col.c-num { width: 5.5%; }
+col.c-count { width: 7%; }
+col.c-money { width: 9%; }
+col.c-date { width: 8%; }
+col.c-window { width: 11%; }
+col.c-rates { width: 15%; }
 th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+/* A heading wraps rather than spilling out of its column: the unit-price heading
+   carries the rate card's own label, which is a sentence in some languages. */
+th { color: var(--muted); font-weight: 600; overflow-wrap: anywhere; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-td.name { min-width: 180px; }
-td.date, th.date, td.rates, td.wrap { white-space: nowrap; }
-td.rates, td.wrap { color: var(--muted); font-size: 12px; }
+td.name, td.wrap { text-align: left; }
+td.name { overflow-wrap: anywhere; }
+.name-line { display: flex; align-items: baseline; }
+/* Both the prefixed and the standard spellings: Safari and Chrome only honour
+   -webkit-box, and line-clamp is what the property is called now. */
+.clamp { display: -webkit-box; flex: 1 1 auto; min-width: 0; overflow: hidden; overflow-wrap: anywhere;
+         -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+td.date, th.date { white-space: nowrap; }
+td.rates, td.wrap { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 tr.scope td { color: var(--muted); }
 td.name.subagent { padding-left: 24px; }
 .nested { margin-right: 4px; color: var(--muted); }
 .sub { display: block; color: var(--muted); font-size: 11px; }
-.badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--track); color: var(--muted); font-size: 11px; font-weight: 400; }
+/* A badge shares the title's line, so it must not wrap: half a badge ("2 个子" /
+   "代理") reads as a different count, and narrowing the title is the point. */
+.badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--track); color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
 .chart { margin: 0 0 14px; }
 figcaption { margin-bottom: 6px; color: var(--muted); font-size: 12px; }
 .bar-row { display: grid; grid-template-columns: minmax(80px, 200px) 1fr 56px; align-items: center; gap: 8px; margin-bottom: 3px; font-size: 12px; }
