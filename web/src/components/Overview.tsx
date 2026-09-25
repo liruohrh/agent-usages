@@ -13,6 +13,7 @@ import type { Dashboard, ProjectSummary, SessionNode, TimeseriesBucket } from '.
 import { formatCost, formatShare, formatTokens } from '../format';
 import { Card, Notice } from './Bits';
 import { Composition, KpiRow } from './Metrics';
+import { localeTag, useLanguage, useT } from '../i18n';
 import { SessionLeaderboard } from './Sessions';
 import { ProjectBoard } from './Ranked';
 import { EChart, timeseriesOption, type SeriesMetric } from '../charts';
@@ -40,6 +41,8 @@ export function Overview({
   dark: boolean;
   loading: boolean;
 }): React.ReactElement {
+  const t = useT();
+  const locale = localeTag(useLanguage());
   const tokens = project === null ? dashboard.totals.tokens : project.tokens;
   const cost = project === null ? dashboard.totals.cost : project.cost;
   const requests = project === null ? dashboard.totals.requests : project.requests;
@@ -55,7 +58,7 @@ export function Overview({
   const firstUsage = project === null ? dashboard.totals.firstUsage : project.firstUsage;
   const lastUsage = project === null ? dashboard.totals.lastUsage : project.lastUsage;
   const day = (instant: number | null): string =>
-    instant === null ? '—' : new Date(instant).toLocaleDateString('zh-CN');
+    instant === null ? '—' : new Date(instant).toLocaleDateString(locale);
 
   return (
     <div className="space-y-4">
@@ -63,31 +66,31 @@ export function Overview({
         items={[
           {
             // No label: `¥135.0531` says what it is. The definition stays on hover.
-            title: '当前范围的总费用',
+            title: t.kpi.money,
             value: formatCost(cost.total, symbol),
             hint: `${dashboard.currency} · ${dashboard.pricingLabel}`,
             tone: 'accent',
           },
           {
             label: 'Q',
-            title: '请求数',
+            title: t.kpi.requests,
             value: formatTokens(requests),
-            hint: `${sessions} 个会话（含 ${subagents} 个子代理）`,
-            ...(unpriced > 0 ? { note: `未计价 ${unpriced}` } : {}),
+            hint: t.kpi.requestsHint(String(sessions), String(subagents)),
+            ...(unpriced > 0 ? { note: t.kpi.unpriced(String(unpriced)) } : {}),
           },
           {
             label: 'T',
-            title: '计费桶 token 合计 = I/T + O/T',
+            title: t.kpi.tokens,
             value: formatTokens(billed, true),
-            ...(tokens.reasoning > 0 ? { hint: `R ${formatTokens(tokens.reasoning, true)}` } : {}),
-            ...(tokens.cacheWrite > 0 ? { note: `I/W ${formatTokens(tokens.cacheWrite, true)}` } : {}),
+            ...(tokens.reasoning > 0 ? { hint: t.kpi.reasoning(formatTokens(tokens.reasoning, true)) } : {}),
+            ...(tokens.cacheWrite > 0 ? { note: t.kpi.cacheWrite(formatTokens(tokens.cacheWrite, true)) } : {}),
           },
           {
-            label: 'I/C 占比',
-            title: '缓存命中输入 ÷ 输入合计（I/C ÷ I/T）',
+            label: t.kpi.hitRate,
+            title: t.kpi.hitRateHint,
             value: formatShare(cacheHit),
-            hint: `I/C ${formatTokens(tokens.cacheRead, true)}`,
-            note: `I/T ${formatTokens(inputTotal, true)}`,
+            hint: t.kpi.cacheRead(formatTokens(tokens.cacheRead, true)),
+            note: t.kpi.inputTotal(formatTokens(inputTotal, true)),
           },
         ]}
       />
@@ -98,7 +101,7 @@ export function Overview({
         </div>
         <div className="xl:col-span-2">
           <Card
-            title="时间序列"
+            title={t.overview.series}
             actions={
               <>
                 <div className="flex overflow-hidden rounded border border-line">
@@ -109,16 +112,16 @@ export function Overview({
                       onClick={() => onBucket(option)}
                       className={`px-2.5 py-1 text-[12px] ${bucket === option ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
                     >
-                      {option === 'day' ? '按天' : '按小时'}
+                      {option === 'day' ? t.overview.byDay : t.overview.byHour}
                     </button>
                   ))}
                 </div>
                 <div className="flex overflow-hidden rounded border border-line">
                   {(
                     [
-                      { key: 'cost', label: '费用' },
-                      { key: 'requests', label: 'Q' },
-                      { key: 'tokens', label: 'T' },
+                      { key: 'cost', label: t.tables.seriesCost },
+                      { key: 'requests', label: t.tables.seriesRequests },
+                      { key: 'tokens', label: t.tables.seriesTokens },
                     ] as const
                   ).map((option) => (
                     <button
@@ -136,14 +139,14 @@ export function Overview({
           >
             {points.length === 0 ? (
               <p className="py-10 text-center text-[13px] text-faint">
-                {bucket === 'hour' ? '最近 14 天没有消耗（小时粒度只保留 14 天）。' : '当前范围没有消耗。'}
+                {bucket === 'hour' ? t.overview.emptyHour : t.overview.empty}
               </p>
             ) : (
               <EChart option={timeseriesOption(points, agents, metric, symbol, dark)} height={300} />
             )}
             <p className="mt-2 text-[11px] text-faint">
-              数据 {day(firstUsage)} 起 到 {day(lastUsage)} · 按 (时间桶 × agent × 项目) 分别计价后相加
-              {bucket === 'hour' && ' · 小时粒度只覆盖最近 14 天'}
+              {t.overview.seriesNote(day(firstUsage), day(lastUsage))}
+              {bucket === 'hour' && t.overview.seriesHourNote}
             </p>
           </Card>
         </div>
@@ -155,11 +158,11 @@ export function Overview({
         <ProjectBoard
           projects={dashboard.projects}
           symbol={symbol}
-          title="项目（前五）"
+          title={t.overview.topProjects}
           limit={5}
           baseline={
             <Link to="?view=projects" className="px-1 text-[11px] text-accent hover:underline">
-              全部 {dashboard.projects.length} 个（可排序）→
+              {t.overview.allRanked(String(dashboard.projects.length))}
             </Link>
           }
           openHref={(entry) => `/p/${encodeURIComponent(entry.id)}`}
@@ -174,7 +177,7 @@ export function Overview({
       />
 
       {dashboard.warnings.length > 0 && (
-        <Notice tone="warn" title={`${dashboard.warnings.length} 条提示`}>
+        <Notice tone="warn" title={t.overview.warnings(String(dashboard.warnings.length))}>
           <ul className="list-disc space-y-0.5 pl-4">
             {dashboard.warnings.slice(0, 4).map((item) => (
               <li key={`${item.code}:${item.message.slice(0, 24)}`}>{item.message}</li>
@@ -198,6 +201,7 @@ function TopSessions({
   showProject: boolean;
   scopeName: string | null;
 }): React.ReactElement {
+  const t = useT();
   const ids = new Set(sessions.map((session) => session.id));
   const roots = sessions.filter(
     (session) => !(session.isSubagent && session.parentId !== null && ids.has(session.parentId)),
@@ -209,10 +213,10 @@ function TopSessions({
       symbol={symbol}
       showProject={showProject}
       limit={5}
-      title={scopeName === null ? '会话（前五）' : `会话（前五）· ${scopeName}`}
+      title={scopeName === null ? t.overview.topSessions : t.overview.topSessionsNamed(scopeName)}
       baseline={
         <Link to="?view=sessions" className="px-1 text-[11px] text-accent hover:underline">
-          全部 {roots.length} 个（可排序）→
+          {t.overview.allRanked(String(roots.length))}
         </Link>
       }
     />

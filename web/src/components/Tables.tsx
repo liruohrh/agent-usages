@@ -31,6 +31,7 @@ import {
   TOKEN_BUCKETS,
 } from '../format';
 import { AgentBadge, Card, Chip, ShareBar } from './Bits';
+import { useT } from '../i18n';
 
 /** Total tokens across the four billed buckets. */
 function billedTotal(tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }): number {
@@ -66,6 +67,7 @@ export function AgentTable({
   symbol: string;
   showShare?: boolean;
 }): React.ReactElement {
+  const t = useT();
   const [mode, setMode] = useState<'tokens' | 'cost' | 'share'>('tokens');
   // Balanced default: the five figures a reader compares, plus the money and its
   // share. The rest of the CLI's columns are one click away rather than always on
@@ -124,23 +126,23 @@ export function AgentTable({
 
   return (
     <Card
-      title="按 agent 分列"
+      title={t.tables.agents}
       actions={
         <>
           <button
             type="button"
             onClick={() => setDetailed((value) => !value)}
             className={`rounded border px-2 py-0.5 text-[11px] ${detailed ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
-            title={detailed ? '只留请求/总量/费用/占比' : '显示每个计费桶'}
+            title={t.tables.agentsHint(detailed)}
           >
-            {detailed ? '精简列' : '全部列'}
+            {detailed ? t.tables.lean : t.tables.full}
           </button>
           <div className="flex overflow-hidden rounded border border-line">
             {(
               [
-                { key: 'tokens', label: '数量' },
-                { key: 'cost', label: '费用' },
-                { key: 'share', label: '占比' },
+                { key: 'tokens', label: t.tables.modes.tokens },
+                { key: 'cost', label: t.tables.modes.cost },
+                { key: 'share', label: t.tables.modes.share },
               ] as const
             ).map((option) => (
               <button
@@ -180,22 +182,30 @@ export function AgentTable({
           <thead>
             <tr className="text-[11px] text-faint">
               <th className="px-2 py-1 text-left font-medium">agent</th>
-              <th className="px-2 py-1 text-right font-medium">会话（子）</th>
+              <th className="px-2 py-1 text-right font-medium">{t.tables.sessionsColumn}</th>
               <th className="px-2 py-1 text-right font-medium">Q</th>
               {detailed && (
                 <>
-                  <th className="px-2 py-1 text-right font-medium" title="未命中缓存的输入">I/M</th>
-                  {hasWrite && <th className="px-2 py-1 text-right font-medium" title="缓存写入输入">I/W</th>}
-                  <th className="px-2 py-1 text-right font-medium" title="缓存命中输入">I/C</th>
-                  <th className="px-2 py-1 text-right font-medium" title="输入合计 = I/M + I/W + I/C">I/T</th>
-                  <th className="px-2 py-1 text-right font-medium" title="输出（不含思考）">O</th>
-                  {hasReasoning && <th className="px-2 py-1 text-right font-medium" title="思考（输出的一部分）">R</th>}
-                  <th className="px-2 py-1 text-right font-medium" title="输出合计 = O + R">O/T</th>
+                  <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.inputMiss}>I/M</th>
+                  {hasWrite && <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.cacheWrite}>I/W</th>}
+                  <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.cacheRead}>I/C</th>
+                  <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.inputTotal}>I/T</th>
+                  <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.outputOnly}>O</th>
+                  {hasReasoning && (
+                    <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.reasoningHint}>
+                      R
+                    </th>
+                  )}
+                  <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.outputTotal}>O/T</th>
                 </>
               )}
-              <th className="px-2 py-1 text-right font-medium" title="Token 总计 = I/T + O/T">T</th>
-              <th className="px-2 py-1 text-right font-medium" title="每一项自己的钱" aria-label="费用" />
-              {showShare && <th className="px-2 py-1 text-left font-medium">占比</th>}
+              <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.tokens}>T</th>
+              <th
+                className="px-2 py-1 text-right font-medium"
+                title={t.vocabulary.ownMoneyShort}
+                aria-label={t.tables.seriesCost}
+              />
+              {showShare && <th className="px-2 py-1 text-left font-medium">{t.tables.modes.share}</th>}
             </tr>
           </thead>
           <tbody>
@@ -219,7 +229,7 @@ export function AgentTable({
               />
             ))}
             <BucketRow
-              label={<span className="font-medium">总计</span>}
+              label={<span className="font-medium">{t.tables.totalRow}</span>}
               sessions={`${totals.sessions}（${totals.subagents}）`}
               requests={totals.requests}
               tokens={{
@@ -241,23 +251,11 @@ export function AgentTable({
         </table>
       </div>
       <p className="mt-2 text-[11px] text-faint">
-        {detailed ? (
-          <>
-            四个桶互不重叠：<span className="text-muted">I/T = I/M + I/W + I/C</span>，
-            <span className="text-muted">R</span> 含在 <span className="text-muted">O/T</span> 里，
-            <span className="text-muted">O/T = O + R</span>。切到「费用」时每格是该项自己的钱。
-          </>
-        ) : (
-          <>
-            默认只列 <span className="text-muted">Q</span>、<span className="text-muted">T</span>、费用与占比；
-            「展开分桶」出现 <span className="text-muted">I/M I/W I/C I/T O R O/T</span>，
-            并可在数量 / 费用 / 占比之间切换。
-          </>
-        )}
+        {t.tables.agentNote(detailed)}
       </p>
       {agents.some((agent) => agent.unpriced > 0) && (
         <p className="mt-2 text-[11px] text-warn">
-          有 {agents.reduce((total, agent) => total + agent.unpriced, 0)} 条记录的价格表里没有对应模型，未计入费用。
+          {t.tables.unpriced(String(agents.reduce((total, agent) => total + agent.unpriced, 0)))}
         </p>
       )}
     </Card>
@@ -367,17 +365,19 @@ function subtractMoney(left: string, right: string): string {
 export function SessionTable({
   sessions,
   symbol,
-  title = '会话明细',
+  title,
   limit = 500,
   showProject = false,
 }: {
   sessions: readonly SessionNode[];
   symbol: string;
-  title?: string;
+  title: string;
   limit?: number;
   /** Add the project column: set when the rows come from every project. */
   showProject?: boolean;
 }): React.ReactElement {
+  const t = useT();
+  const COLUMNS = sessionColumns();
   const [flat, setFlat] = useState(false);
   // Everything is visible unless the reader asks for fewer columns: hiding
   // indicators behind a toggle is what made the comparison view useless.
@@ -417,22 +417,22 @@ export function SessionTable({
       title={`${title}（${rows.length}）`}
       actions={
         <>
-          <span className="hidden text-[11px] text-faint sm:inline">点表头排序</span>
+          <span className="hidden text-[11px] text-faint sm:inline">{t.tables.sortHint}</span>
           <button
             type="button"
             onClick={() => setCompact((value) => !value)}
             className={`rounded border px-2 py-0.5 text-[11px] ${compact ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
-            title={compact ? '恢复全部指标列' : '只留主列（表格更窄）'}
+            title={t.tables.leanHint(compact)}
           >
-            {compact ? '全部列' : '精简列'}
+            {compact ? t.tables.full : t.tables.lean}
           </button>
           <button
             type="button"
             onClick={() => setFlat((value) => !value)}
             className={`rounded border px-2 py-0.5 text-[11px] ${flat ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
-            title="把子代理也单独列出（默认并入其父会话）"
+            title={t.session.flatHint}
           >
-            {flat ? '含子代理' : '合并子代理'}
+            {flat ? t.session.flat : t.session.fold}
           </button>
         </>
       }
@@ -467,7 +467,7 @@ export function SessionTable({
             {shown.length === 0 && (
               <tr>
                 <td colSpan={columns.length} className="px-2 py-4 text-center text-faint">
-                  当前范围没有会话。
+                  {t.tables.noSessions}
                 </td>
               </tr>
             )}
@@ -489,12 +489,12 @@ export function SessionTable({
         </table>
       </div>
       <p className="mt-2 text-[11px] text-faint">
-        {flat
-          ? '含子代理：子代理行与父行会重复计算同一笔用量。'
-          : '默认并入父会话：每行是一个委派子树的根（自身 + 它派生的全部）。'}
-        {' '}
-        共 {rows.length} 行{rows.length > shown.length ? `，显示前 ${shown.length} 行` : ''}；
-        合计 <span className="tnum text-muted">{formatCost(String(totalCost), symbol)}</span>。
+        {flat ? t.session.flatNote : t.session.foldedNote}{' '}
+        {t.tables.sessionsNote(
+          String(rows.length),
+          rows.length > shown.length ? shown.length : null,
+          formatCost(String(totalCost), symbol),
+        )}
       </p>
     </Card>
   );
@@ -526,25 +526,39 @@ interface SessionColumn {
 }
 
 /** The columns, in the order they are drawn. */
-const COLUMNS: readonly SessionColumn[] = [
-  { key: 'title', label: '会话', kind: 'text', always: true },
-  { key: 'project', label: '项目', kind: 'text', always: true },
+function sessionColumns(): readonly SessionColumn[] {
+  const t = useT();
+  return [
+  { key: 'title', label: t.session.title, kind: 'text', always: true },
+  { key: 'project', label: t.scope.tabs.projects, kind: 'text', always: true },
   { key: 'agent', label: 'agent', kind: 'text', always: true },
-  { key: 'requests', label: 'Q', kind: 'num', always: true, title: '请求数' },
-  { key: 'inputMiss', label: 'I/M', kind: 'num', title: '未命中缓存的输入' },
-  { key: 'cacheRead', label: 'I/C', kind: 'num', always: true, title: '缓存命中输入（tokens）' },
-  { key: 'cacheWrite', label: 'I/W', kind: 'num', title: '缓存写入输入' },
-  { key: 'output', label: 'O', kind: 'num', title: '输出（含思考）' },
-  { key: 'reasoning', label: 'R', kind: 'num', title: '其中思考' },
-  { key: 'tokens', label: 'T', kind: 'num', always: true, title: 'token 总计（计费桶）' },
-  { key: 'cost', label: '', kind: 'num', always: true, title: '总费用（每格都是它自己的钱）' },
-  { key: 'lastUsage', label: '最近', kind: 'num', title: '最后一次计费请求的时间' },
-];
+  { key: 'requests', label: 'Q', kind: 'num', always: true, title: t.vocabulary.requests },
+  { key: 'inputMiss', label: 'I/M', kind: 'num', title: t.vocabulary.inputMiss },
+  { key: 'cacheRead', label: 'I/C', kind: 'num', always: true, title: t.vocabulary.cacheRead },
+  { key: 'cacheWrite', label: 'I/W', kind: 'num', title: t.vocabulary.cacheWrite },
+  { key: 'output', label: 'O', kind: 'num', title: t.vocabulary.outputTotal },
+  { key: 'reasoning', label: 'R', kind: 'num', title: t.vocabulary.reasoning },
+  { key: 'tokens', label: 'T', kind: 'num', always: true, title: t.vocabulary.tokens },
+  { key: 'cost', label: '', kind: 'num', always: true, title: t.vocabulary.ownMoneyColumn },
+  { key: 'lastUsage', label: t.session.bandRecentLabel, kind: 'num', title: t.vocabulary.recent },
+  ];
+}
 
 /** The kind of every column, for the default sort direction. */
-const COLUMN_KINDS: Record<SortKey, 'text' | 'num'> = Object.fromEntries(
-  COLUMNS.map((column) => [column.key, column.kind]),
-) as Record<SortKey, 'text' | 'num'>;
+const COLUMN_KINDS: Record<SortKey, 'text' | 'num'> = {
+  title: 'text',
+  project: 'text',
+  agent: 'text',
+  requests: 'num',
+  inputMiss: 'num',
+  cacheRead: 'num',
+  cacheWrite: 'num',
+  output: 'num',
+  reasoning: 'num',
+  tokens: 'num',
+  cost: 'num',
+  lastUsage: 'num',
+};
 
 /** The comparable value behind a column. */
 function sortValue(session: SessionNode, key: SortKey): number | string {
@@ -596,6 +610,7 @@ function SessionCell({
   showProject: boolean;
   totalCost: number;
 }): React.ReactElement {
+  const t = useT();
   const num = (value: string): React.ReactElement => (
     <td className="tnum whitespace-nowrap px-2 py-1.5 text-right">{value}</td>
   );
@@ -610,10 +625,10 @@ function SessionCell({
               className="cell-title min-w-0 text-accent hover:underline"
               title={session.title ?? session.id}
             >
-              {session.title ?? `（无标题）${session.id.slice(0, 8)}`}
+              {session.title ?? t.session.untitled(session.id.slice(0, 8))}
             </Link>
-            {session.subagentCount > 0 && <Chip tone="muted">{session.subagentCount} 子</Chip>}
-            {session.archived && <Chip tone="muted">已归档</Chip>}
+            {session.subagentCount > 0 && <Chip tone="muted">{t.board.subagentsChip(String(session.subagentCount))}</Chip>}
+            {session.archived && <Chip tone="muted">{t.session.archived}</Chip>}
           </div>
         </td>
       );
@@ -684,8 +699,9 @@ export function TokenTable({
   breakdown: TokenBreakdown;
   symbol: string;
 }): React.ReactElement {
+  const t = useT();
   return (
-    <Card title="token 五桶">
+    <Card title={t.tables.bucketsTitle}>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[20rem] table-fixed border-collapse text-[12px]">
           <colgroup>
@@ -713,8 +729,7 @@ export function TokenTable({
         </table>
       </div>
       <p className="mt-2 text-[11px] text-faint">
-        占比以四个计费桶为分母（<span className="text-muted">I/T + O/T = T</span>）；
-        <span className="text-muted">R</span> 已经含在 <span className="text-muted">O/T</span> 里，不另外计费。
+        {t.tables.bucketsNote}
       </p>
     </Card>
   );
@@ -727,12 +742,13 @@ export function TokenTable({
 export function ModelTable({
   models,
   symbol,
-  title = '模型明细',
+  title,
 }: {
   models: readonly ModelRow[];
   symbol: string;
-  title?: string;
+  title: string;
 }): React.ReactElement {
+  const t = useT();
   const rows = useMemo(
     () =>
       [...models].sort(
@@ -756,18 +772,20 @@ export function ModelTable({
           <thead className="sticky top-0 bg-panel">
             <tr className="text-[11px] text-faint">
               <th className="px-2 py-1 text-left font-medium">agent</th>
-              <th className="px-2 py-1 text-left font-medium">模型</th>
-              <th className="px-2 py-1 text-right font-medium" title="请求数">Q</th>
-              <th className="px-2 py-1 text-right font-medium" title="计费桶 token 合计 = I/T + O/T">T</th>
-              <th className="px-2 py-1 text-right font-medium" title="这个模型的总费用" />
-              <th className="px-2 py-1 text-right font-medium" title="占当前范围总费用的比例">占比</th>
+              <th className="px-2 py-1 text-left font-medium">{t.tables.modelsModel}</th>
+              <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.requests}>Q</th>
+              <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.tokens}>T</th>
+              <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.cost} />
+              <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.shareOfMetric(t.tables.seriesCost)}>
+                {t.tables.modes.share}
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-2 py-3 text-center text-faint">
-                  当前范围没有已计价的模型。
+                  {t.tables.noModels}
                 </td>
               </tr>
             )}
@@ -821,12 +839,13 @@ function componentMetric(component: BandComponentRow): string {
 export function BandTable({
   bands,
   symbol,
-  title = '计价区间明细',
+  title,
 }: {
   bands: readonly BandRow[];
   symbol: string;
-  title?: string;
+  title: string;
 }): React.ReactElement {
+  const t = useT();
   const [openBand, setOpenBand] = useState<string | null>(null);
   const rows = useMemo(
     () => [...bands].sort((left, right) => Number(right.cost.total) - Number(left.cost.total)),
@@ -849,18 +868,18 @@ export function BandTable({
             <tr className="text-[11px] text-faint">
               <th />
               <th className="px-2 py-1 text-left font-medium">agent</th>
-              <th className="px-2 py-1 text-left font-medium">模型 · 价格区间</th>
-              <th className="px-2 py-1 text-left font-medium">生效窗口</th>
-              <th className="px-2 py-1 text-left font-medium">档位</th>
-              <th className="px-2 py-1 text-right font-medium" title="请求数">Q</th>
-              <th className="px-2 py-1 text-right font-medium" title="这个区间的总费用" />
+              <th className="px-2 py-1 text-left font-medium">{t.tables.bandsModel}</th>
+              <th className="px-2 py-1 text-left font-medium">{t.tables.bandsWindow}</th>
+              <th className="px-2 py-1 text-left font-medium">{t.tables.bandsTier}</th>
+              <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.requests}>Q</th>
+              <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.cost} />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-2 py-3 text-center text-faint">
-                  当前范围没有命中任何价格区间。
+                  {t.tables.noBands}
                 </td>
               </tr>
             )}
@@ -890,11 +909,15 @@ export function BandTable({
                     </td>
                     <td className="px-2 py-1 text-[11px]">
                       <span className={row.tier === 'peak' ? 'text-warn' : 'text-muted'}>
-                        {row.tier === 'peak' ? '峰时' : row.tier === 'off-peak' ? '谷时' : '统一价'}
+                        {row.tier === 'peak'
+                          ? t.tables.tiers.peak
+                          : row.tier === 'off-peak'
+                            ? t.tables.tiers.offPeak
+                            : t.tables.tiers.flat}
                       </span>
                       {row.resolution !== 'exact' && (
-                        <span className="ml-1 text-[10px] text-faint" title={`价格区间为回退匹配：${row.resolution}`}>
-                          回退
+                        <span className="ml-1 text-[10px] text-faint" title={t.tables.fallbackHint(row.resolution)}>
+                          {t.tables.fallback}
                         </span>
                       )}
                     </td>
@@ -914,10 +937,13 @@ export function BandTable({
                           </colgroup>
                           <thead>
                             <tr className="text-faint">
-                              <th className="px-1 py-0.5 text-left font-medium">计费项</th>
-                              <th className="px-1 py-0.5 text-right font-medium">单价</th>
+                              <th className="px-1 py-0.5 text-left font-medium">{t.tables.item}</th>
+                              <th className="px-1 py-0.5 text-right font-medium">{t.tables.unitPrice}</th>
                               <th className="px-1 py-0.5 text-right font-medium">tokens</th>
-                              <th className="px-1 py-0.5 text-right font-medium" title="每一项自己的钱" />
+                              <th
+                                className="px-1 py-0.5 text-right font-medium"
+                                title={t.vocabulary.ownMoneyShort}
+                              />
                             </tr>
                           </thead>
                           <tbody>
@@ -927,12 +953,15 @@ export function BandTable({
                                   <div className="cell-title tnum">{componentMetric(component)}</div>
                                   {component.excess !== undefined && (
                                     <div className="text-[10px] text-warn">
-                                      超出 {formatTokens(component.excess.tokens, true)} tokens 部分 {component.excess.rate}
+                                      {t.tables.excess(
+                                        formatTokens(component.excess.tokens, true),
+                                        component.excess.rate,
+                                      )}
                                     </div>
                                   )}
                                   {component.ttl !== undefined && (
                                     <div className="text-[10px] text-faint">
-                                      {component.ttl.tier} 缓存写入 ×{component.ttl.multiplier}
+                                      {t.tables.ttl(component.ttl.tier, component.ttl.multiplier)}
                                     </div>
                                   )}
                                 </td>

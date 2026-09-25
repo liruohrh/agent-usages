@@ -13,6 +13,26 @@ import { useMemo, useState } from 'react';
 import type { CostTotals, TokenBuckets } from '../types';
 import { formatCost, formatShare, formatTokens, metricItems } from '../format';
 import { Card, Chip } from './Bits';
+import { t as catalogue, useT } from '../i18n';
+
+/**
+ * The definition behind one of the five buckets, in the current language.
+ *
+ * A plain function rather than a hook: `tokenPieces` builds rows outside the
+ * component body, and the catalogue is module-level anyway — components use
+ * `useT()` when they need to re-render on a switch.
+ */
+export function bucketDefinition(key: keyof TokenBuckets): string {
+  const words = catalogue().vocabulary;
+  const known: Record<string, string> = {
+    input: words.inputMiss,
+    cacheRead: words.cacheRead,
+    cacheWrite: words.cacheWrite,
+    output: words.outputOnly,
+    reasoning: words.reasoning,
+  };
+  return known[key] ?? String(key);
+}
 
 /**
  * The five disjoint buckets, in the order the CLI prints them.
@@ -21,12 +41,12 @@ import { Card, Chip } from './Bits';
  * is the definition, kept for `title` tooltips and prose. A screen never prints
  * both: it prints `I/M` and says 未命中缓存输入 on hover.
  */
-export const BUCKETS: { key: keyof TokenBuckets; label: string; short: string; color: string }[] = [
-  { key: 'input', label: '未命中缓存输入', short: 'I/M', color: '#58a6ff' },
-  { key: 'cacheRead', label: '缓存命中输入', short: 'I/C', color: '#a78bfa' },
-  { key: 'cacheWrite', label: '缓存写入输入', short: 'I/W', color: '#f59e0b' },
-  { key: 'output', label: '输出（不含思考）', short: 'O', color: '#34d399' },
-  { key: 'reasoning', label: '思考（含在 O/T 里）', short: 'R', color: '#f472b6' },
+export const BUCKETS: { key: keyof TokenBuckets; short: string; color: string }[] = [
+  { key: 'input', short: 'I/M', color: '#58a6ff' },
+  { key: 'cacheRead', short: 'I/C', color: '#a78bfa' },
+  { key: 'cacheWrite', short: 'I/W', color: '#f59e0b' },
+  { key: 'output', short: 'O', color: '#34d399' },
+  { key: 'reasoning', short: 'R', color: '#f472b6' },
 ];
 
 /** The money each bucket produced. Reasoning shares the output bill. */
@@ -53,7 +73,7 @@ export function tokenPieces(tokens: TokenBuckets, cost: CostTotals): TokenPiece[
   return BUCKETS.map((bucket) => ({
     key: bucket.key,
     short: bucket.short,
-    label: bucket.label,
+    label: bucketDefinition(bucket.key),
     color: bucket.color,
     tokens: bucket.key === 'output' ? Math.max(0, tokens.output - tokens.reasoning) : tokens[bucket.key],
     money: money[bucket.key] ?? '0',
@@ -147,6 +167,7 @@ export function Composition({
   cost: CostTotals;
   symbol: string;
 }): React.ReactElement {
+  const t = useT();
   // The same five disjoint pieces the ranking bars use: `O` is output without
   // reasoning, so `I/M + I/C + I/W + O + R` is exactly the row's own total.
   const pieces = tokenPieces(tokens, cost).filter((piece) => piece.tokens > 0);
@@ -165,7 +186,7 @@ export function Composition({
               key={piece.key}
               className="h-full"
               style={{ width: `${share * 100}%`, backgroundColor: piece.color }}
-              title={`${piece.label}：占 ${formatShare(share)}`}
+              title={`${piece.label}：${t.vocabulary.shareOfRow(formatShare(share))}`}
             />
           );
         })}
@@ -174,18 +195,20 @@ export function Composition({
   );
 
   return (
-    <Card title="构成">
+    <Card title={t.overview.composition}>
       <div className="space-y-2.5">
         {bar((piece) => (totalTokens === 0 ? 0 : piece.tokens / totalTokens), 'token')}
-        {bar((piece) => (totalMoney === 0 ? 0 : Number(piece.money) / totalMoney), '费用')}
+        {bar((piece) => (totalMoney === 0 ? 0 : Number(piece.money) / totalMoney), t.tables.seriesCost)}
       </div>
       <table className="mt-4 w-full border-collapse text-[13px]">
         <thead>
           <tr className="text-[11px] text-faint">
-            <th className="pb-1 text-left font-medium">计费桶</th>
-            <th className="pb-1 text-right font-medium">tokens</th>
-            <th className="pb-1 text-right font-medium" title="该项占本行 T 的比例">占 T</th>
-            <th className="pb-1 text-right font-medium" title="每格都是它自己的钱" />
+            <th className="pb-1 text-left font-medium">{t.overview.buckets}</th>
+            <th className="pb-1 text-right font-medium">{t.overview.tokens}</th>
+            <th className="pb-1 text-right font-medium" title={t.vocabulary.shareOfTotal}>
+              {t.overview.shareOfTotal}
+            </th>
+            <th className="pb-1 text-right font-medium" title={t.vocabulary.ownMoney} />
           </tr>
         </thead>
         <tbody>
@@ -208,10 +231,7 @@ export function Composition({
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-faint">
-        条长按占比：上图按 T，下图按费用。五项互不重叠且加起来正好是{' '}
-        <span className="text-muted">T</span>（I/M + I/C + I/W + O + R = T，其中 O = O/T − R）。合计{' '}
-        <span className="tnum text-muted">{formatTokens(totalTokens, true)}</span> tokens ·{' '}
-        <span className="tnum text-muted">{formatCost(cost.total, symbol)}</span>
+        {t.overview.compositionNote(formatTokens(totalTokens, true), formatCost(cost.total, symbol))}
       </p>
     </Card>
   );
@@ -239,26 +259,37 @@ export function ScopeSplitTable({
   spawned: Figures;
   symbol: string;
 }): React.ReactElement {
+  const t = useT();
   const billed = (figures: Figures): number =>
     figures.tokens.input + figures.tokens.cacheRead + figures.tokens.cacheWrite + figures.tokens.output;
   const rows = [
-    { label: '总', figures: total, tone: 'font-medium text-fg' },
-    { label: '自身', figures: own, tone: 'text-fg' },
-    { label: '子代理', figures: spawned, tone: 'text-fg' },
+    { label: t.scope.total, figures: total, tone: 'font-medium text-fg' },
+    { label: t.tree.own, figures: own, tone: 'text-fg' },
+    { label: t.tree.spawned, figures: spawned, tone: 'text-fg' },
   ] as const;
   const spawnedShare = total.cost.total === '0' ? 0 : Number(spawned.cost.total) / Number(total.cost.total);
   return (
-    <Card title="这部分的用量" actions={<Chip tone="muted">自身 + 子代理 = 总</Chip>}>
+    <Card title={t.usage.scope} actions={<Chip tone="muted">{t.usage.scopeRule}</Chip>}>
       <table className="w-full border-collapse text-[13px]">
         <thead>
           <tr className="text-[11px] text-faint">
-            <th className="pb-1 text-left font-medium">范围</th>
-            <th className="pb-1 text-right font-medium" title="请求数">Q</th>
-            <th className="pb-1 text-right font-medium" title="输入合计 = I/M + I/C + I/W">I/T</th>
-            <th className="pb-1 text-right font-medium" title="输出合计 = O + R">O/T</th>
-            <th className="pb-1 text-right font-medium" title="缓存命中输入 ÷ 输入合计（I/C ÷ I/T）">I/C 占比</th>
-            <th className="pb-1 text-right font-medium" title="计费桶 token 合计 = I/T + O/T">T</th>
-            <th className="pb-1 text-right font-medium" title="这个范围的总费用" />
+            <th className="pb-1 text-left font-medium">{t.usage.columns.range}</th>
+            <th className="pb-1 text-right font-medium" title={t.vocabulary.requests}>
+              Q
+            </th>
+            <th className="pb-1 text-right font-medium" title={t.vocabulary.inputTotal}>
+              I/T
+            </th>
+            <th className="pb-1 text-right font-medium" title={t.vocabulary.outputTotal}>
+              O/T
+            </th>
+            <th className="pb-1 text-right font-medium" title={t.vocabulary.hitRate}>
+              {t.usage.columns.hitRate}
+            </th>
+            <th className="pb-1 text-right font-medium" title={t.vocabulary.tokens}>
+              T
+            </th>
+            <th className="pb-1 text-right font-medium" title={t.vocabulary.cost} />
           </tr>
         </thead>
         <tbody>
@@ -281,8 +312,7 @@ export function ScopeSplitTable({
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-faint">
-        子代理占 {formatShare(spawnedShare)}；与 CLI 的 <code>usage --subagent</code> 同一口径，缩写也同 CLI
-        （<span className="text-muted">Q I/M I/C I/W I/T O R O/T T</span>）。
+        {t.usage.scopeNote(formatShare(spawnedShare))}
       </p>
     </Card>
   );
@@ -307,11 +337,12 @@ export function MetricDetailTable({
   spawned?: Figures | undefined;
   symbol: string;
 }): React.ReactElement {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const rows = [
-    { label: '总', figures: total },
-    ...(own === undefined ? [] : [{ label: '自身', figures: own }]),
-    ...(spawned === undefined ? [] : [{ label: '子代理', figures: spawned }]),
+    { label: t.scope.total, figures: total },
+    ...(own === undefined ? [] : [{ label: t.tree.own, figures: own }]),
+    ...(spawned === undefined ? [] : [{ label: t.tree.spawned, figures: spawned }]),
   ];
   const columns = useMemo(() => {
     const labels = new Map<string, string>();
@@ -325,34 +356,33 @@ export function MetricDetailTable({
 
   return (
     <Card
-      title="完整指标"
+      title={t.usage.detail}
       actions={
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
           className="rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
         >
-          {open ? '收起' : '展开逐项数字'}
+          {open ? t.usage.detailOpen : t.usage.detailClosed}
         </button>
       }
     >
       {!open ? (
         <p className="text-[13px] text-muted">
-          与 CLI 相同的十项数字（<span className="tnum">I/M I/W I/C I/T O R O/T T Q</span> 与合计）在这里，
-          展开即可逐列查看、复制。
+          {t.usage.detailHint}
         </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[52rem] border-collapse text-[12px]">
             <thead>
               <tr className="text-[11px] text-faint">
-                <th className="pb-1 pr-2 text-left font-medium">范围</th>
+                <th className="pb-1 pr-2 text-left font-medium">{t.usage.columns.range}</th>
                 {[...columns.keys()].map((key) => (
                   <th key={key} className="pb-1 pl-3 text-right font-medium" title={key}>
                     {key}
                   </th>
                 ))}
-                <th className="pb-1 pl-3 text-right font-medium">合计</th>
+                <th className="pb-1 pl-3 text-right font-medium">{t.vocabulary.total}</th>
               </tr>
             </thead>
             <tbody>

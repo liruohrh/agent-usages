@@ -84,7 +84,8 @@
 它不是静态 HTML 报告（那个是 `usage --html`，用来离线分享），而是一个**本地服务**：
 API 返回 JSON，前端是 Vite 构建的单页应用。
 
-- 只读：不写任何 agent 的数据目录，唯一的写操作是显式的 `--write-snapshot`。
+- 不写任何 agent 的数据目录：唯一的文件写操作是显式的 `--write-snapshot`，以及页面上右上角
+  切换语言时写本工具自己的 `config.json`（见 §6）。
 - 默认只绑 `127.0.0.1`，不加载任何 CDN 资源。
 - 数据来自 CLI 已经信任的同一批模块（适配器、`src/core/merge.ts` 合并层、`src/report.ts`
   的 `runQuery`），所以 Web 上的数字与 `agent-usages usage` 是同一套口径；`自身 + 子代理 = 总`
@@ -174,7 +175,8 @@ web/                       # 前端 workspace 包（package.json name = "web"）
     App.tsx                #   布局、路由（/、/p/:id、/s/:uid）、取数
     api.ts                 #   fetch 封装 + 过滤参数
     types.ts               #   契约镜像（前端不 import 服务端代码）
-    format.ts              #   数字/金额/时间格式化、agent 配色
+    format.ts              #   数字/金额/时间格式化（按 locale）、agent 配色
+    i18n/                  #   页面自己的中英词表 + 语言 provider（`useT()` / `useLanguage()`）
     charts.tsx             #   ECharts 按需注册 + 三种图
     components/
       Filters.tsx          #   顶部：时间范围 / agent 多选 / 项目搜索 / 重扫 / 主题
@@ -227,6 +229,7 @@ CLI 的 `bin` / `files` / `version` 未改动。
 | `project` | 项目 id（可重复/逗号分隔） | 省略即全部 |
 | `q` | 子串 | 匹配项目名与工作区路径（大小写不敏感） |
 | `bucket` | `day` / `hour` | 仅 `/api/timeseries` |
+| `lang` | `zh` / `en` | 这一份答复用哪种语言：payload 里的**散文**（时间范围标签、告警句子）按它渲染；省略即用配置/系统语言 |
 
 | 端点 | 返回 |
 | --- | --- |
@@ -240,6 +243,8 @@ CLI 的 `bin` / `files` / `version` 未改动。
 | `GET /api/timeseries` | `{bucket, count, points[]}`，每个桶含 `t/date/label/requests/tokens/cost/byAgent` |
 | `GET /api/dashboard` | 上面所有内容的合集（前端一次请求拿全，快照文件就是它的形状） |
 | `POST /api/refresh` | 重扫所有 agent；成功 `{ok:true,ms,agents[],warnings[]}`，快照模式 409 |
+| `GET /api/settings` | `{language, configured, path, languages[]}`：当前语言、配置文件里写的语言（没有则 `null`）、写入路径 |
+| `PUT /api/settings` | **本服务唯一的写操作**：`{"language":"zh"\|"en"}` 合并进配置文件（保留其它键），返回同上；未知语言 400，`Origin` 不是本机 403 |
 | 其它 `/api/*` | JSON 404（不会回退到前端 HTML） |
 | 其它路径（GET） | `web/dist` 静态文件；找不到则回退 `index.html`（SPA 路由） |
 
@@ -343,15 +348,40 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 
 ---
 
-## 6. 已知限制
+## 6. 语言：中文 / English
+
+页面有两份词表（`web/src/i18n/{zh,en}.ts`），英文那份**按中文那份定型**——少一条就编译不过，
+和 CLI 的 `i18n` 是同一个套路。右上角 `中文 / EN` 就是开关。
+
+- **切换会写配置文件**，这是这个功能的一半：`PUT /api/settings` 把 `language` 合并进
+  `~/.config/agent-usages/config.json`（其它键原样保留；文件解析不了就报错、不覆盖），
+  于是**CLI 下一次运行也说这个语言**——`node src/cli.ts --help` 立刻变英文，因为它读的是同一个值。
+- **数字也跟着换**：`Intl` 的 locale 一起切，所以 `9.7亿` 会变成 `970M`、`2026年9月26日` 变成
+  `9/26/2026`。指标缩写（`I/M`、`T`、`Q`）和钱（`¥12.34`）两种语言下都一样。
+- **服务端只渲染"散文"**：告警句子与时间范围标签按请求的 `?lang=` 现渲染（`code` + `params`
+  重放，没有对应 message 的 code 保留原句）；扫描本身仍然只做一次，价格区间的缓存键带上语言，
+  免得英文请求拿到中文构建的那份（`生效窗口` 里那句 `→ 至今` 是计价引擎在构建时写的）。
+- **测试不碰你的配置**：`web/scripts/tmp-config.mjs` 把 `XDG_CONFIG_HOME` 指到
+  `web/.tmp/config`（gitignore），拷一份价格/汇率缓存进去并写死 `{"language":"zh"}`，
+  冒烟与 e2e 都跑在这份副本上——否则一次切换就会改掉开发者自己的配置。
+- **快照模式**（`--snapshot`）里的文案是写文件时录下来的，切语言不会重写它们：
+  快照是"冻结的数据"，和会话标题一样。
+
+---
+
+## 7. 已知限制
 
 - **会话列表只列"有消耗的"会话**：`range` 内没有计费的会话不在树里，但它仍计入
   `sessions`（总数）；点开一个没消耗的会话仍能看到它的委派树（零金额）。
 - **每次只能看一个 agent 的一个会话详情**（`/api/sessions/:id`），没有跨 agent 的会话对比。
 - **`serve` 没有鉴权**：只绑回环，靠这一点而不是靠 token。要暴露到局域网请自己加反代。
+  `PUT /api/settings` 额外要求 `application/json`（跨站 `fetch` 带 JSON body 需要预检，本服务不应答预检）
+  并拒绝 `Origin` 不是本机的请求；它是唯一会写盘的路由，写的也只是本工具自己的配置文件。
 - **`--provider` / `--json` 不是 `serve` 的选项**：仪表盘的计价来源按 agent 自动选，
   输出永远是网页 + JSON API。写在 `serve` 后面 commander 会报未知选项，写在前面则被明确
   拒绝（`serveOptionUnsupported`）——两者都不静默忽略。
+- **`?lang=` 只改散文**：告警与时间范围标签会跟着请求语言换，其它由数据层生成的文案
+  （计价区间的期间标签、快照里的窗口）是构建/录制时写下的，切语言不会重写。
 - **币种固定是计价来源的币种**（当前 CNY），既不跟随语言、也不做 `--currency` 换算：
   四个 agent 因此可以直接相加，汇率折算只有一个来源。代价是 `LANG=en` 时 CLI 默认显示
   USD，两边的金额不能直接对比——要对齐就在 CLI 上加 `--currency CNY`。
@@ -361,15 +391,15 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 
 ---
 
-## 7. 验证：构建、冒烟、截图
+## 8. 验证：构建、冒烟、截图
 
 ```sh
 pnpm install                                        # 2 个 workspace 包
 pnpm --filter web build                             # tsc --noEmit && vite build
 pnpm web:snapshot                                   # 生成离线 fixture（不入库，先跑一次）
-pnpm web:smoke                                      # 离线快照，47 项断言
+pnpm web:smoke                                      # 离线快照，53 项断言（含 /api/settings 与 ?lang=）
 node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 95 项
-pnpm web:e2e                                        # 真浏览器：27 条，起服务 + 切标签/项目/会话 + 排序 + 口径与布局 + 缩写口径
+pnpm web:e2e                                        # 真浏览器：28 条，起服务 + 切标签/项目/会话 + 排序 + 口径与布局 + 缩写口径 + 中英切换
 CI=true pnpm typecheck                              # 根 tsconfig 覆盖 src/serve/**
 CI=true pnpm test                                   # 488 个用例
 ```
@@ -399,7 +429,7 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 
 ---
 
-## 8. 为什么是这些选择
+## 9. 为什么是这些选择
 
 | 选择 | 理由 |
 | --- | --- |
@@ -417,7 +447,7 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 
 ---
 
-## 9. 相关文件
+## 10. 相关文件
 
 | 文件 | 内容 |
 | --- | --- |

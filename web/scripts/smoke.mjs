@@ -23,9 +23,16 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
+import { isolateConfig } from './tmp-config.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..');
 const snapshotPath = resolve(repo, 'web', 'mock', 'dashboard.snapshot.json');
+
+// The language the page reads lives in the user's configuration file, and this
+// test switches it. Point the server at a copy so a run never rewrites the file
+// a developer is actually using.
+isolateConfig(repo, 'zh');
 
 const { startServer } = await import(resolve(repo, 'src', 'serve', 'server.ts'));
 
@@ -78,6 +85,23 @@ async function exercise(base, { live }) {
   check('GET /api/health → 200', health.status === 200, `HTTP ${health.status}`);
   check('health.ok === true', health.body?.ok === true);
   check('health 报了 agent 列表', Array.isArray(health.body?.agents));
+
+  // The language the page speaks, and the one write this server allows: the
+  // switch in the page is the same setting the CLI reads.
+  const settings = await call(base, '/api/settings');
+  check('GET /api/settings → 200', settings.status === 200, `HTTP ${settings.status}`);
+  check('settings 报了语言与写入路径', settings.body?.language === 'zh' && typeof settings.body?.path === 'string',
+    JSON.stringify(settings.body));
+  check('settings 只列本版本支持的语言', JSON.stringify(settings.body?.languages) === '["zh","en"]');
+  const refused = await call(base, '/api/settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ language: 'fr' }),
+  });
+  check('PUT /api/settings 拒绝不支持的语言', refused.status === 400, `HTTP ${refused.status}`);
+  check('拒绝时带 code', refused.body?.error?.code === 'settingsUnknownLanguage');
+  const english = await call(base, '/api/dashboard?lang=en');
+  check('?lang=en 把散文换成英文', /all time|today|this week|this month/.test(english.body?.rangeLabel ?? ''), english.body?.rangeLabel);
 
   const summary = await call(base, '/api/summary');
   check('GET /api/summary → 200', summary.status === 200, `HTTP ${summary.status}`);

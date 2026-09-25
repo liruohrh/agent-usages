@@ -16,6 +16,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 
 import type { AgentTotals, TimeseriesBucket, TokenBuckets } from './types';
 import { agentColor, agentLabel, chartTheme, formatCost, formatDayShort, formatTokens } from './format';
+import { t as catalogue } from './i18n';
 
 echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
@@ -104,7 +105,7 @@ export function timeseriesOption(
       data: points.map((bucket) => valueOf(bucket, agent.id)),
     })),
     {
-      name: '总计',
+      name: catalogue().tables.chartTotal,
       type: 'line' as const,
       smooth: true,
       showSymbol: false,

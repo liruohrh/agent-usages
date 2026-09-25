@@ -10,6 +10,9 @@ web/dist/
 # (`pnpm web:snapshot`, see web/mock/README.md) and deliberately not tracked.
 web/mock/dashboard.snapshot.json
 web/mock/screenshots/
+# The scratch configuration the smoke/e2e servers run against, so a test that
+# switches the language never writes the developer's own config.json.
+web/.tmp/
 # Playwright's run artifacts: traces, videos and the failure-only HTML report.
 web/test-results/
 web/playwright-report/

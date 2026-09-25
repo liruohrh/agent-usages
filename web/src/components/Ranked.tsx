@@ -17,7 +17,8 @@ import { createPortal } from 'react-dom';
 import type { AgentTotals, CostTotals, ProjectSummary, TokenBuckets, WorkspaceNode } from '../types';
 import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } from '../format';
 import { AgentBadge, Card, Chip } from './Bits';
-import { BUCKETS, bucketMoney, tokenPieces } from './Metrics';
+import { BUCKETS, bucketDefinition, bucketMoney, tokenPieces } from './Metrics';
+import { t as catalogue, useT } from '../i18n';
 
 /** Everything a ranking row needs, whatever the entity is. */
 export interface RankedEntry {
@@ -69,8 +70,7 @@ const MIN_SEGMENT = 0.012;
  * The bar is the row's *own* composition and nothing else: always the full width,
  * because size is what the numbers and the sort are for.
  */
-const BAR_RULE =
-  '条 = 这一行自己的 token 构成：按五个互不重叠的计费项切开（I/M、I/C、I/W、O、R），整条 = 这一行的 100%。某项为 0 时不画；某段不足 1.2% 时保留 1.2% 以便看清。排序用右上角的下拉。';
+const barRule = (): string => catalogue().board.barRule;
 
 /** What this row is made of, as a full-width stack of its own tokens. */
 function CompositionBar({
@@ -89,7 +89,7 @@ function CompositionBar({
   return (
     <span
       className="flex h-3.5 w-full overflow-hidden rounded-full bg-raised ring-1 ring-line ring-inset"
-      title="这一行的 token 构成（整条 = 本行 100%）"
+      title={catalogue().board.barTitle}
     >
       {pieces.map((piece) => {
         const share = total === 0 ? 0 : piece.tokens / total;
@@ -98,7 +98,12 @@ function CompositionBar({
             key={piece.key}
             className="h-full"
             style={{ width: `${(MIN_SEGMENT + share * scale) * 100}%`, backgroundColor: piece.color }}
-            title={`${piece.label}：${formatTokens(piece.tokens, true)} tokens（占本行 ${formatShare(share)}）· ${formatCost(piece.money, symbol)}`}
+            title={catalogue().board.segment(
+              piece.label,
+              formatTokens(piece.tokens, true),
+              formatShare(share),
+              formatCost(piece.money, symbol),
+            )}
           />
         );
       })}
@@ -146,7 +151,7 @@ function MetricRows({
   const text = size === 'large' ? 'text-[12px]' : 'text-[11px]';
   return (
     <ul className={`${size === 'large' ? 'mt-3 space-y-2' : 'mt-2 space-y-1.5'}`}>
-      {valued.length === 0 && <li className={`${text} text-faint`}>这个指标全是 0。</li>}
+      {valued.length === 0 && <li className={`${text} text-faint`}>{catalogue().board.emptyMetric}</li>}
       {valued.map((item) => {
         const share = total === 0 ? 0 : item.value / total;
         // A non-zero slice that rounds to `0%` reads as "nothing"; say so instead.
@@ -155,7 +160,7 @@ function MetricRows({
           <Fragment key={item.entry.key}>
           <li
             className="flex items-center gap-2"
-            title={`${item.entry.title}：${format(item.value)}（占该指标的 ${percent}）`}
+            title={`${item.entry.title}：${format(item.value)}（${catalogue().board.metricShare(percent)}）`}
           >
             <span className={`${nameWidth} shrink-0 truncate ${text} text-muted`}>{item.entry.title}</span>
             <span className={`${size === 'large' ? 'h-3.5' : 'h-2.5'} min-w-0 flex-1 overflow-hidden rounded-full bg-raised`}>
@@ -223,22 +228,24 @@ function MetricDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`${metric.label} 全部条目`}
+        aria-label={catalogue().board.dialogLabel(metric.label)}
         data-metric-dialog={metric.key}
         className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl border border-line bg-panel shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-fg">{metric.label} · 全部 {valued.length} 项</h2>
-            <p className="text-[11px] text-faint">{metric.hint}｜合计 {format(total)}（条长 = 占这个指标总量的比例）</p>
+            <h2 className="text-[15px] font-semibold text-fg">
+              {catalogue().board.dialogTitle(metric.label, String(valued.length))}
+            </h2>
+            <p className="text-[11px] text-faint">{catalogue().board.dialogNote(metric.hint, format(total))}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="shrink-0 rounded border border-line px-2.5 py-1 text-[12px] text-muted hover:text-fg"
           >
-            关闭
+            {catalogue().board.close}
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
@@ -293,21 +300,23 @@ function MetricChart({
     <div className="rounded-lg border border-line p-3" data-chart={metric.key}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[13px] font-medium text-fg">{metric.label}</span>
-        <span className="tnum shrink-0 text-[11px] text-faint" title="这个指标的合计">
+        <span className="tnum shrink-0 text-[11px] text-faint" title={catalogue().board.metricTotal}>
           {format(total)}
         </span>
       </div>
       <MetricRows valued={shown} total={total} colors={colors} format={format} symbol={symbol} metricKey={metric.key} />
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-faint">
-          {folded > 0 ? `其余 ${folded} 项合计 ${format(rest)}` : `共 ${valued.length} 项，已全部列出`}
+          {folded > 0
+            ? catalogue().board.folded(String(folded), format(rest))
+            : catalogue().board.allListed(String(valued.length))}
         </span>
         <button
           type="button"
           onClick={() => setOpen(true)}
           className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
         >
-          展示更多（全部 {valued.length} 项）
+          {catalogue().board.showMore(String(valued.length))}
         </button>
       </div>
       {open && (
@@ -343,9 +352,7 @@ function MetricCharts({
   return (
     <div className="mb-3 rounded-lg border border-line bg-panel/60 p-3">
       <p className="mb-3 text-[11px] leading-5 text-faint">
-        每个指标一张横向柱状图：把这个指标在列表所有条目上的值加起来，看「这个总数是谁贡献的」。条长 =
-        该条目占这个指标总量的比例（每张图都是「占满 = 全部」），右边是数值与占比。卡片里只列前 {CHART_ROWS} 项，
-        点「展示更多」可以看到这个指标下的全部条目。想知道单个条目自己的构成，看每行的条。
+        {catalogue().board.chartsNote(CHART_ROWS)}
       </p>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {metrics.map((metric) => (
@@ -372,23 +379,40 @@ export interface SortMetric {
   optional?: boolean;
 }
 
-/** Every figure a row carries, in the order the chips show them. */
-export const SORT_METRICS: SortMetric[] = [
-  { key: 'requests', label: 'Q', hint: '请求数', value: (entry) => entry.requests },
-  { key: 'input', label: 'I/M', hint: '未命中缓存的输入', value: (entry) => entry.tokens.input },
-  { key: 'cacheRead', label: 'I/C', hint: '缓存命中输入', value: (entry) => entry.tokens.cacheRead },
-  { key: 'cacheWrite', label: 'I/W', hint: '缓存写入输入', value: (entry) => entry.tokens.cacheWrite, optional: true },
-  {
-    key: 'output',
-    label: 'O',
-    hint: '输出（不含思考）',
-    value: (entry) => Math.max(0, entry.tokens.output - entry.tokens.reasoning),
-  },
-  { key: 'reasoning', label: 'R', hint: '思考（输出的一部分，O 里已扣除）', value: (entry) => entry.tokens.reasoning, optional: true },
-  { key: 'tokens', label: 'T', hint: '计费桶 token 合计 = I/T + O/T', value: (entry) => billedTokens(entry.tokens) },
-  { key: 'cost', label: '费用', hint: '总费用（缓存命中的钱＝I/C 那一项的钱，不单列）', value: (entry) => Number(entry.cost.total) },
-  { key: 'recent', label: '最近', hint: '最后一次计费时间', value: (entry) => entry.lastUsage ?? 0 },
-];
+/**
+ * Every figure a row carries, in the order the chips show them.
+ *
+ * A function rather than a constant: two of the labels are words (`费用`, `最近`)
+ * and the rest are definitions, so the list has to be built in the language of
+ * the render that asks for it.
+ * @returns the sortable metrics, in the CLI's order.
+ */
+export function sortMetrics(): SortMetric[] {
+  const words = catalogue();
+  const vocabulary = words.vocabulary;
+  return [
+    { key: 'requests', label: 'Q', hint: vocabulary.requests, value: (entry) => entry.requests },
+    { key: 'input', label: 'I/M', hint: vocabulary.inputMiss, value: (entry) => entry.tokens.input },
+    { key: 'cacheRead', label: 'I/C', hint: vocabulary.cacheRead, value: (entry) => entry.tokens.cacheRead },
+    { key: 'cacheWrite', label: 'I/W', hint: vocabulary.cacheWrite, value: (entry) => entry.tokens.cacheWrite, optional: true },
+    {
+      key: 'output',
+      label: 'O',
+      hint: vocabulary.outputOnly,
+      value: (entry) => Math.max(0, entry.tokens.output - entry.tokens.reasoning),
+    },
+    {
+      key: 'reasoning',
+      label: 'R',
+      hint: vocabulary.reasoningHint,
+      value: (entry) => entry.tokens.reasoning,
+      optional: true,
+    },
+    { key: 'tokens', label: 'T', hint: vocabulary.tokens, value: (entry) => billedTokens(entry.tokens) },
+    { key: 'cost', label: words.tables.seriesCost, hint: vocabulary.costHint, value: (entry) => Number(entry.cost.total) },
+    { key: 'recent', label: words.session.bandRecentLabel, hint: vocabulary.recent, value: (entry) => entry.lastUsage ?? 0 },
+  ];
+}
 
 /** The per-bucket table an expanded row shows: tokens, share and money. */
 export function BucketDetail({
@@ -411,10 +435,12 @@ export function BucketDetail({
       <table className="w-full border-collapse text-[12px]">
         <thead>
           <tr className="text-[11px] text-faint">
-            <th className="pb-1 text-left font-medium">计费桶</th>
-            <th className="pb-1 text-right font-medium">tokens</th>
-            <th className="pb-1 text-right font-medium" title="该项占本行 T 的比例">占 T</th>
-            <th className="pb-1 text-right font-medium" title="每一格都是它自己的钱" />
+            <th className="pb-1 text-left font-medium">{catalogue().overview.buckets}</th>
+            <th className="pb-1 text-right font-medium">{catalogue().overview.tokens}</th>
+            <th className="pb-1 text-right font-medium" title={catalogue().vocabulary.shareOfTotal}>
+              {catalogue().overview.shareOfTotal}
+            </th>
+            <th className="pb-1 text-right font-medium" title={catalogue().vocabulary.ownMoney} />
           </tr>
         </thead>
         <tbody>
@@ -425,7 +451,7 @@ export function BucketDetail({
                   className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle"
                   style={{ backgroundColor: bucket.color }}
                 />
-                <span className="tnum" title={bucket.label}>
+                <span className="tnum" title={bucketDefinition(bucket.key)}>
                   {bucket.short}
                 </span>
               </td>
@@ -437,7 +463,7 @@ export function BucketDetail({
             </tr>
           ))}
           <tr className="border-t border-line font-medium">
-            <td className="py-1">合计</td>
+            <td className="py-1">{catalogue().vocabulary.total}</td>
             <td className="tnum py-1 text-right">{formatTokens(total, true)}</td>
             <td className="py-1 text-right text-faint">100%</td>
             <td className="tnum py-1 text-right text-accent">{formatCost(cost.total, symbol)}</td>
@@ -465,7 +491,7 @@ export function RankedList({
   symbol,
   title,
   defaultSort = 'cost',
-  emptyText = '当前范围没有数据。',
+  emptyText,
   baseline,
   footnote,
   limit,
@@ -481,6 +507,7 @@ export function RankedList({
   /** Draw only the first N rows. */
   limit?: number | undefined;
 }): React.ReactElement {
+  const t = useT();
   const [sortKey, setSortKey] = useState(defaultSort);
   const [desc, setDesc] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
@@ -489,7 +516,9 @@ export function RankedList({
 
   // A figure that is zero everywhere (no cache writes, no reasoning) is not worth
   // a chip; it appears as soon as one row has one.
-  const metrics = SORT_METRICS.filter((metric) => metric.optional !== true || entries.some((entry) => metric.value(entry) > 0));
+  const metrics = sortMetrics().filter(
+    (candidate) => candidate.optional !== true || entries.some((entry) => candidate.value(entry) > 0),
+  );
   const metric = metrics.find((candidate) => candidate.key === sortKey) ?? metrics[0];
 
   const rows = useMemo(() => {
@@ -514,12 +543,12 @@ export function RankedList({
             type="button"
             onClick={() => setAnalysis((value) => !value)}
             className={`rounded border px-2 py-0.5 text-[11px] ${analysis ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
-            title="每个指标一张横向柱状图：这个总数是谁贡献的"
+            title={t.board.chartsHint}
           >
-            {analysis ? '收起图表' : '图表分析'}
+            {analysis ? t.board.chartsOpen : t.board.charts}
           </button>
           <label className="flex items-center gap-1 text-[11px] text-muted">
-            排序
+            {t.board.sortBy}
             <select
               value={sortKey}
               onChange={(event) => {
@@ -539,15 +568,15 @@ export function RankedList({
             type="button"
             onClick={() => setDesc((value) => !value)}
             className="rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
-            title={desc ? '从多到少' : '从少到多'}
+            title={desc ? t.board.descending : t.board.ascending}
           >
-            {desc ? '降序 ↓' : '升序 ↑'}
+            {desc ? t.board.descendingShort : t.board.ascendingShort}
           </button>
         </>
       }
     >
       {rows.length === 0 || metric === undefined ? (
-        <p className="py-8 text-center text-[13px] text-faint">{emptyText}</p>
+        <p className="py-8 text-center text-[13px] text-faint">{emptyText ?? t.board.empty}</p>
       ) : (
         <>
           {/* A chart of timestamps would be meaningless: the charts cover the
@@ -563,9 +592,7 @@ export function RankedList({
             <div className="grid items-center gap-3" style={{ gridTemplateColumns: grid }} data-columns>
               <span />
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
-                <span>
-                  合计 <span className="tnum text-fg">{formatCost(String(totalCost), symbol)}</span>
-                </span>
+                <span className="tnum text-fg">{t.board.total(formatCost(String(totalCost), symbol))}</span>
                 <span>
                   T <span className="tnum text-fg">{formatTokens(totalTokens, true)}</span>
                 </span>
@@ -581,19 +608,21 @@ export function RankedList({
                   ))}
                 </span>
               </span>
-              <span className="text-right text-faint" title="请求数">
+              <span className="text-right text-faint" title={t.vocabulary.requests}>
                 Q
               </span>
-              <span className="text-right text-faint" title="计费桶 token 合计 = I/T + O/T">
+              <span className="text-right text-faint" title={t.vocabulary.tokens}>
                 T
               </span>
               {/* No heading over the money: every cell below starts with `¥`. */}
-              <span className="text-right text-faint" title="总费用，后面的小字是占本列表合计的比例" aria-label="费用" />
+              <span
+                className="text-right text-faint"
+                title={t.vocabulary.cost}
+                aria-label={t.tables.seriesCost}
+              />
             </div>
-            <p className="mt-1.5 text-[11px] leading-5 text-faint" title={BAR_RULE}>
-              条 = 这一行自己的 token 构成（整条 100%，<span className="text-muted">不表示大小</span>——大小看右边的数字）；
-              条下是五个计费桶各自的 token 数与费用（缩写同 CLI）。排序用「排序」下拉，当前是「{metric.label}
-              {desc ? '降序' : '升序'}」；点一行展开这一行的全部计费桶。
+            <p className="mt-1.5 text-[11px] leading-5 text-faint" title={barRule()}>
+              {t.board.rowNote(metric.label, desc ? t.board.descendingWord : t.board.ascendingWord)}
             </p>
           </div>
 
@@ -718,7 +747,7 @@ function metricChips(entry: RankedEntry, symbol: string): MetricChip[] {
       key: piece.key,
       label: piece.short,
       hint: `${piece.label}：${formatTokens(piece.tokens, true)} tokens${
-        piece.key === 'cacheRead' && hit.length > 0 ? `（占 I/T ${hit}）` : ''
+        piece.key === 'cacheRead' && hit.length > 0 ? catalogue().vocabulary.shareOfInput(hit) : ''
       } · ${formatCost(piece.money, symbol)}`,
       value: formatTokens(piece.tokens, true),
       ...(piece.key === 'cacheRead' && hit.length > 0 ? { extra: hit } : {}),
@@ -768,18 +797,19 @@ function BucketChips({
 export function AgentBoard({
   agents,
   symbol,
-  title = 'agent',
+  title,
 }: {
   agents: readonly AgentTotals[];
   symbol: string;
-  title?: string;
+  title: string;
 }): React.ReactElement {
+  const t = useT();
   const entries: RankedEntry[] = agents.map((agent) => ({
     key: agent.id,
     title: agent.label,
     badges: <AgentBadge id={agent.id} />,
     subtitle: agent.source,
-    counts: `${agent.sessions} 会话 · ${agent.subagentSessions} 子代理`,
+    counts: t.board.sessionCounts(String(agent.sessions), String(agent.subagentSessions)),
     tokens: agent.tokens,
     cost: agent.cost,
     requests: agent.requests,
@@ -790,8 +820,8 @@ export function AgentBoard({
       entries={entries}
       symbol={symbol}
       title={title}
-      emptyText="当前范围没有被读到的 agent。"
-      footnote="点一行展开这个 agent 的每个计费桶；费用都是它自己产生的。"
+      emptyText={t.board.noAgents}
+      footnote={t.board.agentFootnote}
     />
   );
 }
@@ -819,6 +849,7 @@ export function ProjectBoard({
   /** Extra header control (the overview's "show all" link). */
   baseline?: ReactNode;
 }): React.ReactElement {
+  const t = useT();
   const entries: RankedEntry[] =
     projects !== undefined
       ? projects.map((project) => ({
@@ -832,8 +863,11 @@ export function ProjectBoard({
               ))}
             </span>
           ),
-          subtitle: project.kind === 'repo' ? `git 仓库 · ${project.workspaces.length} 个工作区` : project.workspaces[0],
-          counts: `${project.sessions} 会话（子 ${project.subagentSessions}）`,
+          subtitle:
+            project.kind === 'repo'
+              ? t.board.repoSubtitle(String(project.workspaces.length))
+              : project.workspaces[0],
+          counts: t.board.sessionCountsProject(String(project.sessions), String(project.subagentSessions)),
           tokens: project.tokens,
           cost: project.cost,
           requests: project.requests,
@@ -846,12 +880,14 @@ export function ProjectBoard({
               facts={
                 <>
                   <div>
-                    自身 <span className="tnum text-fg">{formatCost(project.own.cost.total, symbol)}</span>
+                    {t.tree.own}{' '}
+                    <span className="tnum text-fg">{formatCost(project.own.cost.total, symbol)}</span>
                   </div>
                   <div>
-                    子代理 <span className="tnum text-fg">{formatCost(project.spawned.cost.total, symbol)}</span>
+                    {t.tree.spawned}{' '}
+                    <span className="tnum text-fg">{formatCost(project.spawned.cost.total, symbol)}</span>
                   </div>
-                  <div>{project.workspaces.length} 个工作区</div>
+                  <div>{t.scope.workspaces(String(project.workspaces.length))}</div>
                   {project.workspaces.slice(0, 3).map((path) => (
                     <div key={path} className="truncate" title={path}>
                       {shortenPath(path, 40)}
@@ -873,7 +909,7 @@ export function ProjectBoard({
             </span>
           ),
           subtitle: workspace.path,
-          counts: `${workspace.sessionCount} 会话（子 ${workspace.subagentCount}）`,
+          counts: t.board.sessionCountsProject(String(workspace.sessionCount), String(workspace.subagentCount)),
           tokens: workspace.tokens,
           cost: workspace.cost,
           requests: workspace.requests,
@@ -887,12 +923,8 @@ export function ProjectBoard({
       title={title}
       {...(limit === undefined ? {} : { limit })}
       {...(baseline === undefined ? {} : { baseline })}
-      emptyText="当前范围没有项目。"
-      footnote={
-        projects === undefined
-          ? '点一行展开这个工作区的每个计费桶；费用都是它自己产生的。'
-          : '点一行展开这个项目的每个计费桶；点名字进入项目页。'
-      }
+      emptyText={t.board.noProjects}
+      footnote={projects === undefined ? t.board.workspaceFootnote : t.board.projectFootnote}
     />
   );
 }

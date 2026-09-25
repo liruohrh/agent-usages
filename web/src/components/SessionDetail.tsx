@@ -12,6 +12,7 @@ import type { SessionDetail as Detail, SessionTreeNode } from '../types';
 import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } from '../format';
 import { AgentBadge, Card, Chip, Notice } from './Bits';
 import { Composition, KpiRow, MetricDetailTable, ScopeSplitTable } from './Metrics';
+import { useT } from '../i18n';
 import { BandTable, ModelTable } from './Tables';
 
 /** The session detail panel. */
@@ -26,18 +27,19 @@ export function SessionDetailPanel({
   loading: boolean;
   error: string | null;
 }): React.ReactElement {
+  const t = useT();
   if (error !== null) {
     return (
-      <Notice tone="bad" title="读不到这个会话">
+      <Notice tone="bad" title={t.session.notFound}>
         {error}
       </Notice>
     );
   }
   if (detail === null) {
-    return <Notice title={loading ? '加载中…' : '选择一个会话'}>从左侧项目树里点一个会话（或子代理）看细节。</Notice>;
+    return <Notice title={loading ? t.app.loading : t.session.pick}>{t.session.pickHint}</Notice>;
   }
   const session = detail.session;
-  const title = session.title ?? `（无标题会话 ${session.id.slice(0, 8)}）`;
+  const title = session.title ?? t.session.untitledNamed(session.id.slice(0, 8));
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -47,17 +49,19 @@ export function SessionDetailPanel({
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
             <AgentBadge id={session.agent} />
-            <Chip tone={session.isSubagent ? 'muted' : 'accent'}>{session.isSubagent ? '子代理' : '主会话'}</Chip>
-            {session.archived && <Chip tone="muted">已归档</Chip>}
+            <Chip tone={session.isSubagent ? 'muted' : 'accent'}>
+              {session.isSubagent ? t.session.subagentNode : t.session.main}
+            </Chip>
+            {session.archived && <Chip tone="muted">{t.session.archived}</Chip>}
             <span className="truncate" title={session.cwd ?? session.workspace}>
               {shortenPath(session.cwd ?? session.workspace, 60)}
             </span>
           </div>
           <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-faint">
-            <span>项目 {session.projectName}</span>
-            <span>创建 {formatInstant(session.createdAt)}</span>
+            <span>{t.session.project(session.projectName)}</span>
+            <span>{t.session.created(formatInstant(session.createdAt))}</span>
             <span>
-              首末消耗 {formatInstant(session.firstUsage)} → {formatInstant(session.lastUsage)}
+              {t.session.span(formatInstant(session.firstUsage), formatInstant(session.lastUsage))}
             </span>
             <span className="truncate" title={session.id}>
               id {session.id}
@@ -65,7 +69,7 @@ export function SessionDetailPanel({
           </div>
           {detail.ancestors.length > 0 && (
             <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-faint">
-              <span>上级：</span>
+              <span>{t.session.parent}</span>
               {[...detail.ancestors].reverse().map((ancestor) => (
                 <Link
                   key={`${ancestor.agent}:${ancestor.id}`}
@@ -84,43 +88,51 @@ export function SessionDetailPanel({
           onClick={() => window.history.back()}
           className="rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
         >
-          返回
+          {t.session.back}
         </button>
       </div>
 
       <KpiRow
         items={[
           {
-            title: '这个会话（自身 + 子代理）的总费用',
+            title: t.session.moneyTitle,
             value: formatCost(session.total.cost.total, symbol),
-            hint: `自身 ${formatCost(session.own.cost.total, symbol)} · 子代理 ${formatCost(session.spawned.cost.total, symbol)}`,
+            hint: t.session.requestsHint(
+              formatCost(session.own.cost.total, symbol),
+              formatCost(session.spawned.cost.total, symbol),
+            ),
             tone: 'accent',
           },
           {
             label: 'Q',
-            title: '请求数',
+            title: t.session.requestTitle,
             value: formatTokens(session.total.requests),
-            hint: `自身 ${formatTokens(session.own.requests)} · 子代理 ${formatTokens(session.spawned.requests)}`,
+            hint: t.session.requestsHint(
+              formatTokens(session.own.requests),
+              formatTokens(session.spawned.requests),
+            ),
           },
           {
             label: 'T',
-            title: '计费桶 token 合计 = I/T + O/T',
+            title: t.session.tokensTitle,
             value: formatTokens(session.total.tokens.input + session.total.tokens.output + session.total.tokens.cacheRead + session.total.tokens.cacheWrite, true),
             ...(session.total.tokens.reasoning > 0
-              ? { hint: `R ${formatTokens(session.total.tokens.reasoning, true)}` }
+              ? { hint: t.kpi.reasoning(formatTokens(session.total.tokens.reasoning, true)) }
               : {}),
           },
           {
-            label: '子代理',
+            label: t.session.spawnedLabel,
             value: String(session.spawned.sessions),
             hint:
               session.spawned.sessions === 0
-                ? '没有派生子代理'
-                : `占这个会话费用的 ${formatShare(
-                    Number(session.total.cost.total) === 0
-                      ? 0
-                      : Number(session.spawned.cost.total) / Number(session.total.cost.total),
-                  )}`,
+                ? t.session.noSpawned
+                : t.session.spawnedShare(
+                    formatShare(
+                      Number(session.total.cost.total) === 0
+                        ? 0
+                        : Number(session.spawned.cost.total) / Number(session.total.cost.total),
+                    ),
+                  ),
           },
         ]}
       />
@@ -144,7 +156,7 @@ export function SessionDetailPanel({
       </div>
 
       {detail.tree.children.length > 0 && (
-        <Card title={`委派树（${detail.tree.children.length} 个直接子代理）`}>
+        <Card title={t.session.delegation(String(detail.tree.children.length))}>
           <div className="space-y-0.5">
             <TreeRow node={detail.tree} symbol={symbol} isRoot />
           </div>
@@ -154,8 +166,8 @@ export function SessionDetailPanel({
       {/* Stacked like the project overview: six and seven columns side by side
           do not fit half a window, and a squeezed table is worse than a taller page. */}
       <div className="space-y-3">
-        <ModelTable models={detail.models} symbol={symbol} title="本会话模型明细" />
-        <BandTable bands={detail.bands} symbol={symbol} title="本会话计价区间" />
+        <ModelTable models={detail.models} symbol={symbol} title={t.session.models} />
+        <BandTable bands={detail.bands} symbol={symbol} title={t.session.bands} />
       </div>
     </div>
   );
@@ -171,7 +183,8 @@ function TreeRow({
   symbol: string;
   isRoot?: boolean;
 }): React.ReactElement {
-  const title = node.title ?? `（无标题）${node.id.slice(0, 8)}`;
+  const t = useT();
+  const title = node.title ?? t.session.untitled(node.id.slice(0, 8));
   return (
     <div>
       <div className={`flex items-start gap-2 rounded px-2 py-1 ${isRoot ? 'bg-raised' : 'hover:bg-raised'}`}>

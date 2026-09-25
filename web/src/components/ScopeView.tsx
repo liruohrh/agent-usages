@@ -134,8 +134,16 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
       {active === 'usage' && <UsageTab {...props} />}
       {active === 'models' && (
         <div className="space-y-4">
-          <ModelTable models={project === null ? dashboard.models : project.models} symbol={symbol} />
-          <BandTable bands={project === null ? dashboard.bands : project.bands} symbol={symbol} />
+          <ModelTable
+            models={project === null ? dashboard.models : project.models}
+            symbol={symbol}
+            title={t.tables.modelsTitle}
+          />
+          <BandTable
+            bands={project === null ? dashboard.bands : project.bands}
+            symbol={symbol}
+            title={t.tables.bandsTitle}
+          />
         </div>
       )}
       {active === 'sessions' && (

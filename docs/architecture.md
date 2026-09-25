@@ -177,7 +177,8 @@ src/
 ├── format.ts              纯排版：token 树、计价区间、JSON 序列化（不读价格表）
 ├── html.ts                纯排版：单文件 HTML 报告（内联样式与 SVG，无脚本）
 ├── i18n/                  文案目录（zh 是源、en 按类型对齐）与带 code 的诊断
-├── serve/                 本地 Web 分析平台的服务端（只读 HTTP + 前端静态托管）
+│                          （网页自己那一份在 web/src/i18n/，同一个套路）
+├── serve/                 本地 Web 分析平台的服务端（HTTP + 前端静态托管；唯一的写是语言设置）
 │   ├── data.ts            逐 adapter 读盘 → merge.ts 合并 → runQuery → 仪表盘 JSON
 │   ├── server.ts          Express 应用、startServer()、`--dev` 代理
 │   ├── types.ts           API 与快照的字段契约

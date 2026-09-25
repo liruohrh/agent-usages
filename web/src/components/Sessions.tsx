@@ -14,6 +14,7 @@ import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } fro
 import { AgentBadge } from './Bits';
 import { BucketDetail, RankedList, type RankedEntry } from './Ranked';
 import { SessionTable } from './Tables';
+import { useT } from '../i18n';
 
 /** The session ranking panel. */
 export function SessionLeaderboard({
@@ -21,17 +22,18 @@ export function SessionLeaderboard({
   symbol,
   showProject = false,
   limit,
-  title = '会话',
+  title,
   baseline,
 }: {
   sessions: readonly SessionNode[];
   symbol: string;
   showProject?: boolean;
   limit?: number | undefined;
-  title?: string;
+  title: string;
   /** Extra header control (the overview's "show all" link). */
   baseline?: ReactNode;
 }): React.ReactElement {
+  const t = useT();
   const [flat, setFlat] = useState(false);
   const [view, setView] = useState<'bars' | 'table'>('bars');
   const ids = new Set(sessions.map((session) => session.id));
@@ -53,11 +55,11 @@ export function SessionLeaderboard({
 
   const entries: RankedEntry[] = rows.map((session) => ({
     key: session.uid,
-    title: session.title ?? `（无标题）${session.id.slice(0, 8)}`,
+    title: session.title ?? t.session.untitled(session.id.slice(0, 8)),
     href: `/s/${encodeURIComponent(session.uid)}`,
     badges: <AgentBadge id={session.agent} small />,
     subtitle: showProject ? session.projectName : shortenPath(session.workspace, 34),
-    ...(session.subagentCount > 0 ? { counts: `${session.subagentCount} 子` } : {}),
+    ...(session.subagentCount > 0 ? { counts: t.board.subagentsChip(String(session.subagentCount)) } : {}),
     tokens: session.tokens,
     cost: session.cost,
     requests: session.requests,
@@ -70,20 +72,22 @@ export function SessionLeaderboard({
         facts={
           <>
             <div>
-              首次 <span className="text-fg">{formatInstant(session.firstUsage)}</span>
+              {t.session.first} <span className="text-fg">{formatInstant(session.firstUsage)}</span>
             </div>
             <div>
-              最后 <span className="text-fg">{formatInstant(session.lastUsage)}</span>
+              {t.session.last} <span className="text-fg">{formatInstant(session.lastUsage)}</span>
             </div>
             <div>
-              自身 <span className="tnum text-fg">{formatCost(session.own.cost.total, symbol)}</span> · 子代理{' '}
+              {t.session.own}{' '}
+              <span className="tnum text-fg">{formatCost(session.own.cost.total, symbol)}</span> ·{' '}
+              {t.session.spawned}{' '}
               <span className="tnum text-fg">{formatCost(session.spawned.cost.total, symbol)}</span>
             </div>
             <div>
               Q <span className="tnum text-fg">{formatTokens(session.requests)}</span>
             </div>
             <Link to={`/s/${encodeURIComponent(session.uid)}`} className="inline-block text-accent hover:underline">
-              打开会话详情 →
+              {t.session.open}
             </Link>
           </>
         }
@@ -104,33 +108,29 @@ export function SessionLeaderboard({
             type="button"
             onClick={() => setView('table')}
             className="rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
-            title="切换排行榜 / 表格"
+            title={t.session.tableHint}
           >
-            表格视图
+            {t.session.table}
           </button>
           <button
             type="button"
             onClick={() => setFlat((value) => !value)}
             className={`rounded border px-2 py-0.5 text-[11px] ${flat ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
-            title="把子代理也单独列出（默认并入其父会话）"
+            title={t.session.flatHint}
           >
-            {flat ? '含子代理' : '合并子代理'}
+            {flat ? t.session.flat : t.session.fold}
           </button>
         </>
       }
       footnote={
         <>
-          {flat
-            ? '含子代理：子代理行与父行会重复计算同一笔用量。'
-            : '每行是一个委派子树的根（自身 + 它派生的全部）。'}{' '}
-          点一行展开该会话的全部计费桶与费用。
+          {flat ? t.session.flatNote : t.session.foldedNote} {t.session.rowNote}
           {rows.length > 0 && (
             <>
               {' '}
-              合计 {formatCost(String(rows.reduce((sum, session) => sum + Number(session.cost.total), 0)), symbol)}
-              ，I/C 占{' '}
-              <span title="I/C ÷ I/T">
-                {formatShare(
+              {t.session.share(
+                formatCost(String(rows.reduce((sum, session) => sum + Number(session.cost.total), 0)), symbol),
+                formatShare(
                   rows.reduce((sum, session) => sum + session.tokens.cacheRead, 0) /
                     Math.max(
                       1,
@@ -140,9 +140,8 @@ export function SessionLeaderboard({
                         0,
                       ),
                     ),
-                )}
-              </span>
-              。
+                ),
+              )}
             </>
           )}
         </>

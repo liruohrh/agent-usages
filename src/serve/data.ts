@@ -59,7 +59,7 @@ import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
 import type { CostTotals, TokenBuckets, UsageDataset, UsageRecord } from '../core/types.ts';
 import { renderDiagnostic, type Warning } from '../i18n/errors.ts';
-import { messagesFor, t, type Language } from '../i18n/index.ts';
+import { language, t } from '../i18n/index.ts';
 import { createPricingEngine, currencyOf, providerCurrencies, resolvePricingProvider, type PricingEngine } from '../pricing/index.ts';
 import {
   runQuery,
@@ -823,12 +823,20 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     return inFlight;
   };
 
-  /** Build (and memoize) the dashboard for one range spec. */
+  /**
+   * Build (and memoize) the dashboard for one range spec.
+   *
+   * The language is part of the key because a dashboard is not only numbers: the
+   * price-band windows are prose the pricing engine wrote while building it
+   * (`… → 至今 (UTC+08:00)`). One cache entry per language, so a request in
+   * English never inherits the Chinese one — the scan itself is still shared.
+   */
   const build = (rangeSpec: string | undefined): Dashboard => {
-    const key = (rangeSpec ?? '').trim();
+    const key = `${(rangeSpec ?? '').trim()}\u0000${language()}`;
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
-    const range = resolveRange(key.length === 0 ? {} : { spec: key });
+    const spec = (rangeSpec ?? '').trim();
+    const range = resolveRange(spec.length === 0 ? {} : { spec });
     const result = runQuery(scan.dataset, queryOf(range), context);
     const built = buildDashboard({
       datasets: [scan.dataset],

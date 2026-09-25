@@ -86,6 +86,8 @@ export const zh = {
       models: '模型与计价',
     },
     allProjects: '全部项目',
+    /** The `总 / 自身 / 子代理` rows, the same three words the CLI prints. */
+    total: '总',
     projectsCount: (count: string) => `${count} 个项目`,
     workspaces: (count: string) => `${count} 个工作区`,
     repo: 'git 仓库',
@@ -119,6 +121,8 @@ export const zh = {
     shareOfMetric: (share: string) => `占该指标的 ${share}`,
     shareOfTotal: '该项占本行 T 的比例',
     ownMoney: '每一格都是它自己的钱',
+    /** The sortable money column of the session table, named on hover only. */
+    ownMoneyColumn: '总费用（每格都是它自己的钱）',
     ownMoneyShort: '每一项自己的钱',
     total: '合计',
   },
@@ -185,6 +189,9 @@ export const zh = {
     barRule:
       '条 = 这一行自己的 token 构成：按五个互不重叠的计费项切开（I/M、I/C、I/W、O、R），整条 = 这一行的 100%。某项为 0 时不画；某段不足 1.2% 时保留 1.2% 以便看清。排序用右上角的下拉。',
     barTitle: '这一行的 token 构成（整条 = 本行 100%）',
+    /** `I/C 9.7亿 99.8% ¥19.4932` — one bucket on the hover of a bar segment. */
+    segment: (label: string, tokens: string, share: string, money: string) =>
+      `${label}：${tokens} tokens（占本行 ${share}）· ${money}`,
     rowNote: (metric: string, direction: string) =>
       `条 = 这一行自己的 token 构成（整条 100%，不表示大小——大小看右边的数字）；条下是五个计费桶各自的 token 数与费用（缩写同 CLI）。排序用「排序」下拉，当前是「${metric}${direction}」；点一行展开这一行的全部计费桶。`,
     total: (money: string) => `合计 ${money}`,
@@ -199,6 +206,8 @@ export const zh = {
     folded: (count: string, sum: string) => `其余 ${count} 项合计 ${sum}`,
     allListed: (count: string) => `共 ${count} 项，已全部列出`,
     metricTotal: '这个指标的合计',
+    /** `占该指标的 37.3%` — beside a bar in the chart card. */
+    metricShare: (share: string) => `占该指标的 ${share}`,
     dialogLabel: (metric: string) => `${metric} 全部条目`,
     dialogTitle: (metric: string, count: string) => `${metric} · 全部 ${count} 项`,
     dialogNote: (hint: string, total: string) => `${hint}｜合计 ${total}（条长 = 占这个指标总量的比例）`,
@@ -233,6 +242,8 @@ export const zh = {
     rowNote: '点一行展开该会话的全部计费桶与费用。',
     share: (money: string, hit: string) => `合计 ${money}，I/C 占 ${hit}。`,
     hitRate: 'I/C ÷ I/T',
+    /** The `最近` option of the sort dropdown. */
+    bandRecentLabel: '最近',
     notFound: '读不到这个会话',
     pick: '选择一个会话',
     pickHint: '从左侧项目树里点一个会话（或子代理）看细节。',

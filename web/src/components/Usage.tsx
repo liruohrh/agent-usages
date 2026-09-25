@@ -12,6 +12,7 @@ import { AgentTable, TokenTable } from './Tables';
 import { MetricDetailTable, ScopeSplitTable } from './Metrics';
 import { AgentBadge, Card } from './Bits';
 import type { SeriesMetric } from '../charts';
+import { useT } from '../i18n';
 
 /** The usage panel. */
 export function UsageTab({
@@ -30,6 +31,7 @@ export function UsageTab({
   dark: boolean;
   loading: boolean;
 }): React.ReactElement {
+  const t = useT();
   const figures =
     project === null
       ? { total: dashboard.totals, own: dashboard.totals.own, spawned: dashboard.totals.spawned }
@@ -57,7 +59,7 @@ export function UsageTab({
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <TokenTable breakdown={tokenBreakdown} symbol={symbol} />
-        <Card title="数据来源">
+        <Card title={t.usage.sources}>
           <ul className="space-y-2">
             {dashboard.loadedAgents.map((agent) => (
               <li key={agent.id} className="flex items-center gap-2">
@@ -70,11 +72,11 @@ export function UsageTab({
           </ul>
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-[11px] text-faint">
             <span>
-              计价来源 {dashboard.pricingLabel}（{dashboard.pricingProvider}）· {dashboard.currency}
+              {t.usage.pricing(dashboard.pricingLabel, dashboard.pricingProvider, dashboard.currency)}
             </span>
-            <span>扫描 {dashboard.scanMs} ms</span>
+            <span>{t.usage.scan(String(dashboard.scanMs))}</span>
             <span className="min-w-0 truncate" title={dashboard.source}>
-              数据根 {dashboard.source}
+              {t.usage.root} {dashboard.source}
             </span>
           </div>
         </Card>

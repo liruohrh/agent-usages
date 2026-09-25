@@ -9,6 +9,9 @@
 
 import type { Messages } from './zh';
 
+/** `1 session` / `2 sessions` — the one place English needs a plural. */
+const s = (count: string): string => (count === '1' ? '' : 's');
+
 export const en: Messages = {
   app: {
     loading: 'Loading…',
@@ -55,8 +58,9 @@ export const en: Messages = {
     repoHint: 'a git repository (all its worktrees)',
     pathHint: 'a single directory',
     counts: (sessions: string, subagents: string, workspaces: string) =>
-      `${sessions} sessions / ${subagents} subagents / ${workspaces} workspaces`,
-    workspaceCounts: (sessions: string, subagents: string) => `${sessions} sessions / ${subagents} subagents`,
+      `${sessions} session${s(sessions)} / ${subagents} subagent${s(subagents)} / ${workspaces} workspace${s(workspaces)}`,
+    workspaceCounts: (sessions: string, subagents: string) =>
+      `${sessions} session${s(sessions)} / ${subagents} subagent${s(subagents)}`,
     last: (instant: string) => `last ${instant}`,
     own: 'own',
     spawned: 'spawned',
@@ -65,7 +69,7 @@ export const en: Messages = {
     view: 'Open',
     untitled: (id: string) => `(untitled session ${id})`,
     archived: 'archived',
-    subagents: (count: string) => `${count} subagents`,
+    subagents: (count: string) => `${count} subagent${s(count)}`,
     noUsage: 'This workspace recorded nothing in the current range.',
   },
   scope: {
@@ -78,8 +82,9 @@ export const en: Messages = {
       models: 'Models & pricing',
     },
     allProjects: 'All projects',
-    projectsCount: (count: string) => `${count} projects`,
-    workspaces: (count: string) => `${count} workspaces`,
+    total: 'total',
+    projectsCount: (count: string) => `${count} project${s(count)}`,
+    workspaces: (count: string) => `${count} workspace${s(count)}`,
     repo: 'git repository',
     path: 'directory',
     back: 'Back to all projects',
@@ -109,13 +114,15 @@ export const en: Messages = {
     shareOfMetric: (share: string) => `${share} of this metric`,
     shareOfTotal: 'this bucket as a share of the row’s T',
     ownMoney: 'every cell is its own money',
+    ownMoneyColumn: 'total cost (every cell is its own money)',
     ownMoneyShort: 'each item’s own money',
     total: 'total',
   },
   kpi: {
     money: 'total cost in this range',
     requests: 'requests billed',
-    requestsHint: (sessions: string, subagents: string) => `${sessions} sessions (${subagents} subagents)`,
+    requestsHint: (sessions: string, subagents: string) =>
+      `${sessions} session${s(sessions)} (${subagents} subagent${s(subagents)})`,
     unpriced: (count: string) => `${count} unpriced`,
     tokens: 'billed tokens = I/T + O/T',
     hitRate: 'I/C share',
@@ -144,7 +151,7 @@ export const en: Messages = {
     topSessions: 'Sessions (top five)',
     topSessionsNamed: (name: string) => `Sessions (top five) · ${name}`,
     allRanked: (count: string) => `all ${count} (sortable) →`,
-    warnings: (count: string) => `${count} warnings`,
+    warnings: (count: string) => `${count} warning${s(count)}`,
   },
   usage: {
     scope: 'Usage in this scope',
@@ -172,8 +179,10 @@ export const en: Messages = {
     barRule:
       'A bar is this row’s own token make-up: five disjoint billing items (I/M, I/C, I/W, O, R), the whole bar being this row’s 100%. A zero item is not drawn; a sliver under 1.2% is widened to 1.2% so it stays visible. Sorting lives in the dropdown at the top right.',
     barTitle: 'this row’s token make-up (the whole bar is this row’s 100%)',
+    segment: (label: string, tokens: string, share: string, money: string) =>
+      `${label}: ${tokens} tokens (${share} of this row) · ${money}`,
     rowNote: (metric: string, direction: string) =>
-      `The bar is this row’s own token make-up (the whole bar is 100%, it says nothing about size — size is the number on the right); under it, every bucket with its tokens and money (same abbreviations as the CLI). Sorting is the 「${metric}${direction}」 dropdown; click a row to open all of its buckets.`,
+      `The bar is this row’s own token make-up (the whole bar is 100%, it says nothing about size — size is the number on the right); under it, every bucket with its tokens and money (same abbreviations as the CLI). Sorting is the 「${metric} ${direction}」 dropdown; click a row to open all of its buckets.`,
     total: (money: string) => `${money} in total`,
     emptyMetric: 'This metric is zero everywhere.',
     empty: 'Nothing in this range.',
@@ -186,13 +195,15 @@ export const en: Messages = {
     folded: (count: string, sum: string) => `${count} more: ${sum}`,
     allListed: (count: string) => `all ${count} listed`,
     metricTotal: 'the metric’s total',
+    metricShare: (share: string) => `${share} of this metric`,
     dialogLabel: (metric: string) => `${metric}: every entry`,
     dialogTitle: (metric: string, count: string) => `${metric} · all ${count}`,
     dialogNote: (hint: string, total: string) => `${hint}｜total ${total} (bar = share of the metric’s total)`,
     close: 'Close',
-    sessionCounts: (sessions: string, subagents: string) => `${sessions} sessions · ${subagents} subagents`,
-    sessionCountsProject: (sessions: string, subagents: string) => `${sessions} sessions (${subagents} sub)`,
-    repoSubtitle: (workspaces: string) => `git repository · ${workspaces} workspaces`,
+    sessionCounts: (sessions: string, subagents: string) =>
+      `${sessions} session${s(sessions)} · ${subagents} subagent${s(subagents)}`,
+    sessionCountsProject: (sessions: string, subagents: string) => `${sessions} session${s(sessions)} (${subagents} sub)`,
+    repoSubtitle: (workspaces: string) => `git repository · ${workspaces} workspace${s(workspaces)}`,
     subagentsChip: (count: string) => `${count} sub`,
     agentFootnote: 'Click a row to open every bucket; the money is the agent’s own.',
     projectFootnote: 'Click a row to open every bucket of that project; click the name to open its page.',
@@ -219,6 +230,7 @@ export const en: Messages = {
     rowNote: 'Click a row to open every bucket and the money of that session.',
     share: (money: string, hit: string) => `${money} in total, I/C at ${hit}.`,
     hitRate: 'I/C ÷ I/T',
+    bandRecentLabel: 'recent',
     notFound: 'This session cannot be read',
     pick: 'Pick a session',
     pickHint: 'Click a session (or a subagent) in the tree on the left to see its details.',
@@ -237,7 +249,7 @@ export const en: Messages = {
     spawnedLabel: 'Spawned',
     noSpawned: 'no subagents were spawned',
     spawnedShare: (share: string) => `${share} of this session’s cost`,
-    delegation: (count: string) => `Delegation tree (${count} direct subagents)`,
+    delegation: (count: string) => `Delegation tree (${count} direct subagent${s(count)})`,
     models: 'Models in this session',
     bands: 'Price bands in this session',
   },
@@ -260,7 +272,7 @@ export const en: Messages = {
     leanHint: (lean: boolean) => (lean ? 'bring back every metric column' : 'keep the main columns only (a narrower table)'),
     noSessions: 'No session in this range.',
     sessionsNote: (rows: string, shown: number | null, total: string) =>
-      `${rows} rows${shown === null ? '' : `, showing the first ${shown}`}; ${total} in total.`,
+      `${rows} row${s(rows)}${shown === null ? '' : `, showing the first ${shown}`}; ${total} in total.`,
     bucketsTitle: 'The five token buckets',
     bucketsNote: 'Shares are taken over the four billing buckets (I/T + O/T = T); R is already inside O/T and is never billed again.',
     modelsTitle: 'Models',

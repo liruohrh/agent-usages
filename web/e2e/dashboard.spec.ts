@@ -778,6 +778,43 @@ test.describe('layout', () => {
   });
 });
 
+test.describe('the language switch', () => {
+  const kpis = (page: Page): Locator => page.locator('main div.grid > div.rounded-xl');
+
+  test('switches the page, the numbers, and the file the CLI reads', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: '概览' })).toBeVisible();
+    // Chinese compact notation: the numbers are part of the language, not just
+    // the labels around them.
+    await expect(kpis(page).first()).toContainText('¥');
+    expect((await page.locator('main').innerText())).toMatch(/[亿万]/);
+
+    await page.getByRole('button', { name: 'EN', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Overview' })).toBeVisible();
+    await expect
+      .poll(async () => (await page.locator('main').innerText()).match(/[KMB]\b/)?.[0] ?? '')
+      .toMatch(/[KMB]/);
+
+    // The switch is not a browser preference: it wrote the configuration file,
+    // and the server now speaks English without being asked.
+    const settings = (await page.evaluate(async () => (await fetch('/api/settings')).json())) as {
+      language: string;
+      configured: string;
+      path: string;
+    };
+    expect(settings.configured).toBe('en');
+    expect(settings.language).toBe('en');
+    // The scratch copy the tests run against — never a developer's own file.
+    expect(settings.path).toContain('.tmp');
+
+    // And back, so the rest of the suite and the next run start in Chinese.
+    await page.getByRole('button', { name: '中文', exact: true }).click();
+    await expect(page.getByRole('button', { name: '概览' })).toBeVisible();
+    const after = (await page.evaluate(async () => (await fetch('/api/settings')).json())) as { configured: string };
+    expect(after.configured).toBe('zh');
+  });
+});
+
 test.describe('the metric vocabulary', () => {
   /**
    * The names of the figures, in words, are definitions — they belong in a
