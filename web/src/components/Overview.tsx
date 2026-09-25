@@ -9,7 +9,7 @@
 
 import { Link } from 'react-router-dom';
 
-import type { Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
+import type { Dashboard, ProjectSummary, SessionNode, TimeseriesBucket } from '../types';
 import { formatCost, formatShare, formatTokens } from '../format';
 import { AgentBadge, Card, Notice } from './Bits';
 import { Composition, KpiRow } from './Metrics';
@@ -140,22 +140,16 @@ export function Overview({
         </div>
       </div>
 
-      {project === null ? (
-        <ProjectRanking dashboard={dashboard} symbol={symbol} />
-      ) : (
-        project.sessionReports.length > 0 && (
-          <Card
-            title="最近的会话"
-            actions={
-              <Link to="?view=sessions" className="text-[12px] text-accent hover:underline">
-                全部会话
-              </Link>
-            }
-          >
-            <RecentSessions project={project} symbol={symbol} />
-          </Card>
-        )
-      )}
+      {/* The comparison view, reachable without hunting for the tab: the dearest
+          sessions across every project, with the columns that explain the money. */}
+      <TopSessions
+        sessions={project === null ? dashboard.projects.flatMap((entry) => entry.sessionReports) : project.sessionReports}
+        symbol={symbol}
+        showProject={project === null}
+        scopeName={project === null ? null : project.name}
+      />
+
+      {project === null && <ProjectRanking dashboard={dashboard} symbol={symbol} />}
 
       {dashboard.warnings.length > 0 && (
         <Notice tone="warn" title={`${dashboard.warnings.length} 条提示`}>
@@ -231,28 +225,101 @@ function ProjectRanking({ dashboard, symbol }: { dashboard: Dashboard; symbol: s
   );
 }
 
-/** The newest few sessions of a project, as compact rows. */
-function RecentSessions({ project, symbol }: { project: ProjectSummary; symbol: string }): React.ReactElement {
-  const rows = [...project.sessionReports]
-    .sort((left, right) => (right.lastUsage ?? 0) - (left.lastUsage ?? 0))
-    .slice(0, 6);
+/**
+ * The dearest sessions of the scope, as a sortable-at-a-glance table.
+ *
+ * "Which session cost the most, and where did its tokens go" is the question a
+ * reader has first; the full table (every session, every column, sorted on click)
+ * is one link away.
+ *
+ * @param props - the sessions to rank, and the currency symbol.
+ */
+function TopSessions({
+  sessions,
+  symbol,
+  showProject,
+  scopeName,
+}: {
+  sessions: readonly SessionNode[];
+  symbol: string;
+  showProject: boolean;
+  scopeName: string | null;
+}): React.ReactElement {
+  const ids = new Set(sessions.map((session) => session.id));
+  const roots = sessions.filter(
+    (session) => !(session.isSubagent && session.parentId !== null && ids.has(session.parentId)),
+  );
+  const rows = [...roots].sort((left, right) => Number(right.cost.total) - Number(left.cost.total)).slice(0, 8);
+  const total = roots.reduce((sum, session) => sum + Number(session.cost.total), 0);
+  const billed = (session: SessionNode): number =>
+    session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite + session.tokens.output;
   return (
-    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-      {rows.map((session) => (
-        <Link
-          key={session.uid}
-          to={`/s/${encodeURIComponent(session.uid)}`}
-          className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2 hover:bg-raised"
-        >
-          <span className="cell-title min-w-0 text-[13px]" title={session.title ?? session.id}>
-            {session.title ?? `（无标题）${session.id.slice(0, 8)}`}
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            <AgentBadge id={session.agent} small />
-            <span className="tnum text-[12px] text-muted">{formatCost(session.cost.total, symbol)}</span>
-          </span>
+    <Card
+      title={scopeName === null ? '花费最多的会话' : `花费最多的会话 · ${scopeName}`}
+      actions={
+        <Link to="?view=sessions" className="text-[12px] text-accent hover:underline">
+          全部 {roots.length} 个会话（可排序）
         </Link>
-      ))}
-    </div>
+      }
+    >
+      {rows.length === 0 ? (
+        <p className="py-6 text-center text-[13px] text-faint">当前范围没有会话。</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[46rem] border-collapse text-[13px]">
+            <thead>
+              <tr className="text-[11px] text-faint">
+                <th className="px-2 py-1.5 text-left font-medium">会话</th>
+                {showProject && <th className="px-2 py-1.5 text-left font-medium">项目</th>}
+                <th className="px-2 py-1.5 text-left font-medium">agent</th>
+                <th className="px-2 py-1.5 text-right font-medium" title="请求数">Q</th>
+                <th className="px-2 py-1.5 text-right font-medium" title="缓存命中输入">I/C</th>
+                <th className="px-2 py-1.5 text-right font-medium" title="缓存命中这条计费项的钱">缓存金额</th>
+                <th className="px-2 py-1.5 text-right font-medium" title="token 总计（计费桶）">T</th>
+                <th className="px-2 py-1.5 text-right font-medium">费用</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((session) => (
+                <tr key={session.uid} className="border-t border-line hover:bg-raised">
+                  <td className="px-2 py-2">
+                    <Link
+                      to={`/s/${encodeURIComponent(session.uid)}`}
+                      className="cell-title text-accent hover:underline"
+                      title={session.title ?? session.id}
+                    >
+                      {session.title ?? `（无标题）${session.id.slice(0, 8)}`}
+                    </Link>
+                  </td>
+                  {showProject && (
+                    <td className="max-w-[11rem] truncate px-2 py-2 text-[12px] text-muted" title={session.projectName}>
+                      {session.projectName}
+                    </td>
+                  )}
+                  <td className="px-2 py-2">
+                    <AgentBadge id={session.agent} small />
+                  </td>
+                  <td className="tnum px-2 py-2 text-right">{formatTokens(session.requests)}</td>
+                  <td className="tnum px-2 py-2 text-right">
+                    {formatTokens(session.tokens.cacheRead, true)}
+                    <span className="ml-1 text-[11px] text-faint">
+                      {billed(session) === 0 ? '' : formatShare(session.tokens.cacheRead / billed(session))}
+                    </span>
+                  </td>
+                  <td className="tnum px-2 py-2 text-right">{formatCost(session.cost.cacheHitInputCost, symbol)}</td>
+                  <td className="tnum px-2 py-2 text-right">{formatTokens(billed(session), true)}</td>
+                  <td className="tnum px-2 py-2 text-right">
+                    <span className="text-fg">{formatCost(session.cost.total, symbol)}</span>
+                    {total > 0 && (
+                      <span className="ml-1 text-[11px] text-faint">{formatShare(Number(session.cost.total) / total)}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }

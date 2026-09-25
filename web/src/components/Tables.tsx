@@ -11,7 +11,7 @@ import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
 import type { AgentTotals, BandRow, CostTotals, ModelRow, SessionNode, TokenBreakdown, TokenBuckets } from '../types';
-import { agentColor, formatCost, formatInstant, formatShare, formatTokens, TOKEN_BUCKETS } from '../format';
+import { agentColor, formatCost, formatInstant, formatShare, formatTokens, shortenPath, TOKEN_BUCKETS } from '../format';
 import { AgentBadge, Card, Chip, ShareBar } from './Bits';
 
 /** Total tokens across the four billed buckets. */
@@ -329,20 +329,25 @@ function subtractMoney(left: string, right: string): string {
 }
 
 /**
- * The session table: one row per session, the columns the CLI's session rows
- * carry — first and last use, requests, tokens, money — plus the agent.
+ * Every session, side by side, sorted by whatever the reader is asking about.
  *
- * Subagents are folded into the session that spawned them (the parent's row
- * already contains them) unless the reader asks for the flat view, which is
- * exactly the CLI's `--subagents`.
+ * This is the comparison view: one row per session across all projects (or all of
+ * one project), with the figures that decide where the money went — requests,
+ * cache-read tokens and their money, total tokens, cost — and every column sorts
+ * on click. Default order is cost, descending, because "which sessions cost the
+ * most" is the first question; the first click on a header sorts by it, the
+ * second flips the order.
  *
- * @param props - the rows, the currency symbol and how many to show.
+ * Subagents are folded into the session that spawned them unless the reader asks
+ * for the flat view (the CLI's `--subagents`).
+ *
+ * @param props - the rows, the currency symbol, and how much to show.
  */
 export function SessionTable({
   sessions,
   symbol,
   title = '会话明细',
-  limit = 200,
+  limit = 500,
   showProject = false,
 }: {
   sessions: readonly SessionNode[];
@@ -353,95 +358,94 @@ export function SessionTable({
   showProject?: boolean;
 }): React.ReactElement {
   const [flat, setFlat] = useState(false);
+  const [detailed, setDetailed] = useState(false);
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'cost', desc: true });
   const ids = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
+
   const rows = useMemo(() => {
     const kept = flat
       ? [...sessions]
       : sessions.filter((session) => !(session.isSubagent && session.parentId !== null && ids.has(session.parentId)));
-    return kept.sort((left, right) => Number(right.cost.total) - Number(left.cost.total)).slice(0, limit);
-  }, [sessions, flat, ids, limit]);
-  const total = rows.reduce((sum, session) => sum + Number(session.cost.total), 0);
+    return kept.sort((left, right) => {
+      const order = compare(sortValue(left, sort.key), sortValue(right, sort.key));
+      return (sort.desc ? -order : order) || left.uid.localeCompare(right.uid);
+    });
+  }, [sessions, flat, ids, sort]);
+
+  const shown = rows.slice(0, limit);
+  const totalCost = rows.reduce((sum, session) => sum + Number(session.cost.total), 0);
+  const columns = COLUMNS.filter((column) => (detailed ? true : column.always));
+
+  /** Sort by `key`, flipping the direction when it is already the sort. */
+  const sortBy = (key: SortKey): void =>
+    setSort((current) => ({ key, desc: current.key === key ? !current.desc : COLUMN_KINDS[key] === 'num' }));
 
   return (
     <Card
       title={`${title}（${rows.length}）`}
       actions={
-        <button
-          type="button"
-          onClick={() => setFlat((value) => !value)}
-          className={`rounded border px-2 py-0.5 text-[11px] ${flat ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
-          title="把子代理也单独列出（默认并入其父会话）"
-        >
-          {flat ? '含子代理' : '合并子代理'}
-        </button>
+        <>
+          <span className="hidden text-[11px] text-faint sm:inline">点表头排序</span>
+          <button
+            type="button"
+            onClick={() => setDetailed((value) => !value)}
+            className={`rounded border px-2 py-0.5 text-[11px] ${detailed ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
+          >
+            {detailed ? '收起分桶' : '展开分桶'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setFlat((value) => !value)}
+            className={`rounded border px-2 py-0.5 text-[11px] ${flat ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
+            title="把子代理也单独列出（默认并入其父会话）"
+          >
+            {flat ? '含子代理' : '合并子代理'}
+          </button>
+        </>
       }
     >
-      <div className="max-h-[28rem] overflow-auto">
-        <table className="w-full min-w-[46rem] table-fixed border-collapse text-[12px]">
-          <colgroup>
-            <col />
-            {showProject && <col style={{ width: '132px' }} />}
-            <col style={{ width: '76px' }} />
-            <col style={{ width: '118px' }} />
-            <col style={{ width: '118px' }} />
-            <col style={{ width: '72px' }} />
-            <col style={{ width: '84px' }} />
-            <col style={{ width: '92px' }} />
-            <col style={{ width: '78px' }} />
-          </colgroup>
+      <div className="max-h-[32rem] overflow-auto">
+        <table className="w-full min-w-[54rem] border-collapse text-[13px]">
           <thead className="sticky top-0 bg-panel">
             <tr className="text-[11px] text-faint">
-              <th className="px-2 py-1 text-left font-medium">会话</th>
-              {showProject && <th className="px-2 py-1 text-left font-medium">项目</th>}
-              <th className="px-2 py-1 text-left font-medium">agent</th>
-              <th className="px-2 py-1 text-left font-medium">首次</th>
-              <th className="px-2 py-1 text-left font-medium">最后</th>
-              <th className="px-2 py-1 text-right font-medium">Q</th>
-              <th className="px-2 py-1 text-right font-medium">T</th>
-              <th className="px-2 py-1 text-right font-medium">费用</th>
-              <th className="px-2 py-1 text-right font-medium">占比</th>
+              {columns.map((column) => (
+                <th
+                  key={column.key}
+                  className={`whitespace-nowrap px-2 py-1.5 font-medium ${column.kind === 'num' ? 'text-right' : 'text-left'}`}
+                  title={column.title ?? column.label}
+                >
+                  <button
+                    type="button"
+                    onClick={() => sortBy(column.key)}
+                    className={`inline-flex items-center gap-1 hover:text-fg ${sort.key === column.key ? 'text-accent' : ''}`}
+                  >
+                    {column.label}
+                    <span className="text-[9px]">{sort.key === column.key ? (sort.desc ? '▼' : '▲') : '↕'}</span>
+                  </button>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
+            {shown.length === 0 && (
               <tr>
-                <td colSpan={showProject ? 9 : 8} className="px-2 py-3 text-center text-faint">
+                <td colSpan={columns.length} className="px-2 py-4 text-center text-faint">
                   当前范围没有会话。
                 </td>
               </tr>
             )}
-            {rows.map((session) => (
+            {shown.map((session) => (
               <tr key={session.uid} className="border-t border-line hover:bg-raised">
-                <td className="px-2 py-1">
-                  <div className="flex min-w-0 items-center gap-1">
-                    {session.isSubagent && <span className="shrink-0 text-faint">↳</span>}
-                    <Link
-                      to={`/s/${encodeURIComponent(session.uid)}`}
-                      className="cell-title min-w-0 text-accent hover:underline"
-                      title={session.title ?? session.id}
-                    >
-                      {session.title ?? `（无标题）${session.id.slice(0, 8)}`}
-                    </Link>
-                    {session.subagentCount > 0 && <Chip tone="muted">{session.subagentCount} 子</Chip>}
-                    {session.archived && <Chip tone="muted">已归档</Chip>}
-                  </div>
-                </td>
-                {showProject && (
-                  <td className="truncate px-2 py-1 text-[12px] text-muted" title={session.projectName}>
-                    {session.projectName}
-                  </td>
-                )}
-                <td className="px-2 py-1">
-                  <AgentBadge id={session.agent} small />
-                </td>
-                <td className="px-2 py-1 text-[11px] text-muted">{formatInstant(session.firstUsage)}</td>
-                <td className="px-2 py-1 text-[11px] text-muted">{formatInstant(session.lastUsage)}</td>
-                <Num value={formatTokens(session.requests)} />
-                <Num value={formatTokens(billedTotal(session.tokens), true)} />
-                <Num value={formatCost(session.cost.total, symbol)} />
-                <td className="tnum px-2 py-1 text-right text-faint">
-                  {total === 0 ? '—' : formatShare(Number(session.cost.total) / total)}
-                </td>
+                {columns.map((column) => (
+                  <SessionCell
+                    key={column.key}
+                    column={column}
+                    session={session}
+                    symbol={symbol}
+                    showProject={showProject}
+                    totalCost={totalCost}
+                  />
+                ))}
               </tr>
             ))}
           </tbody>
@@ -449,11 +453,189 @@ export function SessionTable({
       </div>
       <p className="mt-2 text-[11px] text-faint">
         {flat
-          ? '含子代理：子代理行与父行会重复计算同一笔用量，占比按表内之和算。'
-          : '默认并入父会话：这里每行是一个委派子树的根，占比按表内之和算。'}
+          ? '含子代理：子代理行与父行会重复计算同一笔用量。'
+          : '默认并入父会话：每行是一个委派子树的根（自身 + 它派生的全部）。'}
+        {' '}
+        共 {rows.length} 行{rows.length > shown.length ? `，显示前 ${shown.length} 行` : ''}；
+        合计 <span className="tnum text-muted">{formatCost(String(totalCost), symbol)}</span>。
       </p>
     </Card>
   );
+}
+
+/** What the session table can be sorted by. */
+type SortKey =
+  | 'title'
+  | 'project'
+  | 'agent'
+  | 'requests'
+  | 'inputMiss'
+  | 'cacheRead'
+  | 'cacheWrite'
+  | 'output'
+  | 'reasoning'
+  | 'tokens'
+  | 'cacheCost'
+  | 'cost'
+  | 'lastUsage';
+
+/** One sortable column. */
+interface SessionColumn {
+  key: SortKey;
+  label: string;
+  kind: 'text' | 'num';
+  /** Shown even in the summary view. */
+  always?: boolean;
+  title?: string;
+}
+
+/** The columns, in the order they are drawn. */
+const COLUMNS: readonly SessionColumn[] = [
+  { key: 'title', label: '会话', kind: 'text', always: true },
+  { key: 'project', label: '项目', kind: 'text', always: true },
+  { key: 'agent', label: 'agent', kind: 'text', always: true },
+  { key: 'requests', label: 'Q', kind: 'num', always: true, title: '请求数' },
+  { key: 'inputMiss', label: 'I/M', kind: 'num', title: '未命中缓存的输入' },
+  { key: 'cacheRead', label: 'I/C', kind: 'num', always: true, title: '缓存命中输入（tokens）' },
+  { key: 'cacheCost', label: '缓存金额', kind: 'num', always: true, title: '缓存命中输入这条计费项花掉的钱' },
+  { key: 'cacheWrite', label: 'I/W', kind: 'num', title: '缓存写入输入' },
+  { key: 'output', label: 'O', kind: 'num', title: '输出（含思考）' },
+  { key: 'reasoning', label: 'R', kind: 'num', title: '其中思考' },
+  { key: 'tokens', label: 'T', kind: 'num', always: true, title: 'token 总计（计费桶）' },
+  { key: 'cost', label: '费用', kind: 'num', always: true },
+  { key: 'lastUsage', label: '最后使用', kind: 'num', title: '最后一次计费请求的时间' },
+];
+
+/** The kind of every column, for the default sort direction. */
+const COLUMN_KINDS: Record<SortKey, 'text' | 'num'> = Object.fromEntries(
+  COLUMNS.map((column) => [column.key, column.kind]),
+) as Record<SortKey, 'text' | 'num'>;
+
+/** The comparable value behind a column. */
+function sortValue(session: SessionNode, key: SortKey): number | string {
+  switch (key) {
+    case 'title':
+      return session.title ?? session.id;
+    case 'project':
+      return session.projectName;
+    case 'agent':
+      return session.agent;
+    case 'requests':
+      return session.requests;
+    case 'inputMiss':
+      return session.tokens.input;
+    case 'cacheRead':
+      return session.tokens.cacheRead;
+    case 'cacheWrite':
+      return session.tokens.cacheWrite;
+    case 'output':
+      return session.tokens.output;
+    case 'reasoning':
+      return session.tokens.reasoning;
+    case 'tokens':
+      return session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite + session.tokens.output;
+    case 'cacheCost':
+      return Number(session.cost.cacheHitInputCost);
+    case 'cost':
+      return Number(session.cost.total);
+    case 'lastUsage':
+      return session.lastUsage ?? 0;
+  }
+}
+
+/** Compare two values of the same kind; text sorts naturally, numbers by value. */
+function compare(left: number | string, right: number | string): number {
+  if (typeof left === 'number' && typeof right === 'number') return left - right;
+  return String(left).localeCompare(String(right), 'zh-CN');
+}
+
+/** One cell of {@link SessionTable}. */
+function SessionCell({
+  column,
+  session,
+  symbol,
+  showProject,
+  totalCost,
+}: {
+  column: SessionColumn;
+  session: SessionNode;
+  symbol: string;
+  showProject: boolean;
+  totalCost: number;
+}): React.ReactElement {
+  const num = (value: string): React.ReactElement => (
+    <td className="tnum whitespace-nowrap px-2 py-1.5 text-right">{value}</td>
+  );
+  switch (column.key) {
+    case 'title':
+      return (
+        <td className="px-2 py-1.5">
+          <div className="flex min-w-0 items-center gap-1">
+            {session.isSubagent && <span className="shrink-0 text-faint">↳</span>}
+            <Link
+              to={`/s/${encodeURIComponent(session.uid)}`}
+              className="cell-title min-w-0 text-accent hover:underline"
+              title={session.title ?? session.id}
+            >
+              {session.title ?? `（无标题）${session.id.slice(0, 8)}`}
+            </Link>
+            {session.subagentCount > 0 && <Chip tone="muted">{session.subagentCount} 子</Chip>}
+            {session.archived && <Chip tone="muted">已归档</Chip>}
+          </div>
+        </td>
+      );
+    case 'project':
+      return showProject ? (
+        <td className="max-w-[11rem] truncate px-2 py-1.5 text-[12px] text-muted" title={session.projectName}>
+          {session.projectName}
+        </td>
+      ) : (
+        <td className="px-2 py-1.5 text-[12px] text-muted" title={session.workspace}>
+          {shortenPath(session.workspace, 28)}
+        </td>
+      );
+    case 'agent':
+      return (
+        <td className="px-2 py-1.5">
+          <AgentBadge id={session.agent} small />
+        </td>
+      );
+    case 'requests':
+      return num(formatTokens(session.requests));
+    case 'inputMiss':
+      return num(formatTokens(session.tokens.input, true));
+    case 'cacheRead':
+      return num(
+        `${formatTokens(session.tokens.cacheRead, true)}${
+          billedTotal(session.tokens) === 0 ? '' : ` (${formatShare(session.tokens.cacheRead / billedTotal(session.tokens))})`
+        }`,
+      );
+    case 'cacheWrite':
+      return num(formatTokens(session.tokens.cacheWrite, true));
+    case 'output':
+      return num(formatTokens(session.tokens.output, true));
+    case 'reasoning':
+      return num(formatTokens(session.tokens.reasoning, true));
+    case 'tokens':
+      return num(formatTokens(billedTotal(session.tokens), true));
+    case 'cacheCost':
+      return num(formatCost(session.cost.cacheHitInputCost, symbol));
+    case 'cost':
+      return (
+        <td className="tnum whitespace-nowrap px-2 py-1.5 text-right">
+          <span className="text-fg">{formatCost(session.cost.total, symbol)}</span>
+          {totalCost > 0 && (
+            <span className="ml-1 text-[11px] text-faint">{formatShare(Number(session.cost.total) / totalCost)}</span>
+          )}
+        </td>
+      );
+    case 'lastUsage':
+      return (
+        <td className="whitespace-nowrap px-2 py-1.5 text-right text-[11px] text-muted">
+          {formatInstant(session.lastUsage)}
+        </td>
+      );
+  }
 }
 
 /**

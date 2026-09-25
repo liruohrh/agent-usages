@@ -29,6 +29,18 @@ interface ApiRow {
   cost: { total: string };
 }
 
+interface ApiSession {
+  uid: string;
+  id: string;
+  title: string | null;
+  agent: string;
+  isSubagent: boolean;
+  parentId: string | null;
+  requests: number;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number };
+  cost: { total: string; cacheHitInputCost: string };
+}
+
 interface ApiDashboard {
   models: ApiRow[];
   bands: ApiRow[];
@@ -43,7 +55,7 @@ interface ApiDashboard {
     cost: { total: string };
     own: ApiFigures;
     spawned: ApiFigures;
-    sessionReports: { uid: string; isSubagent: boolean; parentId: string | null; title: string | null }[];
+    sessionReports: ApiSession[];
   }[];
 }
 
@@ -110,6 +122,18 @@ function triples(
 function apiTriple(row: ApiRow, withPeriod = false): string {
   const model = withPeriod ? `${row.model} · ${row.periodLabel ?? ''}` : row.model;
   return `${AGENT_LABELS[row.agent] ?? row.agent}|${model}|${row.requests}`;
+}
+
+/** The sessions the table shows by default: one row per delegation subtree. */
+function rootSessions(dashboard: ApiDashboard): ApiSession[] {
+  const all = dashboard.projects.flatMap((project) => project.sessionReports);
+  const ids = new Set(all.map((session) => session.id));
+  return all.filter((session) => !(session.isSubagent && session.parentId !== null && ids.has(session.parentId)));
+}
+
+/** The billed-bucket total a row's `T` column shows. */
+function billed(session: ApiSession): number {
+  return session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite + session.tokens.output;
 }
 
 /** The two projects a switching test uses, or a skip when there are fewer. */
@@ -303,6 +327,77 @@ test.describe('a session', () => {
     expect(triples(modelRows, { agent: 0, model: 1, requests: 2 })).toEqual(
       sortedRows(detail.detail.models).map((row) => apiTriple(row)),
     );
+  });
+});
+
+test.describe('the session comparison', () => {
+  test('lists every session with the columns that explain the money', async ({ page }) => {
+    await page.goto('/?view=sessions');
+    const sessions = rootSessions(await apiDashboard(page));
+    const table = cardStartingWith(page, '会话');
+    await expect(table.locator('tbody tr')).toHaveCount(sessions.length);
+
+    const head = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.replace(/[↕▼▲]/g, '').trim());
+    for (const column of ['会话', '项目', 'agent', 'Q', 'I/C', '缓存金额', 'T', '费用']) {
+      expect(head, `column ${column}`).toContain(column);
+    }
+
+    // Default order is cost, dearest first — the first question a reader has.
+    const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
+    await expect(table.locator('tbody tr').first()).toContainText(dearest?.title ?? dearest?.id ?? '');
+  });
+
+  test('sorts by cost, tokens and cache money on click', async ({ page }) => {
+    await page.goto('/?view=sessions');
+    const sessions = rootSessions(await apiDashboard(page));
+    const table = cardStartingWith(page, '会话');
+    const firstRow = (): Locator => table.locator('tbody tr').first();
+    const header = (label: string): Locator =>
+      table.locator('thead th').filter({ has: page.getByRole('button', { name: new RegExp(`^${label}`) }) }).locator('button');
+
+    const byCostDesc = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
+    const byCostAsc = [...sessions].sort((left, right) => Number(left.cost.total) - Number(right.cost.total))[0];
+    const byTokens = [...sessions].sort((left, right) => billed(right) - billed(left))[0];
+    const byCacheMoney = [...sessions].sort(
+      (left, right) => Number(right.cost.cacheHitInputCost) - Number(left.cost.cacheHitInputCost),
+    )[0];
+
+    // 费用 is the default sort; one click flips it, the next flips it back.
+    await expect(firstRow()).toContainText(byCostDesc?.title ?? '');
+    await header('费用').click();
+    await expect(firstRow()).toContainText(byCostAsc?.title ?? '');
+    await header('费用').click();
+    await expect(firstRow()).toContainText(byCostDesc?.title ?? '');
+
+    // Tokens: the session with the most billed tokens comes first.
+    await header('T').click();
+    await expect(firstRow()).toContainText(byTokens?.title ?? '');
+
+    // Cache money: same, on the cache column.
+    await header('缓存金额').click();
+    await expect(firstRow()).toContainText(byCacheMoney?.title ?? '');
+  });
+
+  test('unfolds the per-bucket columns on request', async ({ page }) => {
+    await page.goto('/?view=sessions');
+    const table = cardStartingWith(page, '会话');
+    await table.getByRole('button', { name: '展开分桶' }).click();
+    const head = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.replace(/[↕▼▲]/g, '').trim());
+    for (const column of ['I/M', 'I/W', 'O', 'R', '最后使用']) {
+      expect(head, `column ${column}`).toContain(column);
+    }
+  });
+
+  test('the overview ranks the dearest sessions and links to the table', async ({ page }) => {
+    await page.goto('/');
+    const sessions = rootSessions(await apiDashboard(page));
+    const card = cardStartingWith(page, '花费最多的会话');
+    await expect(card).toBeVisible();
+    const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
+    await expect(card.locator('tbody tr').first()).toContainText(dearest?.title ?? '');
+    await expect(card.locator('tbody tr')).toHaveCount(Math.min(8, sessions.length));
+    await card.getByRole('link', { name: /全部 .* 个会话/ }).click();
+    await expect(page).toHaveURL(/view=sessions/);
   });
 });
 
