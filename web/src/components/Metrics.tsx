@@ -24,6 +24,43 @@ export const BUCKETS: { key: keyof TokenBuckets; label: string; short: string; c
 ];
 
 /** The money each bucket produced. Reasoning shares the output bill. */
+/**
+ * The pieces a row's usage is made of, as five *disjoint* parts.
+ *
+ * `O` is output **without** reasoning and `R` is the reasoning inside it, so the
+ * five add up to the billed tokens exactly — the CLI prints them the same way
+ * (`O` and `O/T`, with `R` a share of the latter). Reason and cache-write vanish
+ * when the provider never reported them.
+ */
+export interface TokenPiece {
+  key: keyof TokenBuckets;
+  short: string;
+  label: string;
+  color: string;
+  tokens: number;
+  money: string;
+}
+
+/** Split a row into the five pieces a bar or a table can draw. */
+export function tokenPieces(tokens: TokenBuckets, cost: CostTotals): TokenPiece[] {
+  const money = bucketMoney(tokens, cost);
+  const label: Record<string, string> = {
+    input: '未命中缓存输入',
+    cacheRead: '缓存命中输入',
+    cacheWrite: '缓存写入',
+    output: '输出（不含思考）',
+    reasoning: '思考',
+  };
+  return BUCKETS.map((bucket) => ({
+    key: bucket.key,
+    short: bucket.short,
+    label: label[bucket.key] ?? bucket.label,
+    color: bucket.color,
+    tokens: bucket.key === 'output' ? Math.max(0, tokens.output - tokens.reasoning) : tokens[bucket.key],
+    money: money[bucket.key] ?? '0',
+  }));
+}
+
 export function bucketMoney(tokens: TokenBuckets, cost: CostTotals): Record<string, string> {
   const reasoning = tokens.reasoning > 0 ? cost.reasoningCost : '0';
   return {
@@ -99,26 +136,25 @@ export function Composition({
   cost: CostTotals;
   symbol: string;
 }): React.ReactElement {
-  const money = bucketMoney(tokens, cost);
-  const totalTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite + tokens.output;
+  // The same five disjoint pieces the ranking bars use: `O` is output without
+  // reasoning, so `I/M + I/C + I/W + O + R` is exactly the row's own total.
+  const pieces = tokenPieces(tokens, cost).filter((piece) => piece.tokens > 0);
+  const totalTokens = pieces.reduce((sum, piece) => sum + piece.tokens, 0);
   const totalMoney = Number(cost.total);
-  const rows = BUCKETS.filter((bucket) => bucket.key !== 'reasoning' || tokens.reasoning > 0).filter(
-    (bucket) => bucket.key !== 'cacheWrite' || tokens.cacheWrite > 0,
-  );
 
-  const bar = (shareOf: (bucket: (typeof BUCKETS)[number]) => number, title: string): React.ReactElement => (
+  const bar = (shareOf: (piece: TokenPiece) => number, title: string): React.ReactElement => (
     <div className="flex items-center gap-3">
       <span className="w-16 shrink-0 text-[12px] text-faint">{title}</span>
       <div className="flex h-6 min-w-0 flex-1 overflow-hidden rounded-md bg-raised">
-        {rows.map((bucket) => {
-          const share = shareOf(bucket);
+        {pieces.map((piece) => {
+          const share = shareOf(piece);
           if (share <= 0) return null;
           return (
             <div
-              key={bucket.key}
+              key={piece.key}
               className="h-full"
-              style={{ width: `${share * 100}%`, backgroundColor: bucket.color }}
-              title={`${bucket.short} ${bucket.label}：${formatShare(share)}`}
+              style={{ width: `${share * 100}%`, backgroundColor: piece.color }}
+              title={`${piece.short} ${piece.label}：${formatShare(share)}`}
             />
           );
         })}
@@ -129,11 +165,8 @@ export function Composition({
   return (
     <Card title="构成">
       <div className="space-y-2.5">
-        {bar((bucket) => (totalTokens === 0 ? 0 : tokens[bucket.key] / totalTokens), 'token')}
-        {bar(
-          (bucket) => (totalMoney === 0 || bucket.key === 'reasoning' ? 0 : Number(money[bucket.key] ?? '0') / totalMoney),
-          '金额',
-        )}
+        {bar((piece) => (totalTokens === 0 ? 0 : piece.tokens / totalTokens), 'token')}
+        {bar((piece) => (totalMoney === 0 ? 0 : Number(piece.money) / totalMoney), '金额')}
       </div>
       <table className="mt-4 w-full border-collapse text-[13px]">
         <thead>
@@ -145,27 +178,28 @@ export function Composition({
           </tr>
         </thead>
         <tbody>
-          {rows.map((bucket) => {
-            const share = totalTokens === 0 ? 0 : tokens[bucket.key] / totalTokens;
+          {pieces.map((piece) => {
+            const share = totalTokens === 0 ? 0 : piece.tokens / totalTokens;
             return (
-              <tr key={bucket.key} className="border-t border-line">
+              <tr key={piece.key} className="border-t border-line">
                 <td className="py-1.5">
-                  <span className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ backgroundColor: bucket.color }} />
-                  <span className="text-fg" title={bucket.key === 'reasoning' ? '思考是输出的一部分，不另行计费' : bucket.label}>
-                    {bucket.key === 'output' ? '输出（不含思考）' : bucket.key === 'reasoning' ? '思考' : bucket.label}
+                  <span className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ backgroundColor: piece.color }} />
+                  <span className="text-fg" title={piece.key === 'reasoning' ? '思考是输出的一部分，不另行计费' : piece.label}>
+                    {piece.label}
                   </span>
+                  <span className="ml-1 text-[10px] text-faint">{piece.short}</span>
                 </td>
-                <td className="tnum py-1.5 text-right">{formatTokens(tokens[bucket.key], true)}</td>
+                <td className="tnum py-1.5 text-right">{formatTokens(piece.tokens, true)}</td>
                 <td className="tnum py-1.5 text-right text-muted">{formatShare(share)}</td>
-                <td className="tnum py-1.5 text-right">{formatCost(money[bucket.key] ?? '0', symbol)}</td>
+                <td className="tnum py-1.5 text-right">{formatCost(piece.money, symbol)}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-faint">
-        条长按占比：上图按 token，下图按金额。四个计费桶互不重叠（I/M + I/C + I/W + O = 全部），
-        思考是输出的一部分、只在 O 里出现一次。合计{' '}
+        条长按占比：上图按 token，下图按金额。五项互不重叠（I/M + I/C + I/W + O + R = 全部），
+        其中 O 是"输出里不算思考的那部分"。合计{' '}
         <span className="tnum text-muted">{formatTokens(totalTokens, true)}</span> tokens ·{' '}
         <span className="tnum text-muted">{formatCost(cost.total, symbol)}</span>
       </p>

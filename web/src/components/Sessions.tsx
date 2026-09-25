@@ -1,7 +1,9 @@
 /**
  * The session ranking: the same leaderboard as projects and agents, with the two
- * measures that only sessions have (cache money) and the two controls that only
- * sessions need (fold subagents, switch to the column view).
+ * controls only sessions need (fold subagents, switch to the column view).
+ *
+ * Every figure is a sortable column, and each row's bar is that session's own
+ * token make-up — see `RankedList` for why size and composition are separate.
  */
 
 import { useState, type ReactNode } from 'react';
@@ -10,22 +12,8 @@ import { Link } from 'react-router-dom';
 import type { SessionNode } from '../types';
 import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } from '../format';
 import { AgentBadge } from './Bits';
-import { BucketDetail, billedTokens, COMMON_MEASURES, RankedList, type Measure, type RankedEntry } from './Ranked';
+import { BucketDetail, billedTokens, RankedList, type RankedEntry } from './Ranked';
 import { SessionTable } from './Tables';
-
-/** The measures a session can be ranked by. */
-const SESSION_MEASURES: Measure[] = [
-  COMMON_MEASURES[0] as Measure,
-  COMMON_MEASURES[1] as Measure,
-  {
-    key: 'cacheCost',
-    label: '缓存金额',
-    hint: '按缓存命中这条计费项的钱（排序用，行里显示的是费用列）',
-    value: (entry) => Number(entry.cost.cacheHitInputCost),
-  },
-  COMMON_MEASURES[2] as Measure,
-  COMMON_MEASURES[3] as Measure,
-];
 
 /** The session ranking panel. */
 export function SessionLeaderboard({
@@ -94,7 +82,9 @@ export function SessionLeaderboard({
             <div>
               缓存命中金额 <span className="tnum text-fg">{formatCost(session.cost.cacheHitInputCost, symbol)}</span>
             </div>
-            <div>请求 <span className="tnum text-fg">{formatTokens(session.requests)}</span></div>
+            <div>
+              请求 <span className="tnum text-fg">{formatTokens(session.requests)}</span>
+            </div>
             <Link to={`/s/${encodeURIComponent(session.uid)}`} className="inline-block text-accent hover:underline">
               打开会话详情 →
             </Link>
@@ -109,7 +99,6 @@ export function SessionLeaderboard({
       entries={entries}
       symbol={symbol}
       title={title}
-      measures={SESSION_MEASURES}
       {...(limit === undefined ? {} : { limit })}
       baseline={
         <>
@@ -136,10 +125,8 @@ export function SessionLeaderboard({
         <>
           {flat
             ? '含子代理：子代理行与父行会重复计算同一笔用量。'
-            : '每行是一个委派子树的根（自身 + 它派生的全部）。'}
-          {' '}
-          点一行展开该会话的全部计费桶与金额；条形长度 = 当前排序指标，颜色 = 计费桶
-          （占比很小时也保留一点可见宽度，具体数值见每行的色块标签）。
+            : '每行是一个委派子树的根（自身 + 它派生的全部）。'}{' '}
+          点一行展开该会话的全部计费桶与金额。
           {rows.length > 0 && (
             <>
               {' '}
@@ -147,10 +134,7 @@ export function SessionLeaderboard({
               ，缓存命中占{' '}
               {formatShare(
                 rows.reduce((sum, session) => sum + session.tokens.cacheRead, 0) /
-                  Math.max(
-                    1,
-                    rows.reduce((sum, session) => sum + billedTokens(session.tokens), 0),
-                  ),
+                  Math.max(1, rows.reduce((sum, session) => sum + billedTokens(session.tokens), 0)),
               )}
               。
             </>

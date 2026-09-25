@@ -102,6 +102,40 @@ function numberOf(text: string): number {
   return Number(text.replace(/[^\d.]/g, ''));
 }
 
+/** The sortable column labels of the first ranking card on screen. */
+async function columnLabels(page: Page): Promise<string[]> {
+  return (await page.locator('main section div.grid button').allInnerTexts()).map((text) =>
+    text.replace(/[↕▼▲]/g, '').trim(),
+  );
+}
+
+/**
+ * The first count in a cell, with the UI's compact units understood: `9.7亿` is
+ * 970 million, and a trailing percentage (the cache-hit share beside `I/C`) is not
+ * part of the number.
+ */
+function firstCount(text: string): number {
+  const match = /([\d.,]+)\s*(亿|万)?/.exec(text.replace(/,/g, ''));
+  if (match === null) return Number.NaN;
+  const base = Number(match[1]);
+  if (match[2] === '亿') return base * 1e8;
+  if (match[2] === '万') return base * 1e4;
+  return base;
+}
+
+/** One ranking row's figures, keyed by column label. */
+async function rowValues(page: Page, index: number): Promise<Record<string, number>> {
+  const labels = await columnLabels(page);
+  const cells = await page
+    .locator('main ol > li')
+    .nth(index)
+    .evaluate((item) => {
+      const row = item.firstElementChild;
+      return [...(row?.children ?? [])].slice(2).map((cell) => cell.textContent ?? '');
+    });
+  return Object.fromEntries(labels.map((label, order) => [label, firstCount(cells[order] ?? '')]));
+}
+
 /** Switch to one of the scope's tabs. */
 async function openTab(page: Page, label: string): Promise<void> {
   await page.locator('main').getByRole('button', { name: label, exact: true }).first().click();
@@ -265,9 +299,11 @@ test.describe('the project and agent rankings', () => {
 
     const dearest = [...dashboard.projects].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rows.first()).toContainText(dearest?.name ?? '');
-    // The row names every bucket it used, not just the dominant one.
-    const first = await rows.first().innerText();
-    for (const short of ['I/M', 'I/C']) expect(first).toContain(short);
+    // Every figure has its own column, including the buckets.
+    const labels = await columnLabels(page);
+    for (const column of ['Q', 'I/M', 'I/C', 'O', '总 token', '缓存金额', '费用']) {
+      expect(labels, `column ${column}`).toContain(column);
+    }
     // Expanding shows the bucket table with money per bucket.
     await rows.first().click();
     const detail = await rows.first().locator('table tbody tr').allInnerTexts();
@@ -283,7 +319,8 @@ test.describe('the project and agent rankings', () => {
 
     const dearest = [...dashboard.agents].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rows.first()).toContainText(dearest?.label ?? '');
-    await page.locator('main section header').getByRole('button', { name: 'tokens', exact: true }).click();
+    // Sorting is by column header now.
+    await page.locator('main section div.grid button').filter({ hasText: /^总 token/ }).first().click();
     const mostTokens = [...dashboard.agents].sort(
       (left, right) =>
         right.tokens.input + right.tokens.output + right.tokens.cacheRead + right.tokens.cacheWrite -
@@ -404,63 +441,94 @@ test.describe('a session', () => {
 test.describe('the session leaderboard', () => {
   /** One row of the leaderboard, by index. */
   const rowAt = (page: Page, index: number): Locator => page.locator('main ol > li').nth(index);
+  /** A sortable column header, by label. */
+  const header = (page: Page, label: string): Locator =>
+    page.locator('main section div.grid button').filter({ hasText: new RegExp(`^${label}`) }).first();
 
-  test('ranks every session, and the first row is the dearest', async ({ page }) => {
+  test('ranks every session, with a column per figure', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
     const rows = page.locator('main ol > li');
     await expect(rows).toHaveCount(sessions.length);
-    const head = await page.locator('main section div.grid').first().innerText();
-    for (const column of ['Q', '总 token', '费用']) expect(head).toContain(column);
+
+    // Every figure is a column, and every column sorts.
+    const labels = (await page.locator('main section div.grid button').allInnerTexts()).map((text) =>
+      text.replace(/[↕▼▲]/g, '').trim(),
+    );
+    for (const column of ['Q', 'I/M', 'I/C', 'O', '总 token', '缓存金额', '费用']) {
+      expect(labels, `column ${column}`).toContain(column);
+    }
 
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    const first = await rowAt(page, 0).innerText();
-    expect(first).toContain(dearest?.title ?? '');
-    expect(first).toContain(dearest?.cost.total ?? '');
-    // The row names its buckets, so a dominant one cannot hide the others, and
-    // the cache-hit share sits with `I/C` rather than off on its own line.
-    for (const short of ['I/M', 'I/C', 'O']) expect(first).toContain(short);
-    expect(first).toMatch(/I\/C\s*[\d.,万亿]+\s*\d+(\.\d+)?%/);
-    // Three figures end the row — Q, the token total, the money with its share —
-    // and the header labels them.
-    const lines = first.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
-    const last = lines.slice(-3);
-    expect(numberOf(last[0] ?? '')).toBe(dearest?.requests);
-    expect(last[1]).toMatch(/[\d.,]+(万亿)?/);
-    expect(last[2]).toContain(dearest?.cost.total ?? '');
-    expect(last[2]).toMatch(/\d+(\.\d+)?%/);
-    // No `T` label, no "（合计 …）" tail, no invented "含于" note.
-    expect(first).not.toMatch(/\bT\s[\d.,万亿]+/);
-    expect(first).not.toContain('含于');
-    expect(first).not.toContain('合计');
+    await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
+    // Each column shows this session's own figure.
+    const values = await rowValues(page, 0);
+    // Counts are printed compactly, so compare within the rounding they carry.
+    const close = (shown: number, actual: number | undefined): number =>
+      Math.abs(shown - (actual ?? 0)) / Math.max(1, actual ?? 1);
+    expect(values['Q']).toBe(dearest?.requests);
+    expect(close(values['I/C'] ?? Number.NaN, dearest?.tokens.cacheRead)).toBeLessThan(0.02);
+    expect(close(values['总 token'] ?? Number.NaN, dearest ? billed(dearest) : 0)).toBeLessThan(0.02);
+    expect(close(values['缓存金额'] ?? Number.NaN, Number(dearest?.cost.cacheHitInputCost ?? 0))).toBeLessThan(0.01);
+    expect(close(values['费用'] ?? Number.NaN, Number(dearest?.cost.total ?? 0))).toBeLessThan(0.01);
   });
 
-  test('sorts by cost, tokens and cache money', async ({ page }) => {
+  test('sorts by any column on click', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
     const firstTitle = async (): Promise<string> => (await rowAt(page, 0).innerText()).split('\n')[0] ?? '';
-    const measure = (label: string): Locator =>
-      page.locator('main section header').getByRole('button', { name: label, exact: true });
 
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     const mostTokens = [...sessions].sort((left, right) => billed(right) - billed(left))[0];
     const mostCache = [...sessions].sort(
       (left, right) => Number(right.cost.cacheHitInputCost) - Number(left.cost.cacheHitInputCost),
     )[0];
+    const mostRequests = [...sessions].sort((left, right) => right.requests - left.requests)[0];
 
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
-    await measure('tokens').click();
+    await header(page, '总 token').click();
     await expect(rowAt(page, 0)).toContainText(mostTokens?.title ?? '');
-    await measure('缓存金额').click();
+    await header(page, '缓存金额').click();
     await expect(rowAt(page, 0)).toContainText(mostCache?.title ?? '');
+    await header(page, 'Q').click();
+    await expect(rowAt(page, 0)).toContainText(mostRequests?.title ?? '');
 
-    // Ascending puts the smallest first — the same session as the largest, at the
-    // other end of the list.
-    await measure('花费').click();
-    await page.locator('main section header').getByRole('button', { name: /降序/ }).click();
+    // Clicking the same header again flips the direction.
+    await header(page, '费用').click();
+    await page.locator('main section header').getByRole('button', { name: /降序|升序/ }).click();
     const cheapest = [...sessions].sort((left, right) => Number(left.cost.total) - Number(right.cost.total))[0];
     await expect(rowAt(page, 0)).toContainText(cheapest?.title ?? '');
     expect(await firstTitle()).not.toBe('');
+  });
+
+  test('each row draws its own composition, including reasoning', async ({ page }) => {
+    await page.goto('/?view=sessions');
+    const sessions = rootSessions(await apiDashboard(page));
+    // The row whose bar carries the most pieces: the one with reasoning and, if
+    // any, cache writes — both must be drawn, not hidden behind output.
+    const withReasoning = sessions.filter((session) => session.tokens.reasoning > 0)[0];
+
+    const segments = async (index: number): Promise<{ width: number; title: string }[]> =>
+      page.locator('main ol > li').nth(index).evaluate((row) =>
+        [...row.querySelectorAll('span')]
+          .filter((span) => span.style.backgroundColor.length > 0 && span.style.width.length > 0)
+          .map((span) => ({ width: Number(span.style.width.replace('%', '')), title: span.getAttribute('title') ?? '' })),
+      );
+
+    const all = await segments(0);
+    expect(all.length).toBeGreaterThanOrEqual(2);
+    // The bar is a 100% stack of that row's own tokens.
+    const sum = all.reduce((total, segment) => total + segment.width, 0);
+    expect(sum).toBeGreaterThan(99);
+    expect(sum).toBeLessThan(101);
+
+    if (withReasoning !== undefined) {
+      const index = sessions
+        .map((session) => session.title)
+        .indexOf(withReasoning.title);
+      const found = await segments(Math.max(0, index));
+      expect(found.map((segment) => segment.title.slice(0, 2))).toContain('R ');
+    }
   });
 
   test('expands one session into every bucket, with money', async ({ page }) => {
@@ -473,7 +541,6 @@ test.describe('the session leaderboard', () => {
     expect(buckets.join(' ')).toContain('I/M');
     expect(buckets.join(' ')).toContain('I/C');
     expect(buckets.join(' ')).toContain('合计');
-    // Every bucket line carries its own money.
     expect((buckets.join(' ').match(/¥/g) ?? []).length).toBeGreaterThanOrEqual(4);
 
     const sessions = rootSessions(await apiDashboard(page));
@@ -481,44 +548,8 @@ test.describe('the session leaderboard', () => {
     expect(buckets.join(' ')).toContain(first0?.cost.total ?? '');
     await expect(detail.getByRole('link', { name: /打开会话详情/ })).toBeVisible();
 
-    // Clicking again folds it back.
     await first.locator('[role="button"]').first().click();
     await expect(page.locator('main ol > li').first().locator('table')).toHaveCount(0);
-  });
-
-  test('draws size and composition as two separate bars', async ({ page }) => {
-    await page.goto('/?view=sessions');
-    const sessions = rootSessions(await apiDashboard(page));
-    const byCost = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total));
-
-    /** The width of a row's size bar and of each composition segment, in percent. */
-    const bars = async (index: number): Promise<{ size: number; segments: number[] }> =>
-      page.locator('main ol > li').nth(index).evaluate((row) => {
-        const spans = [...row.querySelectorAll('span')];
-        const fill = spans.find((span) => span.className.includes('bg-accent') && span.style.width.length > 0);
-        const size = fill === undefined ? -1 : Number(fill.style.width.replace('%', ''));
-        const colored = spans.filter((span) => span.style.backgroundColor.length > 0 && span.style.width.length > 0);
-        return { size, segments: colored.map((span) => Number(span.style.width.replace('%', ''))) };
-      });
-
-    // The size bar is the row's value against the largest row's: the top row fills
-    // it, and the next row is its own share of that maximum.
-    const first = await bars(0);
-    expect(first.size).toBeCloseTo(100, 1);
-    const second = await bars(1);
-    expect(second.size).toBeCloseTo((Number(byCost[1]?.cost.total) / Number(byCost[0]?.cost.total)) * 100, 1);
-
-    // The composition bar is a 100% stack of that row's own tokens, so its
-    // segments add up to the whole bar — the two encodings never multiply.
-    const sum = first.segments.reduce((total, width) => total + width, 0);
-    expect(sum).toBeGreaterThan(99);
-    expect(sum).toBeLessThan(101);
-
-    // The header says both, in words.
-    const header = await page.locator('main section div.grid').first().locator('xpath=following-sibling::p[1]').innerText();
-    expect(header).toContain('大小');
-    expect(header).toContain('构成');
-    expect(header).toContain('不是占合计的比例');
   });
 
   test('still offers the column view for anyone who wants it', async ({ page }) => {
@@ -538,7 +569,6 @@ test.describe('the session leaderboard', () => {
     await page.goto('/');
     const sessions = rootSessions(await apiDashboard(page));
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    // The overview's own ranking is the same list, five rows deep.
     const card = cardStartingWith(page, '会话（前五）');
     await expect(card.locator('ol > li')).toHaveCount(Math.min(5, sessions.length));
     await expect(card.locator('ol > li').first()).toContainText(dearest?.title ?? '');
