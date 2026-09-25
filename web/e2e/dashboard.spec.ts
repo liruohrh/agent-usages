@@ -410,6 +410,8 @@ test.describe('the session leaderboard', () => {
     const sessions = rootSessions(await apiDashboard(page));
     const rows = page.locator('main ol > li');
     await expect(rows).toHaveCount(sessions.length);
+    const head = await page.locator('main section div.grid').first().innerText();
+    for (const column of ['Q', '总 token', '费用']) expect(head).toContain(column);
 
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     const first = await rowAt(page, 0).innerText();
@@ -419,9 +421,15 @@ test.describe('the session leaderboard', () => {
     // the cache-hit share sits with `I/C` rather than off on its own line.
     for (const short of ['I/M', 'I/C', 'O']) expect(first).toContain(short);
     expect(first).toMatch(/I\/C\s*[\d.,万亿]+\s*\d+(\.\d+)?%/);
-    expect(first).toContain('Q ');
-    // The right-hand figure is the money; the one under it is the token total, and
-    // neither is labelled `T`, nor followed by a "（合计 …）" line.
+    // Three figures end the row — Q, the token total, the money with its share —
+    // and the header labels them.
+    const lines = first.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+    const last = lines.slice(-3);
+    expect(numberOf(last[0] ?? '')).toBe(dearest?.requests);
+    expect(last[1]).toMatch(/[\d.,]+(万亿)?/);
+    expect(last[2]).toContain(dearest?.cost.total ?? '');
+    expect(last[2]).toMatch(/\d+(\.\d+)?%/);
+    // No `T` label, no "（合计 …）" tail, no invented "含于" note.
     expect(first).not.toMatch(/\bT\s[\d.,万亿]+/);
     expect(first).not.toContain('含于');
     expect(first).not.toContain('合计');

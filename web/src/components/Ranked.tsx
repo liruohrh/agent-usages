@@ -42,17 +42,21 @@ export interface RankedEntry {
   openLabel?: string | undefined;
 }
 
-/** One way the list can be ordered. */
+/**
+ * One way the list can be ordered.
+ *
+ * A measure only decides the order (and therefore the bar lengths); what a row
+ * *shows* is always the same three columns — Q, the token total, and the money
+ * with its share — so the numbers stay in the same place as the sort changes.
+ */
 export interface Measure {
   key: string;
   label: string;
   hint: string;
   /** The comparable value. */
   value: (entry: RankedEntry) => number;
-  /** How the row's headline number reads. */
-  format: (entry: RankedEntry, symbol: string) => string;
-  /** A secondary figure under the headline. */
-  secondary?: (entry: RankedEntry, symbol: string) => string;
+  /** Which column the current sort is on: `requests`, `tokens`, `cost` or none. */
+  column?: 'requests' | 'tokens' | 'cost';
 }
 
 /** The billed-bucket total, which is what `T` means everywhere else. */
@@ -60,43 +64,19 @@ export function billedTokens(tokens: TokenBuckets): number {
   return tokens.input + tokens.cacheRead + tokens.cacheWrite + tokens.output;
 }
 
-/** The measures every entity shares: money, tokens, requests. */
+/** The measures every entity shares: money, tokens, requests, recency. */
 export const COMMON_MEASURES: Measure[] = [
-  {
-    key: 'cost',
-    label: '花费',
-    hint: '按总费用',
-    value: (entry) => Number(entry.cost.total),
-    format: (entry, symbol) => formatCost(entry.cost.total, symbol),
-    // No `T` label: the right-hand column is the money, and the figure under it is
-    // this row's token total — the letter only added noise.
-    secondary: (entry) => formatTokens(billedTokens(entry.tokens), true),
-  },
-  {
-    key: 'tokens',
-    label: 'tokens',
-    hint: '按计费桶 token 总数',
-    value: (entry) => billedTokens(entry.tokens),
-    format: (entry) => `${formatTokens(billedTokens(entry.tokens), true)} tokens`,
-    secondary: (entry, symbol) => formatCost(entry.cost.total, symbol),
-  },
-  {
-    key: 'requests',
-    label: '请求',
-    hint: '按请求数',
-    value: (entry) => entry.requests,
-    format: (entry) => `${formatTokens(entry.requests)} 请求`,
-    secondary: (entry, symbol) => formatCost(entry.cost.total, symbol),
-  },
-  {
-    key: 'recent',
-    label: '最近',
-    hint: '按最后一次计费时间',
-    value: (entry) => entry.lastUsage ?? 0,
-    format: (entry) => formatInstant(entry.lastUsage),
-    secondary: (entry, symbol) => formatCost(entry.cost.total, symbol),
-  },
+  { key: 'cost', label: '花费', hint: '按总费用', value: (entry) => Number(entry.cost.total), column: 'cost' },
+  { key: 'tokens', label: 'tokens', hint: '按计费桶 token 总数', value: (entry) => billedTokens(entry.tokens), column: 'tokens' },
+  { key: 'requests', label: '请求', hint: '按请求数', value: (entry) => entry.requests, column: 'requests' },
+  { key: 'recent', label: '最近', hint: '按最后一次计费时间', value: (entry) => entry.lastUsage ?? 0 },
 ];
+
+/**
+ * The row grid: rank, the bar block, then the three figures — same template for
+ * the header and every row, so the numbers line up down the column.
+ */
+const ROW_GRID = 'grid grid-cols-[1.5rem_minmax(0,1fr)_4.5rem_6rem_9rem] gap-3';
 
 /**
  * A stacked composition bar that stays readable when one bucket dominates.
@@ -182,11 +162,16 @@ function BucketChips({ tokens }: { tokens: TokenBuckets }): React.ReactElement {
 }
 
 /**
- * How the bar is drawn, in one sentence — the reader asked, and a picture that
- * cannot be explained is a picture that cannot be trusted.
+ * How the bar is drawn, in one sentence — a picture that cannot be explained is a
+ * picture that cannot be trusted.
+ *
+ * Note what the length is *not*: it is not the row's share of the totals. It is
+ * the row's value on the current measure divided by the largest row's, so the
+ * biggest entry fills the column and the rest are read against it. The share of
+ * the totals is the small percentage beside the money.
  */
 const BAR_RULE =
-  '条长 = 当前排序指标相对榜首的比例；分段 = 这一行自己的计费桶构成（I/M、I/C、I/W、O，思考含在 O 里已在下面说明）；每段不足 1.2% 时保留 1.2% 以便看清。';
+  '条长 = 这一行的「当前排序指标」÷ 列表里最大那一行的同一个指标（最大的那行占满）；不是占合计的比例——占合计的比例写在费用后面的小字里。分段 = 这一行自己的四个计费桶构成（I/M、I/C、I/W、O，按 token 占比），每段不足 1.2% 时保留 1.2%。';
 
 /** The per-bucket table an expanded row shows: tokens, share and money. */
 export function BucketDetail({
@@ -324,28 +309,45 @@ export function RankedList({
         <p className="py-8 text-center text-[13px] text-faint">{emptyText}</p>
       ) : (
         <>
-          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line pb-2.5 text-[12px] text-faint">
-            <span>
-              合计 <span className="tnum text-fg">{formatCost(String(totalCost), symbol)}</span>
-            </span>
-            <span>
-              <span className="tnum text-fg">{formatTokens(rows.reduce((sum, entry) => sum + billedTokens(entry.tokens), 0), true)}</span>{' '}
-              tokens
-            </span>
-            <span>
-              <span className="tnum text-fg">{formatTokens(rows.reduce((sum, entry) => sum + entry.requests, 0))}</span> 请求
-            </span>
-            <span className="flex flex-wrap items-center gap-x-3">
-              {BUCKETS.filter((bucket) => bucket.key !== 'reasoning').map((bucket) => (
-                <span key={bucket.key} className="flex items-center gap-1">
-                  <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: bucket.color }} />
-                  {bucket.short}
+          {/* The baseline, and the labels for the three columns every row ends with. */}
+          <div className="mb-1 border-b border-line pb-2 text-[12px] text-faint">
+            <div className={`${ROW_GRID} items-center`}>
+              <span />
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>
+                  合计 <span className="tnum text-fg">{formatCost(String(totalCost), symbol)}</span>
                 </span>
-              ))}
-              <span className="text-[11px] text-faint" title={BAR_RULE}>
-                （条长 = 当前指标；分段 = 计费桶构成）
+                <span>
+                  <span className="tnum text-fg">
+                    {formatTokens(rows.reduce((sum, entry) => sum + billedTokens(entry.tokens), 0), true)}
+                  </span>{' '}
+                  tokens
+                </span>
+                <span>
+                  <span className="tnum text-fg">{formatTokens(rows.reduce((sum, entry) => sum + entry.requests, 0))}</span> 请求
+                </span>
+                <span className="flex flex-wrap items-center gap-x-3">
+                  {BUCKETS.filter((bucket) => bucket.key !== 'reasoning').map((bucket) => (
+                    <span key={bucket.key} className="flex items-center gap-1">
+                      <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: bucket.color }} />
+                      {bucket.short}
+                    </span>
+                  ))}
+                  <span className="text-[11px] text-faint" title={BAR_RULE}>
+                    ⓘ 条的算法
+                  </span>
+                </span>
               </span>
-            </span>
+              <span className={`text-right ${measure.column === 'requests' ? 'text-accent' : ''}`} title="请求数">
+                Q
+              </span>
+              <span className={`text-right ${measure.column === 'tokens' ? 'text-accent' : ''}`} title="计费桶 token 合计">
+                总 token
+              </span>
+              <span className={`text-right ${measure.column === 'cost' ? 'text-accent' : ''}`} title="费用，后面的小字是占本列表合计的比例">
+                费用
+              </span>
+            </div>
           </div>
 
           <ol className="divide-y divide-line">
@@ -361,10 +363,10 @@ export function RankedList({
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') setOpen(expanded ? null : entry.key);
                     }}
-                    className={`flex cursor-pointer items-center gap-3 px-1 py-2.5 hover:bg-raised ${expanded ? 'bg-raised' : ''}`}
+                    className={`${ROW_GRID} cursor-pointer items-center px-1 py-2.5 hover:bg-raised ${expanded ? 'bg-raised' : ''}`}
                   >
-                    <span className="tnum w-6 shrink-0 text-right text-[11px] text-faint">{index + 1}</span>
-                    <span className="min-w-0 flex-1">
+                    <span className="tnum text-right text-[11px] text-faint">{index + 1}</span>
+                    <span className="min-w-0">
                       <span className="flex min-w-0 items-center gap-2">
                         {entry.href === undefined ? (
                           <span className="cell-title text-[13px] text-fg" title={entry.title}>
@@ -387,26 +389,32 @@ export function RankedList({
                             {entry.subtitle}
                           </span>
                         )}
+                        {/* Sorted by recency, the date has to be visible. */}
+                        {measure.key === 'recent' && entry.lastUsage != null && (
+                          <span className="shrink-0 text-[11px] text-muted">{formatInstant(entry.lastUsage)}</span>
+                        )}
                       </span>
                       <span className="mt-1.5 flex items-center gap-3">
                         <CompositionBar tokens={entry.tokens} cost={entry.cost} symbol={symbol} weight={weight} />
-                        <span className="shrink-0 text-right text-[11px] text-faint">
-                          Q {formatTokens(entry.requests)}
-                          {totalCost > 0 && ` · 费用 ${formatShare(Number(entry.cost.total) / totalCost)}`}
-                        </span>
                       </span>
                       <span className="mt-1 block">
                         <BucketChips tokens={entry.tokens} />
                       </span>
                     </span>
-                    <span className="w-32 shrink-0 text-right">
-                      <span
-                        className={`tnum block text-[14px] ${measureKey === 'cost' ? 'font-medium text-accent' : 'text-fg'}`}
-                      >
-                        {measure.format(entry, symbol)}
+                    <span className={`tnum text-right text-[13px] ${measure.column === 'requests' ? 'font-medium text-accent' : 'text-fg'}`}>
+                      {formatTokens(entry.requests)}
+                    </span>
+                    <span className={`tnum text-right text-[13px] ${measure.column === 'tokens' ? 'font-medium text-accent' : 'text-fg'}`}>
+                      {formatTokens(billedTokens(entry.tokens), true)}
+                    </span>
+                    <span className="tnum text-right text-[13px]">
+                      <span className={measure.column === 'cost' ? 'font-medium text-accent' : 'text-fg'}>
+                        {formatCost(entry.cost.total, symbol)}
                       </span>
-                      {measure.secondary !== undefined && (
-                        <span className="tnum block text-[11px] text-faint">{measure.secondary(entry, symbol)}</span>
+                      {totalCost > 0 && (
+                        <span className="ml-1.5 text-[11px] text-faint">
+                          {formatShare(Number(entry.cost.total) / totalCost)}
+                        </span>
                       )}
                     </span>
                   </div>

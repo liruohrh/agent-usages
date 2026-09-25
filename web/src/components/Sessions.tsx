@@ -20,10 +20,8 @@ const SESSION_MEASURES: Measure[] = [
   {
     key: 'cacheCost',
     label: '缓存金额',
-    hint: '按缓存命中这条计费项的钱',
+    hint: '按缓存命中这条计费项的钱（排序用，行里显示的是费用列）',
     value: (entry) => Number(entry.cost.cacheHitInputCost),
-    format: (entry, symbol) => `${formatCost(entry.cost.cacheHitInputCost, symbol)} 缓存`,
-    secondary: (entry, symbol) => formatCost(entry.cost.total, symbol),
   },
   COMMON_MEASURES[2] as Measure,
   COMMON_MEASURES[3] as Measure,
