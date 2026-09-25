@@ -66,11 +66,10 @@ const MIN_SEGMENT = 0.012;
  * What the bar means, said once, in the header.
  *
  * The bar is the row's *own* composition and nothing else: always the full width,
- * because size is what the numbers and the sort are for. Drawing size and
- * composition in one bar made every segment the product of two unrelated things.
+ * because size is what the numbers and the sort are for.
  */
 const BAR_RULE =
-  '条 = 这一行自己的 token 构成：按五个互不重叠的计费项切开（I/M、I/C、I/W、O、R），整条 = 这一行的 100%。某项为 0 时不画；某段不足 1.2% 时保留 1.2% 以便看清。条下的每个数字都能点，点谁按谁排序。';
+  '条 = 这一行自己的 token 构成：按五个互不重叠的计费项切开（I/M、I/C、I/W、O、R），整条 = 这一行的 100%。某项为 0 时不画；某段不足 1.2% 时保留 1.2% 以便看清。排序用右上角的下拉。';
 
 /** What this row is made of, as a full-width stack of its own tokens. */
 function CompositionBar({
@@ -88,7 +87,7 @@ function CompositionBar({
   const scale = pieces.length === 0 ? 0 : 1 - floors;
   return (
     <span
-      className="flex h-4 w-full overflow-hidden rounded-full bg-raised ring-1 ring-line ring-inset"
+      className="flex h-3.5 w-full overflow-hidden rounded-full bg-raised ring-1 ring-line ring-inset"
       title="这一行的 token 构成（整条 = 本行 100%）"
     >
       {pieces.map((piece) => {
@@ -105,6 +104,148 @@ function CompositionBar({
     </span>
   );
 }
+
+/** One colour per entry (not per bucket): the analysis pies slice by entry. */
+const PIE_COLORS = ['#58a6ff', '#a78bfa', '#34d399', '#f59e0b', '#f472b6', '#22d3ee', '#84cc16', '#fb7185'];
+
+/** One slice of an analysis pie. */
+interface Slice {
+  key: string;
+  label: string;
+  value: number;
+  share: number;
+  color: string;
+  hint: string;
+}
+
+/** A donut, drawn from slices whose shares add up to 1. */
+function Donut({ slices, size = 112 }: { slices: readonly Slice[]; size?: number }): React.ReactElement {
+  const stroke = 16;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="构成">
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={stroke} style={{ stroke: 'var(--raised)' }} />
+      {slices.map((slice) => {
+        const length = slice.share * circumference;
+        const circle = (
+          <circle
+            key={slice.key}
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={slice.color}
+            strokeWidth={stroke}
+            strokeDasharray={`${length} ${circumference - length}`}
+            strokeDashoffset={-offset}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          >
+            <title>{slice.hint}</title>
+          </circle>
+        );
+        offset += length;
+        return circle;
+      })}
+    </svg>
+  );
+}
+
+/**
+ * One metric, split across the whole list — the "who owns this total" view.
+ *
+ * The row bars answer "what is this row made of"; these pies answer "where does
+ * this figure come from" (all projects' `I/M`, all sessions' cost, …). The biggest
+ * five are named and the rest are folded into 其他: a pie with twenty-nine slices
+ * cannot be read.
+ */
+function MetricPie({
+  metric,
+  entries,
+  symbol,
+}: {
+  metric: SortMetric;
+  entries: readonly RankedEntry[];
+  symbol: string;
+}): React.ReactElement {
+  const valued = entries
+    .map((entry) => ({ entry, value: metric.value(entry) }))
+    .filter((item) => item.value > 0)
+    .sort((left, right) => right.value - left.value);
+  const total = valued.reduce((sum, item) => sum + item.value, 0);
+  const asMoney = metric.key === 'cost' || metric.key === 'cacheCost';
+  const format = (value: number): string => (asMoney ? formatCost(String(value), symbol) : formatTokens(value, true));
+
+  const slices: Slice[] = valued.slice(0, 5).map((item, index) => ({
+    key: item.entry.key,
+    label: item.entry.title,
+    value: item.value,
+    share: total === 0 ? 0 : item.value / total,
+    color: PIE_COLORS[index % PIE_COLORS.length] ?? '#8b949e',
+    hint: `${item.entry.title}：${format(item.value)}（${formatShare(total === 0 ? 0 : item.value / total)}）`,
+  }));
+  const rest = valued.slice(5);
+  if (rest.length > 0) {
+    const value = rest.reduce((sum, item) => sum + item.value, 0);
+    slices.push({
+      key: '__rest',
+      label: `其他 ${rest.length} 项`,
+      value,
+      share: total === 0 ? 0 : value / total,
+      color: '#6b7d92',
+      hint: `其他 ${rest.length} 项：${format(value)}`,
+    });
+  }
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-line p-3" data-pie={metric.key}>
+      <Donut slices={slices} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium text-fg" data-metric={metric.key}>
+          {metric.label}
+        </div>
+        <ul className="mt-1 space-y-0.5">
+          {slices.map((slice) => (
+            <li key={slice.key} className="flex items-center gap-1.5 text-[11px]">
+              <span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: slice.color }} />
+              <span className="min-w-0 flex-1 truncate text-muted" title={slice.label}>
+                {slice.label}
+              </span>
+              <span className="tnum shrink-0 text-fg">{format(slice.value)}</span>
+              <span className="tnum w-10 shrink-0 text-right text-faint">{formatShare(slice.share)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/** The analysis panel: one pie per metric, across every row of the list. */
+function MetricPies({
+  entries,
+  symbol,
+  metrics,
+}: {
+  entries: readonly RankedEntry[];
+  symbol: string;
+  metrics: readonly SortMetric[];
+}): React.ReactElement {
+  return (
+    <div className="mb-3 rounded-lg border border-line bg-panel/60 p-3">
+      <p className="mb-3 text-[11px] leading-5 text-faint">
+        每个指标一张饼：把列表里所有条目的这个指标加起来，看「这个总数是谁贡献的」（各饼只列前五项，其余合并为
+        「其他」）。想知道单个条目自己的构成，看每行的条。
+      </p>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        {metrics.map((metric) => (
+          <MetricPie key={metric.key} metric={metric} entries={entries} symbol={symbol} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 /**
  * A figure the list can be ordered by.
@@ -241,6 +382,8 @@ export function RankedList({
   const [sortKey, setSortKey] = useState(defaultSort);
   const [desc, setDesc] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
+  /** The per-metric pies stay folded away until the reader asks for them. */
+  const [analysis, setAnalysis] = useState(false);
 
   // A figure that is zero everywhere (no cache writes, no reasoning) is not worth
   // a chip; it appears as soon as one row has one.
@@ -259,20 +402,20 @@ export function RankedList({
   /** Right-hand columns: the three figures a reader scans down. */
   const grid = '1.5rem minmax(13rem, 1fr) 4.5rem 6rem 9rem';
 
-  const sortBy = (key: string): void => {
-    if (key === sortKey) setDesc((value) => !value);
-    else {
-      setSortKey(key);
-      setDesc(true);
-    }
-  };
-
   return (
     <Card
       title={`${title}（${rows.length}）`}
       actions={
         <>
           {baseline}
+          <button
+            type="button"
+            onClick={() => setAnalysis((value) => !value)}
+            className={`rounded border px-2 py-0.5 text-[11px] ${analysis ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
+            title="每个指标一张饼：这个总数是谁贡献的"
+          >
+            {analysis ? '收起饼图' : '饼图分析'}
+          </button>
           <label className="flex items-center gap-1 text-[11px] text-muted">
             排序
             <select
@@ -305,6 +448,15 @@ export function RankedList({
         <p className="py-8 text-center text-[13px] text-faint">{emptyText}</p>
       ) : (
         <>
+          {/* A pie of timestamps would be meaningless: the pies cover the figures
+              that add up to something, not the recency. */}
+          {analysis && (
+            <MetricPies
+              entries={rows}
+              symbol={symbol}
+              metrics={metrics.filter((candidate) => candidate.key !== 'recent')}
+            />
+          )}
           <div className="mb-1 border-b border-line pb-2 text-[12px]">
             <div className="grid items-center gap-3" style={{ gridTemplateColumns: grid }}>
               <span />
@@ -387,34 +539,23 @@ export function RankedList({
                         )}
                       </span>
 
-                      {/* The bar: this row's own composition, and nothing else. */}
+                      {/* The bar: this row's own composition. */}
                       <span className="mt-1.5 block">
                         <CompositionBar tokens={entry.tokens} cost={entry.cost} symbol={symbol} />
                       </span>
 
-                      {/* Every figure, under the bar; click one to order by it. */}
-                      <span className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+                      {/* Then every bucket with the money it produced. */}
+                      <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
                         {metricChips(entry, symbol).map((chip) => (
-                          <button
-                            key={chip.key}
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              sortBy(chip.key);
-                            }}
-                            title={chip.hint}
-                            className={`flex items-center gap-1 whitespace-nowrap rounded px-1 text-[11px] hover:bg-raised ${
-                              chip.key === sortKey ? 'bg-accent-soft text-accent' : ''
-                            }`}
-                          >
+                          <span key={chip.key} className="flex items-center gap-1 whitespace-nowrap text-[11px]" title={chip.hint}>
                             {chip.color !== undefined && (
                               <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: chip.color }} />
                             )}
-                            <span className={chip.key === sortKey ? '' : 'text-faint'}>{chip.label}</span>
-                            <span className={`tnum ${chip.key === sortKey ? 'text-accent' : 'text-muted'}`}>{chip.value}</span>
+                            <span className="text-faint">{chip.label}</span>
+                            <span className="tnum text-muted">{chip.value}</span>
                             {chip.extra !== undefined && <span className="tnum text-faint">{chip.extra}</span>}
-                            {chip.key === sortKey && <span className="text-[9px]">{desc ? '▼' : '▲'}</span>}
-                          </button>
+                            {chip.money !== undefined && <span className="tnum text-fg">{chip.money}</span>}
+                          </span>
                         ))}
                       </span>
                     </span>
@@ -456,56 +597,37 @@ export function RankedList({
   );
 }
 
-/** One clickable figure under a bar. */
+/** One figure beside the pie: a bucket, its tokens, and the money it produced. */
 interface MetricChip {
   key: string;
   label: string;
   hint: string;
   value: string;
   extra?: string | undefined;
+  money?: string | undefined;
   color?: string | undefined;
 }
 
 /**
- * The figures under a row's bar, in the CLI's order.
+ * The buckets a row is made of, in the CLI's order, each with its own money.
  *
- * The five buckets the bar is made of come first (each with the colour it is drawn
- * in), then the totals; `I/C` carries its share, `费用` carries its share of the
- * list. Zero-valued pieces are left out — the bar does not draw them either.
+ * Only the five pieces of the pie appear here: the totals (`总 token`, `费用`) are
+ * the figures pinned on the right, and cache money is the `I/C` line's money —
+ * repeating them beside the chart would say the same number twice.
  */
 function metricChips(entry: RankedEntry, symbol: string): MetricChip[] {
   const total = billedTokens(entry.tokens);
-  const chips: MetricChip[] = tokenPieces(entry.tokens, entry.cost)
+  return tokenPieces(entry.tokens, entry.cost)
     .filter((piece) => piece.tokens > 0)
     .map((piece) => ({
       key: piece.key,
       label: piece.short,
-      hint: `${piece.label}：${formatTokens(piece.tokens, true)} tokens · ${formatCost(piece.money, symbol)}（点击按它排序）`,
+      hint: `${piece.label}：${formatTokens(piece.tokens, true)} tokens · ${formatCost(piece.money, symbol)}`,
       value: formatTokens(piece.tokens, true),
       ...(piece.key === 'cacheRead' && total > 0 ? { extra: formatShare(piece.tokens / total) } : {}),
+      money: formatCost(piece.money, symbol),
       color: piece.color,
     }));
-  chips.push(
-    {
-      key: 'tokens',
-      label: '总 token',
-      hint: '计费桶 token 合计（点击按它排序）',
-      value: formatTokens(total, true),
-    },
-    {
-      key: 'cacheCost',
-      label: '缓存金额',
-      hint: '缓存命中这条计费项花掉的钱（点击按它排序）',
-      value: formatCost(entry.cost.cacheHitInputCost, symbol),
-    },
-    {
-      key: 'cost',
-      label: '费用',
-      hint: '总费用（点击按它排序）',
-      value: formatCost(entry.cost.total, symbol),
-    },
-  );
-  return chips;
 }
 
 /** The agents of a scope, as a ranking. */

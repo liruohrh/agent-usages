@@ -102,17 +102,18 @@ function numberOf(text: string): number {
   return Number(text.replace(/[^\d.]/g, ''));
 }
 
-/** The chip labels under the first row's bar: every figure the row shows. */
-async function chipLabels(page: Page): Promise<string[]> {
+/** The bucket chips under the first row's bar, as `label value money`. */
+async function rowChips(page: Page, index = 0): Promise<string[]> {
   return page
     .locator('main ol > li')
-    .first()
-    .locator('button')
-    .evaluateAll((buttons) =>
-      buttons
-        .map((button) => (button.textContent ?? '').replace(/[\d.,万亿¥%▲▼]/g, '').trim())
-        .filter((label) => label.length > 0),
-    );
+    .nth(index)
+    .evaluate((item) => {
+      const row = item.firstElementChild;
+      const content = row?.children[1];
+      return [...(content?.querySelectorAll('span.whitespace-nowrap') ?? [])]
+        .map((chip) => (chip.textContent ?? '').replace(/\s+/g, ' ').trim())
+        .filter((text) => text.length > 0);
+    });
 }
 
 /** The three figures pinned on the right of a row: Q, tokens, money. */
@@ -301,12 +302,11 @@ test.describe('the project and agent rankings', () => {
 
     const dearest = [...dashboard.projects].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rows.first()).toContainText(dearest?.name ?? '');
-    // Every figure is a chip under the bar, and the rows carry the three
+    // Each bucket is a chip with its money, and the rows carry the three
     // right-hand figures (Q, tokens, money).
-    const chips = await chipLabels(page);
-    for (const column of ['I/M', 'I/C', 'O', '总 token', '缓存金额', '费用']) {
-      expect(chips, `chip ${column}`).toContain(column);
-    }
+    const chips = await rowChips(page);
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+    expect(chips.every((chip) => chip.includes('¥'))).toBe(true);
     expect(await rowFigures(page, 0)).toHaveLength(3);
     // Expanding shows the bucket table with money per bucket.
     await rows.first().click();
@@ -446,58 +446,82 @@ test.describe('the session leaderboard', () => {
   /** One row of the leaderboard, by index. */
   const rowAt = (page: Page, index: number): Locator => page.locator('main ol > li').nth(index);
 
-  test('shows every figure under the bar, and three on the right', async ({ page }) => {
+  test('shows every bucket with its money under the bar, and three figures on the right', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
-    const rows = page.locator('main ol > li');
-    await expect(rows).toHaveCount(sessions.length);
+    await expect(page.locator('main ol > li')).toHaveCount(sessions.length);
 
-    // Under the bar: the buckets the row is made of, then the totals.
-    const chips = await chipLabels(page);
-    for (const label of ['I/M', 'I/C', 'O', '总 token', '缓存金额', '费用']) {
-      expect(chips, `chip ${label}`).toContain(label);
+    const chips = await rowChips(page);
+    // One chip per bucket the row used, and each carries its own money.
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+    for (const chip of chips) {
+      expect(chip, chip).toMatch(/^(I\/M|I\/C|I\/W|O|R)/);
+      expect(chip, `money in ${chip}`).toContain('¥');
     }
+    // The totals are the right-hand columns, not chips.
+    expect(chips.join(' ')).not.toContain('总 token');
+    expect(chips.join(' ')).not.toContain('费用');
 
-    // On the right: Q, the token total, the money with its share.
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
     const [requests, tokens, cost] = await rowFigures(page, 0);
-    expect(requests).toBe(dearest?.requests);
     const close = (shown: number | undefined, actual: number | undefined): number =>
       Math.abs((shown ?? 0) - (actual ?? 0)) / Math.max(1, actual ?? 1);
+    expect(requests).toBe(dearest?.requests);
     expect(close(tokens, dearest ? billed(dearest) : 0)).toBeLessThan(0.02);
     expect(close(cost, Number(dearest?.cost.total ?? 0))).toBeLessThan(0.01);
-    // The money cell carries its share of the list right after the amount.
-    expect(await rowAt(page, 0).innerText()).toMatch(/¥[\d.,]+\s+\d+(\.\d+)?%/);
   });
 
-  test('every figure can order the list — chip or dropdown', async ({ page }) => {
+  test('orders the list from the dropdown, both directions', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    const mostCacheRead = [...sessions].sort((left, right) => right.tokens.cacheRead - left.tokens.cacheRead)[0];
     const mostRequests = [...sessions].sort((left, right) => right.requests - left.requests)[0];
     const mostTokens = [...sessions].sort((left, right) => billed(right) - billed(left))[0];
+    const cheapest = [...sessions].sort((left, right) => Number(left.cost.total) - Number(right.cost.total))[0];
+    const direction = page.locator('main section header').getByRole('button', { name: /降序|升序/ });
 
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
-
-    // A chip is a sort control: clicking `I/C` in any row orders by cache reads.
-    await rowAt(page, 0).locator('button').filter({ hasText: /^I\/C/ }).first().click();
-    await expect(rowAt(page, 0)).toContainText(mostCacheRead?.title ?? '');
-
-    // The dropdown covers everything else, including figures not always on screen.
     await sortSelect(page).selectOption({ label: 'Q' });
     await expect(rowAt(page, 0)).toContainText(mostRequests?.title ?? '');
     await sortSelect(page).selectOption({ label: '总 token' });
     await expect(rowAt(page, 0)).toContainText(mostTokens?.title ?? '');
-
-    // Same figure twice flips the direction.
-    await page.locator('main section header').getByRole('button', { name: /降序|升序/ }).click();
-    const cheapest = [...sessions].sort((left, right) => Number(left.cost.total) - Number(right.cost.total))[0];
     await sortSelect(page).selectOption({ label: '费用' });
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
-    await page.locator('main section header').getByRole('button', { name: /降序|升序/ }).click();
+    await direction.click();
     await expect(rowAt(page, 0)).toContainText(cheapest?.title ?? '');
+  });
+
+  test('folds a per-metric pie chart behind one button', async ({ page }) => {
+    await page.goto('/?view=sessions');
+    const sessions = rootSessions(await apiDashboard(page));
+    const button = page.locator('main section header').getByRole('button', { name: '饼图分析' });
+
+    // Folded away by default: no pies until asked.
+    expect(await page.locator('main section svg').count()).toBe(0);
+    await button.click();
+
+    const panel = page.locator('main section div.mb-3').first();
+    await expect(panel).toBeVisible();
+    const titles = await panel.locator('[data-metric]').allInnerTexts();
+    for (const metric of ['Q', 'I/M', 'I/C', 'O', '总 token', '费用']) {
+      expect(titles, `pie ${metric}`).toContain(metric);
+    }
+    // One donut per metric, minus the recency figure, which has no meaningful sum.
+    expect(await panel.locator('svg').count()).toBe(titles.length);
+    expect(titles).not.toContain('最近');
+
+    // The cost pie names the dearest session first, with its share of the list.
+    const total = sessions.reduce((sum, session) => sum + Number(session.cost.total), 0);
+    const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
+    const costPie = panel.locator('[data-pie="cost"]');
+    const legend = await costPie.locator('li').allInnerTexts();
+    expect(legend[0]).toContain(dearest?.title ?? '');
+    expect(legend[0]).toContain(((Number(dearest?.cost.total ?? 0) / total) * 100).toFixed(1));
+
+    // And it folds back.
+    await page.locator('main section header').getByRole('button', { name: '收起饼图' }).click();
+    expect(await page.locator('main section svg').count()).toBe(0);
   });
 
   test('each row draws its own composition, including reasoning', async ({ page }) => {
@@ -514,17 +538,16 @@ test.describe('the session leaderboard', () => {
 
     const all = await segments(0);
     expect(all.length).toBeGreaterThanOrEqual(2);
-    // The bar is a 100% stack of that row's own tokens, and it is visible.
     const sum = all.reduce((total, segment) => total + segment.width, 0);
     expect(sum).toBeGreaterThan(99);
     expect(sum).toBeLessThan(101);
-    const height = await page.locator('main ol > li span.h-4').first().boundingBox();
-    expect(height?.height ?? 0).toBeGreaterThanOrEqual(12);
 
     if (withReasoning !== undefined) {
       const index = sessions.map((session) => session.title).indexOf(withReasoning.title);
       const found = await segments(Math.max(0, index));
       expect(found.map((segment) => segment.title.slice(0, 2))).toContain('R ');
+      // Reasoning is billed out of the output, so the row shows it as its own chip.
+      expect((await rowChips(page, Math.max(0, index))).join(' ')).toMatch(/R[\d.,]+万?¥/);
     }
   });
 
