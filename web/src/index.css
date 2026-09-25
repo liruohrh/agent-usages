@@ -1,0 +1,107 @@
+/**
+ * The dashboard's styles: Tailwind, plus the palette.
+ *
+ * Every colour is a CSS variable switched by one class on `<html>` — dark is the
+ * default (no class needed), `.light` swaps the set. Tailwind's `@theme inline`
+ * exposes them as utilities (`bg-panel`, `text-muted`, `border-line`, …), so the
+ * components never mention a hex value and both themes stay in one file.
+ */
+
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+}
+
+:root {
+  --bg: #0a0e14;
+  --panel: #10161f;
+  --raised: #161e2a;
+  --line: #223047;
+  --fg: #e6edf3;
+  --muted: #9fb0c3;
+  --faint: #6b7d92;
+  --accent: #58a6ff;
+  --accent-soft: #1f3a5f;
+  --good: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+  color-scheme: dark;
+}
+
+html.light {
+  --bg: #f5f7fa;
+  --panel: #ffffff;
+  --raised: #f0f3f7;
+  --line: #d7dee8;
+  --fg: #16202c;
+  --muted: #51637a;
+  --faint: #7d8ea3;
+  --accent: #0969da;
+  --accent-soft: #dbeafe;
+  --good: #1a7f37;
+  --warn: #9a6700;
+  --bad: #cf222e;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers line up in every table without a monospace font's width cost. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A thin scrollbar, so the tree does not lose 15px of width to the chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Long titles wrap inside their cell instead of widening the table. */
+.cell-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
