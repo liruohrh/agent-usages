@@ -2,3 +2,11 @@ node_modules/
 *.log
 .DS_Store
 .agents/drafts
+# The dashboard is built from source (`pnpm --filter web build`); the bundle is a
+# local artifact, not something to review in a diff.
+web/dist/
+# The offline fixture and the screenshots are dumps of *this* machine's usage:
+# real paths, session titles and amounts. They are generated on demand
+# (`pnpm web:snapshot`, see web/mock/README.md) and deliberately not tracked.
+web/mock/dashboard.snapshot.json
+web/mock/screenshots/

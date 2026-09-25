@@ -1,3 +1,10 @@
+# The CLI lives in the root package (`src/`, `bin/`, `config/`); `web/` is the
+# browser dashboard it serves, and is the only workspace member. Its build output
+# (`web/dist`) is what `agent-usages serve` mounts, and it is listed in the root
+# package's `files` so a global install ships the dashboard with it.
+packages:
+  - web
+
 # pnpm 12 reads dependency-build approvals from the `allowBuilds` map here.
 # vitest's bundler (esbuild) installs a native binary from a build script, so the
 # script must be allowed to run or `pnpm install` aborts with

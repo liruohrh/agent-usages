@@ -28,7 +28,8 @@
     "src",
     "config",
     "docs",
-    "README.md"
+    "README.md",
+    "web/dist"
   ],
   "type": "module",
   "engines": {
@@ -47,13 +48,23 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "serve": "node src/serve/main.ts",
+    "web:dev": "pnpm --filter web dev",
+    "web:build": "pnpm --filter web build",
+    "web:typecheck": "pnpm --filter web typecheck",
+    "web:smoke": "node web/scripts/smoke.mjs",
+    "web:snapshot": "node src/serve/main.ts --write-snapshot web/mock/dashboard.snapshot.json"
   },
   "dependencies": {
     "commander": "^14.0.0",
+    "express": "^5.2.1",
+    "http-proxy-middleware": "^4.2.0",
+    "open": "^11.0.4",
     "string-width": "^8.2.2"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
