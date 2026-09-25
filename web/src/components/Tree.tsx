@@ -162,7 +162,6 @@ function ProjectRow({
               cost={project.cost.total}
               tokens={billed(project.tokens)}
               symbol={symbol}
-              requests={project.requests}
               hint={metricText(project.tokens, project.cost, project.requests, symbol)}
             />
           </div>
@@ -253,7 +252,6 @@ function WorkspaceRow({
               cost={workspace.cost.total}
               tokens={billed(workspace.tokens)}
               symbol={symbol}
-              requests={workspace.requests}
               hint={metricText(workspace.tokens, workspace.cost, workspace.requests, symbol)}
             />
           </div>
@@ -330,7 +328,6 @@ function SessionRow({
               cost={session.cost.total}
               tokens={billed(session.tokens)}
               symbol={symbol}
-              requests={session.requests}
               hint={metricText(session.total.tokens, session.total.cost, session.total.requests, symbol)}
             />
           </div>

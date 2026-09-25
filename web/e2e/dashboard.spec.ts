@@ -415,9 +415,16 @@ test.describe('the session leaderboard', () => {
     const first = await rowAt(page, 0).innerText();
     expect(first).toContain(dearest?.title ?? '');
     expect(first).toContain(dearest?.cost.total ?? '');
-    // The row names its buckets, so a dominant one cannot hide the others.
-    for (const short of ['I/M', 'I/C']) expect(first).toContain(short);
+    // The row names its buckets, so a dominant one cannot hide the others, and
+    // the cache-hit share sits with `I/C` rather than off on its own line.
+    for (const short of ['I/M', 'I/C', 'O']) expect(first).toContain(short);
+    expect(first).toMatch(/I\/C\s*[\d.,万亿]+\s*\d+(\.\d+)?%/);
     expect(first).toContain('Q ');
+    // The right-hand figure is the money; the one under it is the token total, and
+    // neither is labelled `T`, nor followed by a "（合计 …）" line.
+    expect(first).not.toMatch(/\bT\s[\d.,万亿]+/);
+    expect(first).not.toContain('含于');
+    expect(first).not.toContain('合计');
   });
 
   test('sorts by cost, tokens and cache money', async ({ page }) => {
@@ -572,6 +579,11 @@ test.describe('layout', () => {
     const hint = await page.locator('aside [title*="I/M"]').first().getAttribute('title');
     expect(hint ?? '').toContain('I/T');
     expect(hint ?? '').toContain('Q ');
+    // The compact sidebar row shows money and tokens only: requests are the least
+    // useful figure there, and the boards keep them.
+    const row = await page.locator('aside button').filter({ hasText: 'tok' }).first().innerText();
+    expect(row).toContain('tok');
+    expect(row).not.toContain('req');
     // The sidebar must not have grown a ten-figure line: its rows stay short.
     const rows = await page.locator('aside button').allInnerTexts();
     expect(Math.max(...rows.map((row) => row.split('\n').length))).toBeLessThanOrEqual(8);

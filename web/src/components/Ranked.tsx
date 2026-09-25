@@ -68,7 +68,9 @@ export const COMMON_MEASURES: Measure[] = [
     hint: '按总费用',
     value: (entry) => Number(entry.cost.total),
     format: (entry, symbol) => formatCost(entry.cost.total, symbol),
-    secondary: (entry) => `T ${formatTokens(billedTokens(entry.tokens), true)}`,
+    // No `T` label: the right-hand column is the money, and the figure under it is
+    // this row's token total — the letter only added noise.
+    secondary: (entry) => formatTokens(billedTokens(entry.tokens), true),
   },
   {
     key: 'tokens',
@@ -149,32 +151,42 @@ function CompositionBar({
   );
 }
 
-/** The chips under a row: every bucket it used, with its value. */
-function BucketChips({ tokens, symbol }: { tokens: TokenBuckets; symbol: string }): React.ReactElement {
-  const used = usedBuckets(tokens);
+/**
+ * The chips under a bar: the four billed buckets, each with its value.
+ *
+ * The cache-hit share goes right after `I/C` (it is a property of that bucket),
+ * and reasoning is left out on purpose — it is part of output, so a fifth chip
+ * would read as a fifth billable bucket. It has a row of its own in the expanded
+ * detail.
+ */
+function BucketChips({ tokens }: { tokens: TokenBuckets }): React.ReactElement {
+  const total = billedTokens(tokens);
   return (
     <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
-      {used.map((bucket) => (
+      {BUCKETS.filter((bucket) => bucket.key !== 'reasoning' && tokens[bucket.key] > 0).map((bucket) => (
         <span key={bucket.key} className="flex items-center gap-1 whitespace-nowrap">
           <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: bucket.color }} />
-          <span className="text-faint">{bucket.short}</span>
+          <span className="text-faint" title={bucket.label}>
+            {bucket.short}
+          </span>
           <span className="tnum text-muted">{formatTokens(tokens[bucket.key], true)}</span>
-          {bucket.key === 'reasoning' && <span className="text-[10px] text-faint">（含于 O）</span>}
+          {bucket.key === 'cacheRead' && total > 0 && (
+            <span className="tnum text-faint" title="缓存命中占全部计费桶的比例">
+              {formatShare(tokens.cacheRead / total)}
+            </span>
+          )}
         </span>
       ))}
-      <span className="text-faint">
-        （合计 {formatTokens(billedTokens(tokens), true)} tokens{tokenShareOfCache(tokens, symbol)}）
-      </span>
     </span>
   );
 }
 
-/** `，其中缓存命中 99.5%`, appended to a row's chip line. */
-function tokenShareOfCache(tokens: TokenBuckets, _symbol: string): string {
-  const total = billedTokens(tokens);
-  if (total === 0 || tokens.cacheRead === 0) return '';
-  return `，缓存命中 ${formatShare(tokens.cacheRead / total)}`;
-}
+/**
+ * How the bar is drawn, in one sentence — the reader asked, and a picture that
+ * cannot be explained is a picture that cannot be trusted.
+ */
+const BAR_RULE =
+  '条长 = 当前排序指标相对榜首的比例；分段 = 这一行自己的计费桶构成（I/M、I/C、I/W、O，思考含在 O 里已在下面说明）；每段不足 1.2% 时保留 1.2% 以便看清。';
 
 /** The per-bucket table an expanded row shows: tokens, share and money. */
 export function BucketDetail({
@@ -211,7 +223,9 @@ export function BucketDetail({
                   className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle"
                   style={{ backgroundColor: bucket.color }}
                 />
-                {bucket.label}
+                <span title={bucket.key === 'reasoning' ? '思考是输出的一部分；输出按整笔计价，这里把它拆开看' : bucket.label}>
+                  {bucket.key === 'output' ? '输出（不含思考）' : bucket.key === 'reasoning' ? '思考' : bucket.label}
+                </span>
                 <span className="ml-1 text-[10px] text-faint">{bucket.short}</span>
               </td>
               <td className="tnum py-1 text-right">{formatTokens(tokens[bucket.key], true)}</td>
@@ -328,7 +342,9 @@ export function RankedList({
                   {bucket.short}
                 </span>
               ))}
-              <span className="text-[11px] text-faint">（条只画互不重叠的四项，思考已含在 O 里）</span>
+              <span className="text-[11px] text-faint" title={BAR_RULE}>
+                （条长 = 当前指标；分段 = 计费桶构成）
+              </span>
             </span>
           </div>
 
@@ -380,7 +396,7 @@ export function RankedList({
                         </span>
                       </span>
                       <span className="mt-1 block">
-                        <BucketChips tokens={entry.tokens} symbol={symbol} />
+                        <BucketChips tokens={entry.tokens} />
                       </span>
                     </span>
                     <span className="w-32 shrink-0 text-right">

@@ -151,8 +151,9 @@ export function Composition({
               <tr key={bucket.key} className="border-t border-line">
                 <td className="py-1.5">
                   <span className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ backgroundColor: bucket.color }} />
-                  <span className="text-fg">{bucket.label}</span>
-                  {bucket.key === 'reasoning' && <span className="ml-1 text-[11px] text-faint">（已含在 O 里，不重复计费）</span>}
+                  <span className="text-fg" title={bucket.key === 'reasoning' ? '思考是输出的一部分，不另行计费' : bucket.label}>
+                    {bucket.key === 'output' ? '输出（不含思考）' : bucket.key === 'reasoning' ? '思考' : bucket.label}
+                  </span>
                 </td>
                 <td className="tnum py-1.5 text-right">{formatTokens(tokens[bucket.key], true)}</td>
                 <td className="tnum py-1.5 text-right text-muted">{formatShare(share)}</td>
@@ -163,7 +164,8 @@ export function Composition({
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-faint">
-        四个计费桶互不重叠；思考是输出的一部分（上图金额按输出的账单拆分）。合计{' '}
+        条长按占比：上图按 token，下图按金额。四个计费桶互不重叠（I/M + I/C + I/W + O = 全部），
+        思考是输出的一部分、只在 O 里出现一次。合计{' '}
         <span className="tnum text-muted">{formatTokens(totalTokens, true)}</span> tokens ·{' '}
         <span className="tnum text-muted">{formatCost(cost.total, symbol)}</span>
       </p>
