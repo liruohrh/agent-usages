@@ -49,6 +49,10 @@ export function AgentTable({
   showShare?: boolean;
 }): React.ReactElement {
   const [mode, setMode] = useState<'tokens' | 'cost' | 'share'>('tokens');
+  // Balanced default: the five figures a reader compares, plus the money and its
+  // share. The rest of the CLI's columns are one click away rather than always on
+  // screen — 13 live columns at 12px is what made this table feel cramped.
+  const [detailed, setDetailed] = useState(false);
   const totalCost = agents.reduce((total, agent) => total + Number(agent.cost.total), 0);
   const totals = agents.reduce(
     (sum, agent) => ({
@@ -104,60 +108,72 @@ export function AgentTable({
     <Card
       title="按 agent 分列"
       actions={
-        <div className="flex overflow-hidden rounded border border-line">
-          {(
-            [
-              { key: 'tokens', label: '数量' },
-              { key: 'cost', label: '金额' },
-              { key: 'share', label: '占比' },
-            ] as const
-          ).map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => setMode(option.key)}
-              className={`px-2 py-0.5 text-[11px] ${mode === option.key ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <>
+          <button
+            type="button"
+            onClick={() => setDetailed((value) => !value)}
+            className={`rounded border px-2 py-0.5 text-[11px] ${detailed ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
+          >
+            {detailed ? '收起分桶' : '展开分桶'}
+          </button>
+          <div className="flex overflow-hidden rounded border border-line">
+            {(
+              [
+                { key: 'tokens', label: '数量' },
+                { key: 'cost', label: '金额' },
+                { key: 'share', label: '占比' },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setMode(option.key)}
+                className={`px-2 py-0.5 text-[11px] ${mode === option.key ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </>
       }
     >
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[62rem] table-fixed border-collapse text-[12px]">
+        <table className={`w-full ${detailed ? 'min-w-[62rem]' : 'min-w-[38rem]'} table-fixed border-collapse text-[13px]`}>
           <colgroup>
-            <col style={{ width: '80px' }} />
-            <col style={{ width: '82px' }} />
-            <col style={{ width: '68px' }} />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col style={{ width: '84px' }} />
-            {showShare && <col style={{ width: '92px' }} />}
+            <col style={{ width: '88px' }} />
+            <col style={{ width: '90px' }} />
+            <col style={{ width: '76px' }} />
+            {detailed && (
+              <>
+                <col />
+                {hasWrite && <col />}
+                <col />
+                <col />
+                <col />
+                {hasReasoning && <col />}
+                <col />
+              </>
+            )}
+            <col style={{ width: '88px' }} />
+            <col style={{ width: '92px' }} />
+            {showShare && <col style={{ width: '96px' }} />}
           </colgroup>
           <thead>
             <tr className="text-[11px] text-faint">
               <th className="px-2 py-1 text-left font-medium">agent</th>
               <th className="px-2 py-1 text-right font-medium">会话（子）</th>
               <th className="px-2 py-1 text-right font-medium">Q</th>
-              <th className="px-2 py-1 text-right font-medium" title="未命中缓存的输入">I/M</th>
-              {hasWrite && (
-                <th className="px-2 py-1 text-right font-medium" title="缓存写入输入">I/W</th>
+              {detailed && (
+                <>
+                  <th className="px-2 py-1 text-right font-medium" title="未命中缓存的输入">I/M</th>
+                  {hasWrite && <th className="px-2 py-1 text-right font-medium" title="缓存写入输入">I/W</th>}
+                  <th className="px-2 py-1 text-right font-medium" title="缓存命中输入">I/C</th>
+                  <th className="px-2 py-1 text-right font-medium" title="输入合计 = I/M + I/W + I/C">I/T</th>
+                  <th className="px-2 py-1 text-right font-medium" title="输出（不含思考）">O</th>
+                  {hasReasoning && <th className="px-2 py-1 text-right font-medium" title="思考（输出的一部分）">R</th>}
+                  <th className="px-2 py-1 text-right font-medium" title="输出合计 = O + R">O/T</th>
+                </>
               )}
-              <th className="px-2 py-1 text-right font-medium" title="缓存命中输入">I/C</th>
-              <th className="px-2 py-1 text-right font-medium" title="输入合计 = I/M + I/W + I/C">I/T</th>
-              <th className="px-2 py-1 text-right font-medium" title="输出（不含思考）">O</th>
-              {hasReasoning && (
-                <th className="px-2 py-1 text-right font-medium" title="思考（输出的一部分）">R</th>
-              )}
-              <th className="px-2 py-1 text-right font-medium" title="输出合计 = O + R">O/T</th>
               <th className="px-2 py-1 text-right font-medium" title="Token 总计 = I/T + O/T">T</th>
               <th className="px-2 py-1 text-right font-medium">费用</th>
               {showShare && <th className="px-2 py-1 text-left font-medium">占比</th>}
@@ -177,6 +193,7 @@ export function AgentTable({
                 cell={cell}
                 hasWrite={hasWrite}
                 hasReasoning={hasReasoning}
+                detailed={detailed}
                 share={
                   showShare ? { value: totalCost === 0 ? 0 : Number(agent.cost.total) / totalCost, color: agentColor(agent.id) } : undefined
                 }
@@ -198,14 +215,24 @@ export function AgentTable({
               cell={cell}
               hasWrite={hasWrite}
               hasReasoning={hasReasoning}
+              detailed={detailed}
               muted
             />
           </tbody>
         </table>
       </div>
       <p className="mt-2 text-[11px] text-faint">
-        四个桶互不重叠：<span className="text-muted">I/T = I/M + I/W + I/C</span>，思考含在输出里，
-        <span className="text-muted">O/T = O + R</span>。切到「金额」时每格是该项自己的钱（输出按 O/T 整体计价，O 与 R 分的是同一笔）。
+        {detailed ? (
+          <>
+            四个桶互不重叠：<span className="text-muted">I/T = I/M + I/W + I/C</span>，思考含在输出里，
+            <span className="text-muted">O/T = O + R</span>。切到「金额」时每格是该项自己的钱。
+          </>
+        ) : (
+          <>
+            默认只列请求数、tokens 合计、费用与占比；「展开分桶」出现 <span className="text-muted">I/M I/W I/C I/T O R O/T</span>，
+            并可在数量 / 金额 / 占比之间切换。
+          </>
+        )}
       </p>
       {agents.some((agent) => agent.unpriced > 0) && (
         <p className="mt-2 text-[11px] text-warn">
@@ -228,6 +255,7 @@ function BucketRow({
   cell,
   hasWrite,
   hasReasoning,
+  detailed,
   share,
   muted = false,
 }: {
@@ -241,6 +269,7 @@ function BucketRow({
   cell: (tokens: number, money: string, billed: number) => string;
   hasWrite: boolean;
   hasReasoning: boolean;
+  detailed: boolean;
   share?: { value: number; color: string } | undefined;
   muted?: boolean;
 }): React.ReactElement {
@@ -255,13 +284,23 @@ function BucketRow({
       </td>
       <Num value={sessions} />
       <Num value={formatTokens(requests)} />
-      <Num value={cell(tokens.input, cost.cacheMissInputCost, billed)} />
-      {hasWrite && <Num value={cell(tokens.cacheWrite, cost.cacheWriteInputCost, billed)} />}
-      <Num value={cell(tokens.cacheRead, cost.cacheHitInputCost, billed)} />
-      <Num value={cell(inputTotal, addMoneyString(addMoneyString(cost.cacheMissInputCost, cost.cacheHitInputCost), cost.cacheWriteInputCost), billed)} />
-      <Num value={cell(outputOnly, outputOnlyCost, billed)} />
-      {hasReasoning && <Num value={cell(tokens.reasoning, cost.reasoningCost, billed)} />}
-      <Num value={cell(tokens.output, cost.outputCost, billed)} />
+      {detailed && (
+        <>
+          <Num value={cell(tokens.input, cost.cacheMissInputCost, billed)} />
+          {hasWrite && <Num value={cell(tokens.cacheWrite, cost.cacheWriteInputCost, billed)} />}
+          <Num value={cell(tokens.cacheRead, cost.cacheHitInputCost, billed)} />
+          <Num
+            value={cell(
+              inputTotal,
+              addMoneyString(addMoneyString(cost.cacheMissInputCost, cost.cacheHitInputCost), cost.cacheWriteInputCost),
+              billed,
+            )}
+          />
+          <Num value={cell(outputOnly, outputOnlyCost, billed)} />
+          {hasReasoning && <Num value={cell(tokens.reasoning, cost.reasoningCost, billed)} />}
+          <Num value={cell(tokens.output, cost.outputCost, billed)} />
+        </>
+      )}
       <Num value={formatTokens(inputTotal + tokens.output, true)} />
       <Num value={formatCost(cost.total, symbol)} />
       {share !== undefined && (
@@ -304,11 +343,14 @@ export function SessionTable({
   symbol,
   title = '会话明细',
   limit = 200,
+  showProject = false,
 }: {
   sessions: readonly SessionNode[];
   symbol: string;
   title?: string;
   limit?: number;
+  /** Add the project column: set when the rows come from every project. */
+  showProject?: boolean;
 }): React.ReactElement {
   const [flat, setFlat] = useState(false);
   const ids = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
@@ -338,6 +380,7 @@ export function SessionTable({
         <table className="w-full min-w-[46rem] table-fixed border-collapse text-[12px]">
           <colgroup>
             <col />
+            {showProject && <col style={{ width: '132px' }} />}
             <col style={{ width: '76px' }} />
             <col style={{ width: '118px' }} />
             <col style={{ width: '118px' }} />
@@ -349,6 +392,7 @@ export function SessionTable({
           <thead className="sticky top-0 bg-panel">
             <tr className="text-[11px] text-faint">
               <th className="px-2 py-1 text-left font-medium">会话</th>
+              {showProject && <th className="px-2 py-1 text-left font-medium">项目</th>}
               <th className="px-2 py-1 text-left font-medium">agent</th>
               <th className="px-2 py-1 text-left font-medium">首次</th>
               <th className="px-2 py-1 text-left font-medium">最后</th>
@@ -361,7 +405,7 @@ export function SessionTable({
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-2 py-3 text-center text-faint">
+                <td colSpan={showProject ? 9 : 8} className="px-2 py-3 text-center text-faint">
                   当前范围没有会话。
                 </td>
               </tr>
@@ -382,6 +426,11 @@ export function SessionTable({
                     {session.archived && <Chip tone="muted">已归档</Chip>}
                   </div>
                 </td>
+                {showProject && (
+                  <td className="truncate px-2 py-1 text-[12px] text-muted" title={session.projectName}>
+                    {session.projectName}
+                  </td>
+                )}
                 <td className="px-2 py-1">
                   <AgentBadge id={session.agent} small />
                 </td>

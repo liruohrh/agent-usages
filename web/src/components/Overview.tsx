@@ -1,25 +1,21 @@
 /**
- * The right panel when nothing is selected: the overview of the current scope.
+ * The 概览 tab: the four headline figures, where the tokens and the money went,
+ * the trend, and — for the whole machine — which projects spent it.
  *
- * "Scope" is one project or every project — the component does not care, it reads
- * the dashboard the server already filtered. From top to bottom: the headline
- * numbers, the per-agent table, the two share charts, the time series, then the
- * model and price-band detail.
+ * Nothing here is a wall of numbers: the per-bucket detail lives in the 用量 tab,
+ * and the project list is a short ranking rather than every column of every
+ * project. The one long scroll from the terminal's report is deliberately gone.
  */
 
-import { useMemo } from 'react';
-import type { Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
-import {
-  formatCost,
-  formatInstant,
-  formatShare,
-  formatTokens,
-} from '../format';
-import { AgentBadge, Card, Chip, MetricSplit, Notice, Stat } from './Bits';
-import { AgentTable, BandTable, ModelTable, SessionTable, TokenTable } from './Tables';
-import { agentShareOption, EChart, projectBarOption, timeseriesOption, tokenDonutOption, type SeriesMetric } from '../charts';
+import { Link } from 'react-router-dom';
 
-/** The scope overview. */
+import type { Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
+import { formatCost, formatShare, formatTokens } from '../format';
+import { AgentBadge, Card, Notice } from './Bits';
+import { Composition, KpiRow } from './Metrics';
+import { EChart, timeseriesOption, type SeriesMetric } from '../charts';
+
+/** The overview panel. */
 export function Overview({
   dashboard,
   project,
@@ -30,7 +26,6 @@ export function Overview({
   onMetric,
   symbol,
   dark,
-  loading,
 }: {
   dashboard: Dashboard;
   project: ProjectSummary | null;
@@ -43,115 +38,126 @@ export function Overview({
   dark: boolean;
   loading: boolean;
 }): React.ReactElement {
-  const totals = project === null ? dashboard.totals : null;
-  const cost = project === null ? dashboard.totals.cost.total : project.cost.total;
-  const requests = project === null ? dashboard.totals.requests : project.requests;
   const tokens = project === null ? dashboard.totals.tokens : project.tokens;
+  const cost = project === null ? dashboard.totals.cost : project.cost;
+  const requests = project === null ? dashboard.totals.requests : project.requests;
   const sessions = project === null ? dashboard.totals.sessions : project.sessions;
   const subagents = project === null ? dashboard.totals.subagentSessions : project.subagentSessions;
   const agents = project === null ? dashboard.agents : project.agentTotals;
-  const models = project === null ? dashboard.models : project.models;
-  const bands = project === null ? dashboard.bands : project.bands;
-  const billedTokens = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
-
-  const projectRows = useMemo(
-    () =>
-      [...dashboard.projects]
-        .sort((left, right) => Number(right.cost.total) - Number(left.cost.total))
-        .slice(0, 8)
-        .map((entry) => ({
-          name: entry.name,
-          value: Number(entry.cost.total),
-          extra: `${entry.agents.join('·')}｜${formatTokens(entry.requests)} 次请求｜${formatCost(entry.cost.total, symbol)}`,
-        })),
-    [dashboard.projects, symbol],
-  );
+  const billed = tokens.input + tokens.cacheRead + tokens.cacheWrite + tokens.output;
+  const cacheHit = billed === 0 ? 0 : tokens.cacheRead / billed;
+  const unpriced = project === null ? dashboard.totals.unpriced : project.unpriced;
+  const firstUsage = project === null ? dashboard.totals.firstUsage : project.firstUsage;
+  const lastUsage = project === null ? dashboard.totals.lastUsage : project.lastUsage;
+  const day = (instant: number | null): string =>
+    instant === null ? '—' : new Date(instant).toLocaleDateString('zh-CN');
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="cell-title max-w-full text-lg font-semibold" title={project?.name ?? '全部项目'}>
-              {project?.name ?? '全部项目'}
-            </h1>
-            {project !== null && <Chip tone={project.kind === 'repo' ? 'accent' : 'muted'}>{project.kind === 'repo' ? 'git 仓库' : '目录'}</Chip>}
-            {project !== null && project.repo !== undefined && (
-              <Chip tone="muted" title={project.repo.root}>
-                {project.repo.name}
-              </Chip>
+    <div className="space-y-4">
+      <KpiRow
+        items={[
+          {
+            label: '费用',
+            value: formatCost(cost.total, symbol),
+            hint: `${dashboard.currency} · ${dashboard.pricingLabel}`,
+            tone: 'accent',
+          },
+          {
+            label: '请求',
+            value: formatTokens(requests),
+            hint: `${sessions} 个会话（含 ${subagents} 个子代理）`,
+            ...(unpriced > 0 ? { note: `未计价 ${unpriced}` } : {}),
+          },
+          {
+            label: 'tokens（计费桶）',
+            value: formatTokens(billed, true),
+            hint: `思考 ${formatTokens(tokens.reasoning, true)}`,
+            ...(tokens.cacheWrite > 0 ? { note: `缓存写入 ${formatTokens(tokens.cacheWrite, true)}` } : {}),
+          },
+          {
+            label: '缓存命中率',
+            value: formatShare(cacheHit),
+            hint: `${formatTokens(tokens.cacheRead, true)} 来自缓存`,
+            note: `${formatTokens(billed, true)} 计费桶`,
+          },
+        ]}
+      />
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="xl:col-span-1">
+          <Composition tokens={tokens} cost={cost} symbol={symbol} />
+        </div>
+        <div className="xl:col-span-2">
+          <Card
+            title="时间序列"
+            actions={
+              <>
+                <div className="flex overflow-hidden rounded border border-line">
+                  {(['day', 'hour'] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => onBucket(option)}
+                      className={`px-2.5 py-1 text-[12px] ${bucket === option ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
+                    >
+                      {option === 'day' ? '按天' : '按小时'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex overflow-hidden rounded border border-line">
+                  {(
+                    [
+                      { key: 'cost', label: '费用' },
+                      { key: 'requests', label: '请求' },
+                      { key: 'tokens', label: 'tokens' },
+                    ] as const
+                  ).map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => onMetric(option.key)}
+                      className={`px-2.5 py-1 text-[12px] ${metric === option.key ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            }
+          >
+            {points.length === 0 ? (
+              <p className="py-10 text-center text-[13px] text-faint">
+                {bucket === 'hour' ? '最近 14 天没有消耗（小时粒度只保留 14 天）。' : '当前范围没有消耗。'}
+              </p>
+            ) : (
+              <EChart option={timeseriesOption(points, agents, metric, symbol, dark)} height={300} />
             )}
-            {loading && <span className="text-[11px] text-faint">加载中…</span>}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
-            {agents.map((agent) => (
-              <AgentBadge key={agent.id} id={agent.id} small />
-            ))}
-            <span>
-              {project === null
-                ? `${dashboard.totals.projects} 个项目 · ${dashboard.totals.workspaces} 个工作区`
-                : `${project.workspaces.length} 个工作区`}
-            </span>
-            <span>
-              数据 {formatInstant(dashboard.rangeFrom ?? dashboard.totals.firstUsage)} →{' '}
-              {formatInstant(dashboard.rangeTo ?? dashboard.totals.lastUsage)}
-            </span>
-            <span>
-              {dashboard.mode === 'snapshot' ? '离线快照' : '实时扫描'} · {dashboard.rangeLabel} · 扫描于{' '}
-              {formatInstant(dashboard.scannedAt)}（{dashboard.scanMs} ms）
-            </span>
-          </div>
-          {project !== null && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {project.workspaces.map((workspace) => (
-                <span key={workspace} className="max-w-full truncate text-[11px] text-faint" title={workspace}>
-                  {workspace}
-                </span>
-              ))}
-            </div>
-          )}
+            <p className="mt-2 text-[11px] text-faint">
+              数据 {day(firstUsage)} 起 到 {day(lastUsage)} · 按 (时间桶 × agent × 项目) 分别计价后相加
+              {bucket === 'hour' && ' · 小时粒度只覆盖最近 14 天'}
+            </p>
+          </Card>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-        <Stat label="会话（子代理）" value={`${sessions}（${subagents}）`} hint={`活跃 ${project === null ? dashboard.totals.activeSessions : project.activeSessions}`} />
-        <Stat label="请求" value={formatTokens(requests)} hint={`未计价 ${project === null ? dashboard.totals.unpriced : project.unpriced}`} />
-        <Stat label="tokens（计费桶）" value={formatTokens(billedTokens, true)} hint={`思考 ${formatTokens(tokens.reasoning, true)}`} />
-        <Stat label="费用" value={formatCost(cost, symbol)} tone="accent" hint={`${dashboard.currency} · ${dashboard.pricingLabel}`} />
-        <Stat label="缓存读取占比" value={formatShare(billedTokens === 0 ? 0 : tokens.cacheRead / billedTokens)} hint={`缓存写入 ${formatTokens(tokens.cacheWrite, true)}`} />
-        <Stat
-          label="项目占比"
-          value={project === null ? '100%' : formatShare(Number(project.cost.total) / Math.max(Number(dashboard.totals.cost.total), 1e-9))}
-          hint={project === null ? '全部项目' : `全部 ${formatCost(dashboard.totals.cost.total, symbol)}`}
-        />
-      </div>
+      {project === null ? (
+        <ProjectRanking dashboard={dashboard} symbol={symbol} />
+      ) : (
+        project.sessionReports.length > 0 && (
+          <Card
+            title="最近的会话"
+            actions={
+              <Link to="?view=sessions" className="text-[12px] text-accent hover:underline">
+                全部会话
+              </Link>
+            }
+          >
+            <RecentSessions project={project} symbol={symbol} />
+          </Card>
+        )
+      )}
 
-      {/* The CLI prints 总 / 自身 / 子代理 for every node; this is that block. */}
-      <Card title="指标（总 / 自身 / 子代理）">
-        <MetricSplit
-          total={{
-            tokens,
-            cost: project === null ? dashboard.totals.cost : project.cost,
-            requests,
-          }}
-          own={{
-            tokens: (project === null ? dashboard.totals.own : project.own).tokens,
-            cost: (project === null ? dashboard.totals.own : project.own).cost,
-            requests: (project === null ? dashboard.totals.own : project.own).requests,
-          }}
-          spawned={{
-            tokens: (project === null ? dashboard.totals.spawned : project.spawned).tokens,
-            cost: (project === null ? dashboard.totals.spawned : project.spawned).cost,
-            requests: (project === null ? dashboard.totals.spawned : project.spawned).requests,
-          }}
-          symbol={symbol}
-        />
-        <p className="mt-2 text-[11px] text-faint">
-          与 CLI 的 <code>usage --subagent</code> 同一口径：自身 + 子代理 = 总；每项后面的金额是该项自己产生的钱。
-        </p>
-      </Card>
-
-      {totals !== null && dashboard.warnings.length > 0 && (
+      {dashboard.warnings.length > 0 && (
         <Notice tone="warn" title={`${dashboard.warnings.length} 条提示`}>
           <ul className="list-disc space-y-0.5 pl-4">
             {dashboard.warnings.slice(0, 4).map((item) => (
@@ -160,113 +166,93 @@ export function Overview({
           </ul>
         </Notice>
       )}
+    </div>
+  );
+}
 
-      <AgentTable agents={agents} symbol={symbol} />
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Card title="agent 费用占比">
-          {agents.length === 0 ? (
-            <p className="py-8 text-center text-[12px] text-faint">没有数据。</p>
-          ) : (
-            <EChart option={agentShareOption(agents, symbol, dark)} height={230} />
-          )}
-        </Card>
-        <div className="space-y-3">
-          <Card title="token 五桶占比">
-            <EChart option={tokenDonutOption(tokens, dark)} height={190} />
-            <p className="mt-1 text-[11px] text-faint">只画四个计费桶；思考 token 已含在输出里，图中不重复计。</p>
-          </Card>
-          <TokenTable breakdown={project === null ? dashboard.totals.tokenBreakdown : project.tokenBreakdown} symbol={symbol} />
-          {project === null && projectRows.length > 0 && (
-            <Card title="项目费用排行">
-              <EChart option={projectBarOption(projectRows, symbol, dark)} height={140} />
-            </Card>
-          )}
+/** The project ranking: a share bar per project, plus a short card each. */
+function ProjectRanking({ dashboard, symbol }: { dashboard: Dashboard; symbol: string }): React.ReactElement {
+  const rows = [...dashboard.projects]
+    .sort((left, right) => Number(right.cost.total) - Number(left.cost.total))
+    .slice(0, 8);
+  const total = Number(dashboard.totals.cost.total);
+  return (
+    <Card title="项目花费">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="space-y-2">
+          {rows.map((project) => {
+            const share = total === 0 ? 0 : Number(project.cost.total) / total;
+            return (
+              <Link
+                key={project.id}
+                to={`/p/${encodeURIComponent(project.id)}`}
+                className="flex items-center gap-3 rounded-lg border border-line px-3 py-2 hover:bg-raised"
+              >
+                <span className="w-40 min-w-0 shrink-0 truncate text-[13px]" title={project.id}>
+                  {project.name}
+                </span>
+                <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-raised">
+                  <span className="block h-full rounded-full bg-accent" style={{ width: `${share * 100}%` }} />
+                </span>
+                <span className="tnum w-24 shrink-0 text-right text-[13px]">{formatCost(project.cost.total, symbol)}</span>
+                <span className="tnum w-24 shrink-0 text-right text-[12px] text-faint">
+                  {formatTokens(project.requests)} 请求
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+        <div className="space-y-2">
+          {rows.slice(0, 4).map((project) => (
+            <div key={project.id} className="rounded-lg border border-line px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-[13px]" title={project.id}>
+                  {project.name}
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {project.agents.map((agent) => (
+                    <AgentBadge key={agent} id={agent} small />
+                  ))}
+                </span>
+              </div>
+              <div className="mt-1 text-[12px] text-faint">
+                {project.sessions} 会话（子代理 {project.subagentSessions}）·{' '}
+                {formatTokens(
+                  project.tokens.input + project.tokens.output + project.tokens.cacheRead + project.tokens.cacheWrite,
+                  true,
+                )}{' '}
+                tokens
+              </div>
+            </div>
+          ))}
         </div>
       </div>
+    </Card>
+  );
+}
 
-      <Card
-        title="时间序列"
-        actions={
-          <>
-            <div className="flex overflow-hidden rounded border border-line">
-              {(['day', 'hour'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => onBucket(option)}
-                  className={`px-2 py-0.5 text-[11px] ${bucket === option ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
-                >
-                  {option === 'day' ? '按天' : '按小时'}
-                </button>
-              ))}
-            </div>
-            <div className="flex overflow-hidden rounded border border-line">
-              {(
-                [
-                  { key: 'cost', label: '费用' },
-                  { key: 'requests', label: '请求' },
-                  { key: 'tokens', label: 'tokens' },
-                ] as const
-              ).map((option) => (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => onMetric(option.key)}
-                  className={`px-2 py-0.5 text-[11px] ${metric === option.key ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </>
-        }
-      >
-        {points.length === 0 ? (
-          <p className="py-6 text-center text-[12px] text-faint">
-            {bucket === 'hour' ? '最近 14 天没有消耗（小时粒度只保留 14 天）。' : '当前范围没有消耗。'}
-          </p>
-        ) : (
-          <EChart option={timeseriesOption(points, agents, metric, symbol, dark)} height={260} />
-        )}
-        <p className="mt-1 text-[11px] text-faint">
-          按 (时间桶 × agent × 项目) 分别计价后相加，与总计的差异在小数点后第 4 位以内。
-          {bucket === 'hour' && ' 小时粒度只覆盖最近 14 天。'}
-        </p>
-      </Card>
-
-      {/* Stacked, not side by side: both tables carry six or seven columns, and
-          two of them abreast is what forced a horizontal scrollbar. */}
-      <div className="space-y-3">
-        <ModelTable models={models} symbol={symbol} />
-        <BandTable bands={bands} symbol={symbol} />
-      </div>
-
-      {project !== null && project.sessionReports.length > 0 && (
-        <SessionTable sessions={project.sessionReports} symbol={symbol} />
-      )}
-
-      {totals !== null && (
-        <Card title="数据来源">
-          <ul className="space-y-1 text-[11px] text-muted">
-            {dashboard.loadedAgents.map((agent) => (
-              <li key={agent.id} className="flex items-center gap-2">
-                <AgentBadge id={agent.id} small />
-                <span className="truncate" title={agent.source}>
-                  {agent.label} · {agent.source}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-faint">
-            <span>
-              计价来源 {dashboard.pricingLabel}（{dashboard.pricingProvider}），货币 {dashboard.currency}
-            </span>
-            <span>· 扫描 {dashboard.scanMs} ms</span>
-            <span>· 数据根 {dashboard.source}</span>
-          </div>
-        </Card>
-      )}
+/** The newest few sessions of a project, as compact rows. */
+function RecentSessions({ project, symbol }: { project: ProjectSummary; symbol: string }): React.ReactElement {
+  const rows = [...project.sessionReports]
+    .sort((left, right) => (right.lastUsage ?? 0) - (left.lastUsage ?? 0))
+    .slice(0, 6);
+  return (
+    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+      {rows.map((session) => (
+        <Link
+          key={session.uid}
+          to={`/s/${encodeURIComponent(session.uid)}`}
+          className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2 hover:bg-raised"
+        >
+          <span className="cell-title min-w-0 text-[13px]" title={session.title ?? session.id}>
+            {session.title ?? `（无标题）${session.id.slice(0, 8)}`}
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <AgentBadge id={session.agent} small />
+            <span className="tnum text-[12px] text-muted">{formatCost(session.cost.total, symbol)}</span>
+          </span>
+        </Link>
+      ))}
     </div>
   );
 }

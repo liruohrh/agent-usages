@@ -9,8 +9,9 @@
 import { Link } from 'react-router-dom';
 
 import type { SessionDetail as Detail, SessionTreeNode } from '../types';
-import { formatCost, formatInstant, formatTokens, shortenPath } from '../format';
-import { AgentBadge, Card, Chip, MetricSplit, Notice } from './Bits';
+import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } from '../format';
+import { AgentBadge, Card, Chip, Notice } from './Bits';
+import { Composition, KpiRow, MetricDetailTable, ScopeSplitTable } from './Metrics';
 import { BandTable, ModelTable } from './Tables';
 
 /** The session detail panel. */
@@ -87,25 +88,47 @@ export function SessionDetailPanel({
         </button>
       </div>
 
-      {/* The CLI prints this block for a session too: 总 / 自身 / 子代理, with the
-          money each bucket produced — the line a reader can compare, column by
-          column, with `agent-usages usage`. */}
-      <Card title="指标（总 / 自身 / 子代理）">
-        <MetricSplit
-          total={{ tokens: session.total.tokens, cost: session.total.cost, requests: session.total.requests }}
-          own={{ tokens: session.own.tokens, cost: session.own.cost, requests: session.own.requests }}
-          spawned={{ tokens: session.spawned.tokens, cost: session.spawned.cost, requests: session.spawned.requests }}
-          symbol={symbol}
-        />
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-faint">
-          <span>首次 {formatInstant(session.firstUsage)}</span>
-          <span>· 最后 {formatInstant(session.lastUsage)}</span>
-          <span>· 创建 {formatInstant(session.createdAt)}</span>
-          <span>· 深度 {session.depth}</span>
-          <span>· 子代理 {session.subagentCount}</span>
-          {session.archived && <Chip tone="muted">已归档</Chip>}
+      <KpiRow
+        items={[
+          { label: '这个会话的花费', value: formatCost(session.total.cost.total, symbol), hint: `自身 ${formatCost(session.own.cost.total, symbol)} · 子代理 ${formatCost(session.spawned.cost.total, symbol)}`, tone: 'accent' },
+          { label: '请求', value: formatTokens(session.total.requests), hint: `自身 ${formatTokens(session.own.requests)} · 子代理 ${formatTokens(session.spawned.requests)}` },
+          {
+            label: 'tokens（计费桶）',
+            value: formatTokens(session.total.tokens.input + session.total.tokens.output + session.total.tokens.cacheRead + session.total.tokens.cacheWrite, true),
+            hint: `思考 ${formatTokens(session.total.tokens.reasoning, true)}`,
+          },
+          {
+            label: '子代理',
+            value: String(session.spawned.sessions),
+            hint:
+              session.spawned.sessions === 0
+                ? '没有派生子代理'
+                : `占这个会话费用的 ${formatShare(
+                    Number(session.total.cost.total) === 0
+                      ? 0
+                      : Number(session.spawned.cost.total) / Number(session.total.cost.total),
+                  )}`,
+          },
+        ]}
+      />
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Composition tokens={session.total.tokens} cost={session.total.cost} symbol={symbol} />
+        <div className="space-y-4">
+          <ScopeSplitTable
+            total={{ requests: session.total.requests, tokens: session.total.tokens, cost: session.total.cost }}
+            own={{ requests: session.own.requests, tokens: session.own.tokens, cost: session.own.cost }}
+            spawned={{ requests: session.spawned.requests, tokens: session.spawned.tokens, cost: session.spawned.cost }}
+            symbol={symbol}
+          />
+          <MetricDetailTable
+            total={{ requests: session.total.requests, tokens: session.total.tokens, cost: session.total.cost }}
+            own={{ requests: session.own.requests, tokens: session.own.tokens, cost: session.own.cost }}
+            spawned={{ requests: session.spawned.requests, tokens: session.spawned.tokens, cost: session.spawned.cost }}
+            symbol={symbol}
+          />
         </div>
-      </Card>
+      </div>
 
       {detail.tree.children.length > 0 && (
         <Card title={`委派树（${detail.tree.children.length} 个直接子代理）`}>

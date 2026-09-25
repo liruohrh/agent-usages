@@ -2,19 +2,27 @@
 
 终端里看四个 agent 的用量已经不够用了：项目一多，`usage` 的表格就要横向滚动，
 会话与子代理只能靠缩进辨认，时间趋势更是完全看不见。这一层把同一份数据放进浏览器：
-左边是**项目 → 工作区 → 会话 → 子代理**的树，右边是选中范围的**指标行**、
-按 agent 分列的**五桶表**、时间序列、token 五桶占比、**会话明细**、模型与计价区间明细。
+左边是**项目 → 工作区 → 会话 → 子代理**的树，右边是选中范围的仪表盘：
+四张大数字卡、构成条、时间序列、按 agent 分列、会话明细、模型与计价区间明细。
 
-细节与 CLI 是同一套，不是摘要版：
+页面按「一个问题一屏」组织，右栏是四个标签页（URL 带 `?view=`，可分享链接）：
 
-- 每个层级（全局 / 项目 / 工作区 / 会话）都给 **`总 / 自身 / 子代理`** 三段，就是
-  `usage --subagent` 的那三行；
-- 每段都是 CLI 的**完整指标行**：`I/M`、`I/W`（有才显示）、`I/C`（带命中率）、`I/T`、
-  `O`、`R`（有才显示，带占比）、`O/T`、`T`、`Q`，每项都跟着它自己产生的金额；
-- 项目页的**会话明细表**列出每个会话的 agent、首次/最后用量、Q、T、金额与占比，
-  可切换「合并子代理 / 含子代理」（对应 CLI 的默认与 `--subagents`）；
-- 树里的行保持紧凑（340px 宽放不下整行），**悬停**给出该行的完整指标行，**选中的行**
-  直接在树下展开 `总 / 自身 / 子代理`。
+| 标签 | 回答什么 |
+| --- | --- |
+| 概览 | 花了多少、花在哪：四张大数字卡（费用 / 请求 / tokens / 缓存命中率）、构成条、时间序列、项目花费排行 |
+| 用量 | 具体数字：`总 / 自身 / 子代理` 一张表，完整十项指标收在可展开的「完整指标」里，按 agent 分列与 token 五桶 |
+| 模型与计价 | 模型明细与计价区间明细（各占整宽，纵向排列） |
+| 会话 | 每会话一行：agent、首次/最后、Q、T、费用、占比，可切「含子代理」 |
+
+与 CLI 的对应关系（细节一个不少，只是不再全部堆在一屏）：
+
+- 每个层级（全局 / 项目 / 工作区 / 会话）都有 **`总 / 自身 / 子代理`**，就是
+  `usage --subagent` 的三行，做成表格而不是三行长字符串；
+- 「完整指标」展开后是 CLI 的十项数字 `I/M I/W I/C I/T O R O/T T Q` 与合计，
+  **每项一列**，数量在上、金额与占比在下 —— 可直接逐列对照终端输出；
+- 会话明细表的「合并子代理 / 含子代理」对应 CLI 默认与 `--subagents`；
+- 树里的行保持一行高（340px 放不下整行），**悬停**给出该行完整的指标行，选中的行
+  在树下给两行「自身 / 子代理」。
 
 它不是静态 HTML 报告（那个是 `usage --html`，用来离线分享），而是一个**本地服务**：
 API 返回 JSON，前端是 Vite 构建的单页应用。
@@ -114,10 +122,13 @@ web/                       # 前端 workspace 包（package.json name = "web"）
     components/
       Filters.tsx          #   顶部：时间范围 / agent 多选 / 项目搜索 / 重扫 / 主题
       Tree.tsx             #   左栏：项目 → 工作区 → 会话 → 子代理
-      Overview.tsx         #   右栏：概览、指标（总/自身/子代理）、按 agent 分列、占比图、时序、明细
-      SessionDetail.tsx    #   会话详情 + 同一套指标 + 委派树
+      ScopeView.tsx        #   右栏外壳：四个标签页（概览/用量/模型与计价/会话）+ 作用域标题
+      Overview.tsx         #   概览：四张数字卡、构成条、时间序列、项目花费排行
+      Usage.tsx            #   用量：总/自身/子代理、完整指标（折叠）、按 agent 分列、token 五桶
+      Metrics.tsx          #   呈现层：KpiRow / Composition / ScopeSplitTable / MetricDetailTable
+      SessionDetail.tsx    #   会话页：四张数字卡 + 构成 + 三段指标 + 委派树
       Tables.tsx           #   按 agent / 会话 / 模型 / 计价区间 / token 五桶五张表
-      Bits.tsx             #   徽标、卡片、统计块、提示条、MetricLine/MetricSplit（与 CLI 同一行的指标）
+      Bits.tsx             #   徽标、卡片、统计块、提示条、树行里的金额+token
   scripts/smoke.mjs        # 冒烟测试（起服务 → 打接口 → 断言 → 关闭）
   scripts/e2e-server.mjs   # 给 Playwright 起的服务（优先离线快照，没有就实时扫）
   e2e/dashboard.spec.ts    # 浏览器里的端到端测试：切项目/切会话/布局与溢出
@@ -301,7 +312,7 @@ pnpm --filter web build                             # tsc --noEmit && vite build
 pnpm web:snapshot                                   # 生成离线 fixture（不入库，先跑一次）
 pnpm web:smoke                                      # 离线快照，47 项断言
 node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 95 项
-pnpm web:e2e                                        # 真浏览器：10 条，起服务 + 切项目/会话 + 口径与布局
+pnpm web:e2e                                        # 真浏览器：14 条，起服务 + 切标签/项目/会话 + 口径与布局
 CI=true pnpm typecheck                              # 根 tsconfig 覆盖 src/serve/**
 CI=true pnpm test                                   # 488 个用例
 ```
@@ -343,7 +354,8 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 | 长标题 `line-clamp-2` + `title` | 表格 `table-fixed`，会话标题/路径再长也不撑宽列；CLI 的 HTML 报告用同一套修法（`table-layout:fixed` + `colgroup` + `title` 全文） |
 | 明细表纵向排列 | 模型明细 6 列、计价区间明细 7 列，并排时半宽放不下只能横滚；纵向各占整宽后 1440px 下不再需要滚动（Playwright 每条都量） |
 | 一行一个 (agent, 项目, 模型) / (agent, 项目, 模型, 区间, 档位) | 表格的行身份就是 React 的 key：按会话出数会给出重复 key，切范围时旧行不会被卸载（真实缺陷）。服务端在 `mergeModelRows` / `mergeBandRows` 里把同一身份的行相加，一行一条后再交给前端 |
-| 指标行与 CLI 逐字对齐 | Web 的每一层都给 `自身 / 子代理` 与 `I/M I/W I/C I/T O R O/T T Q 金额`，顺序与 `src/format.ts` 相同；数来自服务端 `own`/`spawned` 字段，前端只排版不重算 |
+| 一个问题一屏（标签页） | 原来把十余张卡片堆成一条长滚动，最重要的费用和几乎恒为 0 的 `I/W` 一样是 11px 小字；现在四个标签各答一个问题，数字有大小之分，明细在折叠里 |
+| 大数字 + 构成条，而不是数字长行 | 一行 150 字符的 `I/M … ¥…` 是终端的排版；网页用四张 KPI 卡定调、用堆叠条表示构成，完整十项仍以**每项一列**的表格给出（默认折叠），口径与 `src/format.ts` 相同，数来自服务端 `own`/`spawned`，前端不重算钱 |
 | Playwright | 只有真浏览器能发现"key 不唯一 → 切项目留旧行"和"并排太窄"这类问题；断言直接与页面自己拿到的 API 数据比对 |
 
 ---

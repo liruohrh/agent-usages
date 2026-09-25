@@ -19,7 +19,7 @@ import { fetchDashboard, fetchSession, fetchTimeseries, refresh as refreshApi, t
 import type { Dashboard, SessionDetail, TimeseriesBucket } from './types';
 import { Filters, type FilterState } from './components/Filters';
 import { ProjectTree } from './components/Tree';
-import { Overview } from './components/Overview';
+import { ScopeView } from './components/ScopeView';
 import { SessionDetailPanel } from './components/SessionDetail';
 import type { SeriesMetric } from './charts';
 import { Notice } from './components/Bits';
@@ -181,7 +181,7 @@ export function App(): React.ReactElement {
                 dashboard === null ? (
                   <Notice title="加载中…">正在向本地服务要数据。</Notice>
                 ) : (
-                  <Overview
+                  <ScopeView
                     dashboard={dashboard}
                     project={null}
                     points={points}
@@ -206,7 +206,7 @@ export function App(): React.ReactElement {
                     当前筛选下找不到这个项目，可能是被 agent 或时间范围过滤掉了。
                   </Notice>
                 ) : (
-                  <Overview
+                  <ScopeView
                     dashboard={dashboard}
                     project={project}
                     points={points}

@@ -9,8 +9,7 @@
 
 import type { ReactNode } from 'react';
 
-import { agentColor, agentLabel, formatCost, formatTokens, metricItems } from '../format';
-import type { CostTotals, TokenBuckets } from '../types';
+import { agentColor, agentLabel, formatCost, formatTokens } from '../format';
 
 /** A coloured agent chip. */
 export function AgentBadge({ id, small = false }: { id: string; small?: boolean }): React.ReactElement {
@@ -77,28 +76,6 @@ export function Card({
   );
 }
 
-/** One number with a caption, for the top row. */
-export function Stat({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: ReactNode;
-  hint?: ReactNode;
-  tone?: 'accent' | 'good' | 'warn';
-}): React.ReactElement {
-  const colors: Record<string, string> = { accent: 'text-accent', good: 'text-good', warn: 'text-warn' };
-  return (
-    <div className="rounded-lg border border-line bg-panel px-3 py-2">
-      <div className="text-[11px] text-faint">{label}</div>
-      <div className={`tnum mt-0.5 text-lg font-semibold ${tone === undefined ? '' : (colors[tone] ?? '')}`}>{value}</div>
-      {hint !== undefined && <div className="mt-0.5 text-[11px] text-faint">{hint}</div>}
-    </div>
-  );
-}
-
 /** A horizontal share bar. */
 export function ShareBar({ share, color }: { share: number; color: string }): React.ReactElement {
   const width = Math.max(0, Math.min(1, Number.isFinite(share) ? share : 0)) * 100;
@@ -132,7 +109,13 @@ export function Notice({
   );
 }
 
-/** A labelled money + tokens pair, used in tree rows. */
+/**
+ * A labelled money + tokens pair, used in tree rows.
+ *
+ * The sidebar keeps one line per row: a full breakdown is what the panel beside
+ * it is for, and the `hint` still carries the ten-figure line for a reader who
+ * wants to check a number without leaving the tree.
+ */
 export function MoneyTokens({
   cost,
   tokens,
@@ -153,84 +136,5 @@ export function MoneyTokens({
       <span className="text-faint"> · {formatTokens(tokens, true)} tok</span>
       {requests !== undefined && <span className="text-faint"> · {formatTokens(requests)} req</span>}
     </span>
-  );
-}
-
-/**
- * The CLI's metric line, in the browser.
- *
- * The terminal prints one line per node — `I/M 1.2M ¥0.53 · I/C … · T … · Q … ·
- * ¥…` — and this is the same line, in the same order, so a figure read here and
- * a figure read there cannot disagree. `I/W` and `R` show up only when they were
- * reported; the trailing total is the one on the row's own headline.
- */
-export function MetricLine({
-  tokens,
-  cost,
-  requests,
-  symbol,
-  className = '',
-}: {
-  tokens: TokenBuckets;
-  cost: CostTotals;
-  requests: number;
-  symbol: string;
-  className?: string;
-}): React.ReactElement {
-  return (
-    <div className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] ${className}`}>
-      {metricItems(tokens, cost, requests, symbol).map((entry, index) => (
-        <span key={`${entry.key}:${String(index)}`} className="whitespace-nowrap">
-          {entry.key.length > 0 && <span className="text-faint">{entry.key} </span>}
-          {entry.key.length > 0 && <span className="tnum text-fg">{formatTokens(entry.count, true)}</span>}
-          {entry.ratio.length > 0 && <span className="tnum text-faint">{entry.ratio}</span>}
-          {entry.money.length > 0 && (
-            <span className={`tnum ml-1 ${entry.key.length === 0 ? 'font-medium text-accent' : 'text-muted'}`}>
-              {entry.money}
-            </span>
-          )}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-/**
- * The `总 / 自身 / 子代理` block, exactly what `usage --subagent` prints.
- *
- * @param props - the scope's figures.
- */
-export function MetricSplit({
-  total,
-  own,
-  spawned,
-  symbol,
-}: {
-  total: { tokens: TokenBuckets; cost: CostTotals; requests: number };
-  own: { tokens: TokenBuckets; cost: CostTotals; requests: number };
-  spawned: { tokens: TokenBuckets; cost: CostTotals; requests: number };
-  symbol: string;
-}): React.ReactElement {
-  return (
-    <div className="space-y-1">
-      {(
-        [
-          { label: '总', figures: total, tone: 'text-fg' },
-          { label: '自身', figures: own, tone: 'text-muted' },
-          { label: '子代理', figures: spawned, tone: 'text-muted' },
-        ] as const
-      ).map((row) => (
-        <div key={row.label} className="flex min-w-0 items-baseline gap-2">
-          <span className={`w-10 shrink-0 text-[11px] ${row.tone}`}>{row.label}</span>
-          <MetricLine
-            tokens={row.figures.tokens}
-            cost={row.figures.cost}
-            requests={row.figures.requests}
-            symbol={symbol}
-            className="min-w-0 flex-1"
-          />
-        </div>
-      ))}
-    </div>
   );
 }

@@ -10,7 +10,7 @@ import { useMemo, useState } from 'react';
 
 import type { Dashboard, ProjectSummary, SessionNode, WorkspaceNode } from '../types';
 import { formatCost, formatInstant, formatTokens, metricText, shortenPath } from '../format';
-import { AgentBadge, Chip, MetricSplit, MoneyTokens } from './Bits';
+import { AgentBadge, Chip, MoneyTokens } from './Bits';
 
 /** The four billed buckets, which is what the compact tree row counts as "tok". */
 function billed(tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }): number {
@@ -169,15 +169,19 @@ function ProjectRow({
         </button>
       </div>
       {selected && (
-        // The full line does not fit a 340px column, so it appears for the row
-        // the reader is actually looking at, and on hover for the others.
-        <div className="ml-3 border-l border-line pl-2">
-          <MetricSplit
-            total={{ tokens: project.tokens, cost: project.cost, requests: project.requests }}
-            own={{ tokens: project.own.tokens, cost: project.own.cost, requests: project.own.requests }}
-            spawned={{ tokens: project.spawned.tokens, cost: project.spawned.cost, requests: project.spawned.requests }}
-            symbol={symbol}
-          />
+        // Two short lines, not the ten-figure line: the sidebar is 340px wide, and
+        // the full breakdown belongs in the panel the row opens.
+        <div className="ml-3 space-y-0.5 border-l border-line pl-3 pb-1 text-[12px] text-muted">
+          <div>
+            自身 <span className="tnum text-fg">{formatCost(project.own.cost.total, symbol)}</span>
+            <span className="text-faint"> · {formatTokens(project.own.requests)} 请求</span>
+          </div>
+          {project.spawned.requests > 0 && (
+            <div>
+              子代理 <span className="tnum text-fg">{formatCost(project.spawned.cost.total, symbol)}</span>
+              <span className="text-faint"> · {formatTokens(project.spawned.requests)} 请求</span>
+            </div>
+          )}
         </div>
       )}
       {expanded && (
@@ -333,13 +337,10 @@ function SessionRow({
         </button>
       </div>
       {selected && session.spawned.requests > 0 && (
-        <div className="ml-6 border-l border-line pl-2">
-          <MetricSplit
-            total={{ tokens: session.total.tokens, cost: session.total.cost, requests: session.total.requests }}
-            own={{ tokens: session.own.tokens, cost: session.own.cost, requests: session.own.requests }}
-            spawned={{ tokens: session.spawned.tokens, cost: session.spawned.cost, requests: session.spawned.requests }}
-            symbol={symbol}
-          />
+        <div className="ml-6 border-l border-line pl-3 pb-1 text-[12px] text-muted">
+          自身 <span className="tnum text-fg">{formatCost(session.own.cost.total, symbol)}</span>
+          <span className="text-faint"> · 子代理 </span>
+          <span className="tnum text-fg">{formatCost(session.spawned.cost.total, symbol)}</span>
         </div>
       )}
       {expanded && children.length > 0 && (
