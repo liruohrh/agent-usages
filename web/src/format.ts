@@ -154,13 +154,25 @@ export function shortenPath(path: string, max = 46): string {
   return `…/${tail}`;
 }
 
-/** The five token buckets, in display order, with their Chinese labels. */
-export const TOKEN_BUCKETS: { key: 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'reasoning'; label: string }[] = [
-  { key: 'input', label: '输入（未命中缓存）' },
-  { key: 'output', label: '输出' },
-  { key: 'cacheRead', label: '缓存读取' },
-  { key: 'cacheWrite', label: '缓存写入' },
-  { key: 'reasoning', label: '思考（含于输出）' },
+/**
+ * The five token buckets, in display order.
+ *
+ * `short` is what the reader sees and `label` is the definition behind it: the
+ * metric vocabulary (`Q`, `I/M`, `I/C`, `I/W`, `I/T`, `O`, `R`, `O/T`, `T`) is
+ * the CLI's, so a figure on the page is recognisably the one in the terminal —
+ * see `src/i18n/zh.ts`, which keeps the same abbreviations out of the prose.
+ * Money has no abbreviation and stays `费用`.
+ */
+export const TOKEN_BUCKETS: {
+  key: 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'reasoning';
+  short: string;
+  label: string;
+}[] = [
+  { key: 'input', short: 'I/M', label: '未命中缓存输入' },
+  { key: 'output', short: 'O/T', label: '输出合计（含 R）' },
+  { key: 'cacheRead', short: 'I/C', label: '缓存命中输入' },
+  { key: 'cacheWrite', short: 'I/W', label: '缓存写入输入' },
+  { key: 'reasoning', short: 'R', label: '思考（含在 O/T 里）' },
 ];
 
 /** Fixed hues per agent, so the same agent is the same colour everywhere. */

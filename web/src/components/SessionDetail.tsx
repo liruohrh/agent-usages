@@ -90,12 +90,26 @@ export function SessionDetailPanel({
 
       <KpiRow
         items={[
-          { label: '这个会话的花费', value: formatCost(session.total.cost.total, symbol), hint: `自身 ${formatCost(session.own.cost.total, symbol)} · 子代理 ${formatCost(session.spawned.cost.total, symbol)}`, tone: 'accent' },
-          { label: '请求', value: formatTokens(session.total.requests), hint: `自身 ${formatTokens(session.own.requests)} · 子代理 ${formatTokens(session.spawned.requests)}` },
           {
-            label: 'tokens（计费桶）',
+            label: '费用',
+            title: '这个会话（自身 + 子代理）的总费用',
+            value: formatCost(session.total.cost.total, symbol),
+            hint: `自身 ${formatCost(session.own.cost.total, symbol)} · 子代理 ${formatCost(session.spawned.cost.total, symbol)}`,
+            tone: 'accent',
+          },
+          {
+            label: 'Q',
+            title: '请求数',
+            value: formatTokens(session.total.requests),
+            hint: `自身 ${formatTokens(session.own.requests)} · 子代理 ${formatTokens(session.spawned.requests)}`,
+          },
+          {
+            label: 'T',
+            title: '计费桶 token 合计 = I/T + O/T',
             value: formatTokens(session.total.tokens.input + session.total.tokens.output + session.total.tokens.cacheRead + session.total.tokens.cacheWrite, true),
-            hint: `思考 ${formatTokens(session.total.tokens.reasoning, true)}`,
+            ...(session.total.tokens.reasoning > 0
+              ? { hint: `R ${formatTokens(session.total.tokens.reasoning, true)}` }
+              : {}),
           },
           {
             label: '子代理',
@@ -173,7 +187,8 @@ function TreeRow({
             {!isRoot && <AgentBadge id={node.agent} small />}
           </div>
           <div className="tnum mt-0.5 text-[11px] text-faint">
-            {formatTokens(node.requests)} req · {formatTokens(node.tokens.input + node.tokens.output + node.tokens.cacheRead + node.tokens.cacheWrite, true)} tok
+            Q {formatTokens(node.requests)} · T{' '}
+            {formatTokens(node.tokens.input + node.tokens.output + node.tokens.cacheRead + node.tokens.cacheWrite, true)}
           </div>
         </div>
         <span className="tnum shrink-0 text-[11px]">{formatCost(node.cost.total, symbol)}</span>

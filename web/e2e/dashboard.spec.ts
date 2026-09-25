@@ -209,7 +209,7 @@ test.describe('the overview', () => {
     const cards = page.locator('main div.grid > div.rounded-xl');
     await expect(cards).toHaveCount(4);
     const texts = (await cards.allInnerTexts()).join(' ');
-    for (const label of ['费用', '请求', 'tokens（计费桶）', '缓存命中率']) expect(texts).toContain(label);
+    for (const label of ['费用', 'Q', 'T', 'I/C 占比']) expect(texts).toContain(label);
     expect(texts).toContain(dashboard.totals.cost.total);
   });
 
@@ -218,8 +218,14 @@ test.describe('the overview', () => {
     const card = cardOf(page, '构成');
     await expect(card).toBeVisible();
     const labels = (await card.locator('table tbody tr').allInnerTexts()).join(' ');
-    expect(labels).toContain('未命中缓存输入');
-    expect(labels).toContain('缓存命中输入');
+    expect(labels).toContain('I/M');
+    expect(labels).toContain('I/C');
+    // The full names live in the hover text, not on the screen: one vocabulary.
+    const names = await card.locator('table tbody tr td span[title]').evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute('title') ?? ''),
+    );
+    expect(names).toContain('未命中缓存输入');
+    expect(names).toContain('缓存命中输入');
   });
 
   test('ranks the projects and the sessions, and opens one on click', async ({ page }) => {
@@ -324,7 +330,7 @@ test.describe('the project and agent rankings', () => {
     const dearest = [...dashboard.agents].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rows.first()).toContainText(dearest?.label ?? '');
     // Sorting is by the dropdown (or by clicking a chip).
-    await sortSelect(page).selectOption({ label: '总 token' });
+    await sortSelect(page).selectOption({ label: 'T' });
     const mostTokens = [...dashboard.agents].sort(
       (left, right) =>
         right.tokens.input + right.tokens.output + right.tokens.cacheRead + right.tokens.cacheWrite -
@@ -458,9 +464,13 @@ test.describe('the session leaderboard', () => {
       expect(chip, chip).toMatch(/^(I\/M|I\/C|I\/W|O|R)/);
       expect(chip, `money in ${chip}`).toContain('¥');
     }
-    // The totals are the right-hand columns, not chips.
-    expect(chips.join(' ')).not.toContain('总 token');
+    // The totals are the header's `Q` / `T` / 费用 columns, not chips.
     expect(chips.join(' ')).not.toContain('费用');
+    const columns = await page
+      .locator('[data-columns]')
+      .first()
+      .evaluate((row) => [...row.children].map((cell) => (cell.textContent ?? '').trim()));
+    expect(columns.slice(-3)).toEqual(['Q', 'T', '费用']);
 
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
@@ -484,7 +494,7 @@ test.describe('the session leaderboard', () => {
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
     await sortSelect(page).selectOption({ label: 'Q' });
     await expect(rowAt(page, 0)).toContainText(mostRequests?.title ?? '');
-    await sortSelect(page).selectOption({ label: '总 token' });
+    await sortSelect(page).selectOption({ label: 'T' });
     await expect(rowAt(page, 0)).toContainText(mostTokens?.title ?? '');
     await sortSelect(page).selectOption({ label: '费用' });
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
@@ -588,7 +598,10 @@ test.describe('the session leaderboard', () => {
     if (withReasoning !== undefined) {
       const index = sessions.map((session) => session.title).indexOf(withReasoning.title);
       const found = await segments(Math.max(0, index));
-      expect(found.map((segment) => segment.title.slice(0, 2))).toContain('R ');
+      // The segments are named by definition on hover, not by abbreviation: the
+      // abbreviation is what the row prints underneath.
+      expect(found.map((segment) => segment.title.slice(0, 2))).toContain('思考');
+      expect(found.map((segment) => segment.title.slice(0, 2))).toContain('输出');
       // Reasoning is billed out of the output, so the row shows it as its own chip.
       expect((await rowChips(page, Math.max(0, index))).join(' ')).toMatch(/R[\d.,]+万?¥/);
     }
@@ -715,13 +728,93 @@ test.describe('layout', () => {
     const hint = await page.locator('aside [title*="I/M"]').first().getAttribute('title');
     expect(hint ?? '').toContain('I/T');
     expect(hint ?? '').toContain('Q ');
-    // The compact sidebar row shows money and tokens only: requests are the least
+    // The compact sidebar row shows money and `T` only: requests are the least
     // useful figure there, and the boards keep them.
-    const row = await page.locator('aside button').filter({ hasText: 'tok' }).first().innerText();
-    expect(row).toContain('tok');
-    expect(row).not.toContain('req');
+    const row = await page.locator('aside button').filter({ hasText: 'T ' }).first().innerText();
+    expect(row).toContain('T ');
+    expect(row).not.toContain('Q ');
     // The sidebar must not have grown a ten-figure line: its rows stay short.
     const rows = await page.locator('aside button').allInnerTexts();
     expect(Math.max(...rows.map((row) => row.split('\n').length))).toBeLessThanOrEqual(8);
+  });
+});
+
+test.describe('the metric vocabulary', () => {
+  /**
+   * The names of the figures, in words, are definitions — they belong in a
+   * `title` tooltip, in the docs and in `--help`, never in the text on screen.
+   * The screen prints the CLI's abbreviations (`Q I/M I/C I/W I/T O R O/T T`),
+   * so a figure on the page is recognisably the one in the terminal.
+   */
+  const IN_WORDS = [
+    '未命中缓存输入',
+    '缓存未命中输入',
+    '未命中缓存的输入',
+    '缓存命中输入',
+    '缓存写入输入',
+    '缓存读取',
+    '输入（未命中缓存）',
+    '输出（不含思考）',
+    '输出（含思考）',
+    '其中思考',
+    '思考（含于输出）',
+    '总 token',
+    'tokens（计费桶）',
+    '缓存命中率',
+    '最后使用',
+    '次请求',
+    '请求数',
+  ];
+
+  /**
+   * Wait for a screen to have drawn its data. The page is a single-page app:
+   * `goto` resolves before the numbers arrive, and an empty page would pass the
+   * checks below for the wrong reason.
+   */
+  async function waitForScreen(page: Page): Promise<void> {
+    await expect(page.locator('main section').first()).toBeVisible();
+    await expect(page.locator('main')).not.toContainText('加载中');
+  }
+
+  /** Check one screen: no definition in the text, no `tok`/`req` beside a figure. */
+  async function expectAbbreviations(page: Page, where: string): Promise<void> {
+    await waitForScreen(page);
+    const text = await page.locator('body').innerText();
+    // A screen that rendered nothing would pass the check below for the wrong
+    // reason, so require a real page that really names its figures.
+    expect(text.length, `${where} has content`).toBeGreaterThan(200);
+    const abbreviations = ['I/M', 'I/C', 'I/W', 'I/T', 'O/T', 'Q', 'T'].filter((name) => text.includes(name));
+    expect(abbreviations.length, `${where} prints abbreviations`).toBeGreaterThanOrEqual(2);
+    for (const name of IN_WORDS) expect(text, `${where} shows 「${name}」`).not.toContain(name);
+    expect(text, `${where} spells out a unit`).not.toMatch(/\btok\b|\breq\b/);
+  }
+
+  test('prints abbreviations in every tab, and the words only on hover', async ({ page }) => {
+    for (const view of ['', '?view=projects', '?view=agents', '?view=sessions', '?view=usage', '?view=models']) {
+      await page.goto(`/${view}`);
+      await expectAbbreviations(page, view === '' ? '概览' : view);
+    }
+
+    // The definitions are still there — one hover away.
+    await page.goto('/?view=usage');
+    await waitForScreen(page);
+    const defs = await page
+      .locator('[title]')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('title') ?? ''));
+    for (const name of ['未命中缓存输入', '缓存命中输入', '缓存写入输入']) {
+      expect(defs.some((def) => def.includes(name)), `「${name}」 is defined somewhere`).toBe(true);
+    }
+  });
+
+  test('prints abbreviations on a session page and in a project scope too', async ({ page }) => {
+    await page.goto('/');
+    const { uid } = await openSession(page);
+    await page.goto(`/s/${encodeURIComponent(uid)}`);
+    await expectAbbreviations(page, '会话详情');
+
+    const projects = await twoProjects(page);
+    await page.goto('/?view=usage');
+    await selectProject(page, projects[0]?.name ?? '');
+    await expectAbbreviations(page, '单个项目');
   });
 });

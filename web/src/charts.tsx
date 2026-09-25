@@ -1,22 +1,23 @@
 /**
  * ECharts, wrapped small.
  *
- * Only the pieces the dashboard draws are registered (line, pie, bar + grid,
- * tooltip, legend), which keeps the bundle near 400 kB instead of the ~1 MB the
- * full `echarts` entry pulls in. The wrapper itself is twenty lines: create once,
- * `setOption` on change, resize with the element.
+ * Only the pieces the dashboard draws are registered (line and bar, plus grid,
+ * tooltip and legend — no pie: sized slices of thirty entries are unreadable),
+ * which keeps the bundle near 400 kB instead of the ~1 MB the full `echarts`
+ * entry pulls in. The wrapper itself is twenty lines: create once, `setOption`
+ * on change, resize with the element.
  */
 
 import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts/core';
-import { BarChart, LineChart, PieChart } from 'echarts/charts';
+import { BarChart, LineChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 
 import type { AgentTotals, TimeseriesBucket, TokenBuckets } from './types';
-import { agentColor, agentLabel, chartTheme, formatCost, formatDayShort, formatTokens, TOKEN_BUCKETS } from './format';
+import { agentColor, agentLabel, chartTheme, formatCost, formatDayShort, formatTokens } from './format';
 
-echarts.use([LineChart, PieChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
 /** Any option ECharts accepts; the concrete shape is per chart below. */
 export type ChartOption = Parameters<echarts.ECharts['setOption']>[0];
@@ -66,76 +67,6 @@ function tooltip(dark: boolean): Record<string, unknown> {
     borderColor: theme.tooltipBorder,
     textStyle: { color: theme.text, fontSize: 12 },
     confine: true,
-  };
-}
-
-/** One agent's slice of the bill. */
-export function agentShareOption(agents: readonly AgentTotals[], symbol: string, dark: boolean): ChartOption {
-  const theme = chartTheme(dark);
-  const data = agents
-    .map((agent) => ({
-      name: agentLabel(agent.id),
-      value: Number(agent.cost.total),
-      itemStyle: { color: agentColor(agent.id) },
-      requests: agent.requests,
-    }))
-    .filter((entry) => entry.value > 0 || entry.requests > 0);
-  return {
-    tooltip: {
-      ...tooltip(dark),
-      trigger: 'item',
-      formatter: (params: { name: string; value: number; percent: number; data: { requests: number } }) =>
-        `${params.name}<br/>费用 ${formatCost(String(params.value), symbol)}（${params.percent}%）<br/>请求 ${formatTokens(
-          params.data.requests,
-        )}`,
-    },
-    legend: { bottom: 0, textStyle: { color: theme.axis, fontSize: 11 }, icon: 'circle' },
-    series: [
-      {
-        type: 'pie',
-        radius: ['52%', '76%'],
-        center: ['50%', '44%'],
-        avoidLabelOverlap: true,
-        itemStyle: { borderWidth: 2, borderColor: dark ? '#10161f' : '#ffffff' },
-        label: { show: false },
-        data,
-      },
-    ],
-  };
-}
-
-/** The four billed buckets as a donut (reasoning is inside output, so it is not a slice). */
-export function tokenDonutOption(tokens: TokenBuckets, dark: boolean): ChartOption {
-  const theme = chartTheme(dark);
-  const colors: Record<string, string> = {
-    input: '#58a6ff',
-    output: '#3fb950',
-    cacheRead: '#a78bfa',
-    cacheWrite: '#f59e0b',
-  };
-  const slices = TOKEN_BUCKETS.filter((bucket) => bucket.key !== 'reasoning').map((bucket) => ({
-    name: bucket.label,
-    value: tokens[bucket.key],
-    itemStyle: { color: colors[bucket.key] },
-  }));
-  return {
-    tooltip: {
-      ...tooltip(dark),
-      trigger: 'item',
-      formatter: (params: { name: string; value: number; percent: number }) =>
-        `${params.name}<br/>${formatTokens(params.value)} tokens（${params.percent}%）`,
-    },
-    legend: { bottom: 0, textStyle: { color: theme.axis, fontSize: 11 }, icon: 'circle' },
-    series: [
-      {
-        type: 'pie',
-        radius: ['52%', '76%'],
-        center: ['50%', '44%'],
-        itemStyle: { borderWidth: 2, borderColor: dark ? '#10161f' : '#ffffff' },
-        label: { show: false },
-        data: slices,
-      },
-    ],
   };
 }
 

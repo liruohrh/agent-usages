@@ -98,7 +98,7 @@ function CompositionBar({
             key={piece.key}
             className="h-full"
             style={{ width: `${(MIN_SEGMENT + share * scale) * 100}%`, backgroundColor: piece.color }}
-            title={`${piece.short} ${piece.label}：${formatTokens(piece.tokens, true)} tokens（占本行 ${formatShare(share)}）· ${formatCost(piece.money, symbol)}`}
+            title={`${piece.label}：${formatTokens(piece.tokens, true)} tokens（占本行 ${formatShare(share)}）· ${formatCost(piece.money, symbol)}`}
           />
         );
       })}
@@ -359,7 +359,7 @@ export const SORT_METRICS: SortMetric[] = [
     value: (entry) => Math.max(0, entry.tokens.output - entry.tokens.reasoning),
   },
   { key: 'reasoning', label: 'R', hint: '思考（输出的一部分，O 里已扣除）', value: (entry) => entry.tokens.reasoning, optional: true },
-  { key: 'tokens', label: '总 token', hint: '计费桶 token 合计', value: (entry) => billedTokens(entry.tokens) },
+  { key: 'tokens', label: 'T', hint: '计费桶 token 合计 = I/T + O/T', value: (entry) => billedTokens(entry.tokens) },
   { key: 'cost', label: '费用', hint: '总费用（缓存命中的钱＝I/C 那一项的钱，不单列）', value: (entry) => Number(entry.cost.total) },
   { key: 'recent', label: '最近', hint: '最后一次计费时间', value: (entry) => entry.lastUsage ?? 0 },
 ];
@@ -387,7 +387,7 @@ export function BucketDetail({
           <tr className="text-[11px] text-faint">
             <th className="pb-1 text-left font-medium">计费桶</th>
             <th className="pb-1 text-right font-medium">tokens</th>
-            <th className="pb-1 text-right font-medium">占比</th>
+            <th className="pb-1 text-right font-medium" title="该项占本行 T 的比例">占 T</th>
             <th className="pb-1 text-right font-medium">费用</th>
           </tr>
         </thead>
@@ -399,10 +399,9 @@ export function BucketDetail({
                   className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle"
                   style={{ backgroundColor: bucket.color }}
                 />
-                <span title={bucket.key === 'reasoning' ? '思考是输出的一部分；输出按整笔计价，这里把它拆开看' : bucket.label}>
-                  {bucket.key === 'output' ? '输出（不含思考）' : bucket.key === 'reasoning' ? '思考' : bucket.label}
+                <span className="tnum" title={bucket.label}>
+                  {bucket.short}
                 </span>
-                <span className="ml-1 text-[10px] text-faint">{bucket.short}</span>
               </td>
               <td className="tnum py-1 text-right">{formatTokens(tokens[bucket.key], true)}</td>
               <td className="tnum py-1 text-right text-muted">
@@ -535,17 +534,17 @@ export function RankedList({
             />
           )}
           <div className="mb-1 border-b border-line pb-2 text-[12px]">
-            <div className="grid items-center gap-3" style={{ gridTemplateColumns: grid }}>
+            <div className="grid items-center gap-3" style={{ gridTemplateColumns: grid }} data-columns>
               <span />
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
                 <span>
                   合计 <span className="tnum text-fg">{formatCost(String(totalCost), symbol)}</span>
                 </span>
                 <span>
-                  <span className="tnum text-fg">{formatTokens(totalTokens, true)}</span> tokens
+                  T <span className="tnum text-fg">{formatTokens(totalTokens, true)}</span>
                 </span>
                 <span>
-                  <span className="tnum text-fg">{formatTokens(totalRequests)}</span> 请求
+                  Q <span className="tnum text-fg">{formatTokens(totalRequests)}</span>
                 </span>
                 <span className="flex flex-wrap items-center gap-x-2.5">
                   {BUCKETS.map((bucket) => (
@@ -559,8 +558,8 @@ export function RankedList({
               <span className="text-right text-faint" title="请求数">
                 Q
               </span>
-              <span className="text-right text-faint" title="计费桶 token 合计">
-                总 token
+              <span className="text-right text-faint" title="计费桶 token 合计 = I/T + O/T">
+                T
               </span>
               <span className="text-right text-faint" title="总费用，后面的小字是占本列表合计的比例">
                 费用
@@ -568,7 +567,7 @@ export function RankedList({
             </div>
             <p className="mt-1.5 text-[11px] leading-5 text-faint" title={BAR_RULE}>
               条 = 这一行自己的 token 构成（整条 100%，<span className="text-muted">不表示大小</span>——大小看右边的数字）；
-              条下是五个计费桶各自的 tokens 与费用。排序用「排序」下拉，当前是「{metric.label}
+              条下是五个计费桶各自的 token 数与费用（缩写同 CLI）。排序用「排序」下拉，当前是「{metric.label}
               {desc ? '降序' : '升序'}」；点一行展开这一行的全部计费桶。
             </p>
           </div>
@@ -689,20 +688,25 @@ interface MetricChip {
 /**
  * The buckets a row is made of, in the CLI's order, each with its own money.
  *
- * Only the five pieces of the pie appear here: the totals (`总 token`, `费用`) are
+ * Only the five pieces of the pie appear here: the totals (`T`, `费用`) are
  * the figures pinned on the right, and cache money is the `I/C` line's money —
  * repeating them beside the chart would say the same number twice.
  */
 function metricChips(entry: RankedEntry, symbol: string): MetricChip[] {
-  const total = billedTokens(entry.tokens);
+  // The share beside `I/C` is the CLI's hit rate, `I/C ÷ I/T` — a share of the
+  // input, which is the figure the ratio is about.
+  const inputTotal = entry.tokens.input + entry.tokens.cacheRead + entry.tokens.cacheWrite;
+  const hit = inputTotal === 0 ? '' : formatShare(entry.tokens.cacheRead / inputTotal);
   return tokenPieces(entry.tokens, entry.cost)
     .filter((piece) => piece.tokens > 0)
     .map((piece) => ({
       key: piece.key,
       label: piece.short,
-      hint: `${piece.label}：${formatTokens(piece.tokens, true)} tokens · ${formatCost(piece.money, symbol)}`,
+      hint: `${piece.label}：${formatTokens(piece.tokens, true)} tokens${
+        piece.key === 'cacheRead' && hit.length > 0 ? `（占 I/T ${hit}）` : ''
+      } · ${formatCost(piece.money, symbol)}`,
       value: formatTokens(piece.tokens, true),
-      ...(piece.key === 'cacheRead' && total > 0 ? { extra: formatShare(piece.tokens / total) } : {}),
+      ...(piece.key === 'cacheRead' && hit.length > 0 ? { extra: hit } : {}),
       money: formatCost(piece.money, symbol),
       color: piece.color,
     }));

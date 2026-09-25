@@ -12,7 +12,7 @@ import type { Dashboard, ProjectSummary, SessionNode, WorkspaceNode } from '../t
 import { formatCost, formatInstant, formatTokens, metricText, shortenPath } from '../format';
 import { AgentBadge, Chip, MoneyTokens } from './Bits';
 
-/** The four billed buckets, which is what the compact tree row counts as "tok". */
+/** The four billed buckets, which is what the compact tree row counts as `T`. */
 function billed(tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }): number {
   return tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
 }
@@ -97,7 +97,7 @@ export function ProjectTree({
         ))}
       </div>
       <div className="border-t border-line px-3 py-1.5 text-[11px] text-faint">
-        共 {formatCost(String(totalCost), symbol)} · {formatTokens(dashboard.totals.requests)} 次请求
+        共 {formatCost(String(totalCost), symbol)} · Q {formatTokens(dashboard.totals.requests)}
       </div>
     </div>
   );
@@ -173,12 +173,12 @@ function ProjectRow({
         <div className="ml-3 space-y-0.5 border-l border-line pl-3 pb-1 text-[12px] text-muted">
           <div>
             自身 <span className="tnum text-fg">{formatCost(project.own.cost.total, symbol)}</span>
-            <span className="text-faint"> · {formatTokens(project.own.requests)} 请求</span>
+            <span className="text-faint"> · Q {formatTokens(project.own.requests)}</span>
           </div>
           {project.spawned.requests > 0 && (
             <div>
               子代理 <span className="tnum text-fg">{formatCost(project.spawned.cost.total, symbol)}</span>
-              <span className="text-faint"> · {formatTokens(project.spawned.requests)} 请求</span>
+              <span className="text-faint"> · Q {formatTokens(project.spawned.requests)}</span>
             </div>
           )}
         </div>

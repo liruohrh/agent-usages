@@ -12,7 +12,7 @@ import { Link } from 'react-router-dom';
 import type { SessionNode } from '../types';
 import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } from '../format';
 import { AgentBadge } from './Bits';
-import { BucketDetail, billedTokens, RankedList, type RankedEntry } from './Ranked';
+import { BucketDetail, RankedList, type RankedEntry } from './Ranked';
 import { SessionTable } from './Tables';
 
 /** The session ranking panel. */
@@ -80,7 +80,7 @@ export function SessionLeaderboard({
               <span className="tnum text-fg">{formatCost(session.spawned.cost.total, symbol)}</span>
             </div>
             <div>
-              请求 <span className="tnum text-fg">{formatTokens(session.requests)}</span>
+              Q <span className="tnum text-fg">{formatTokens(session.requests)}</span>
             </div>
             <Link to={`/s/${encodeURIComponent(session.uid)}`} className="inline-block text-accent hover:underline">
               打开会话详情 →
@@ -128,11 +128,20 @@ export function SessionLeaderboard({
             <>
               {' '}
               合计 {formatCost(String(rows.reduce((sum, session) => sum + Number(session.cost.total), 0)), symbol)}
-              ，缓存命中占{' '}
-              {formatShare(
-                rows.reduce((sum, session) => sum + session.tokens.cacheRead, 0) /
-                  Math.max(1, rows.reduce((sum, session) => sum + billedTokens(session.tokens), 0)),
-              )}
+              ，I/C 占{' '}
+              <span title="I/C ÷ I/T">
+                {formatShare(
+                  rows.reduce((sum, session) => sum + session.tokens.cacheRead, 0) /
+                    Math.max(
+                      1,
+                      rows.reduce(
+                        (sum, session) =>
+                          sum + session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite,
+                        0,
+                      ),
+                    ),
+                )}
+              </span>
               。
             </>
           )}

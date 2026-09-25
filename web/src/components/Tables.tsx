@@ -10,7 +10,16 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
-import type { AgentTotals, BandRow, CostTotals, ModelRow, SessionNode, TokenBreakdown, TokenBuckets } from '../types';
+import type {
+  AgentTotals,
+  BandComponentRow,
+  BandRow,
+  CostTotals,
+  ModelRow,
+  SessionNode,
+  TokenBreakdown,
+  TokenBuckets,
+} from '../types';
 import { agentColor, formatCost, formatInstant, formatShare, formatTokens, shortenPath, TOKEN_BUCKETS } from '../format';
 import { AgentBadge, Card, Chip, ShareBar } from './Bits';
 
@@ -225,12 +234,14 @@ export function AgentTable({
       <p className="mt-2 text-[11px] text-faint">
         {detailed ? (
           <>
-            四个桶互不重叠：<span className="text-muted">I/T = I/M + I/W + I/C</span>，思考含在输出里，
+            四个桶互不重叠：<span className="text-muted">I/T = I/M + I/W + I/C</span>，
+            <span className="text-muted">R</span> 含在 <span className="text-muted">O/T</span> 里，
             <span className="text-muted">O/T = O + R</span>。切到「费用」时每格是该项自己的钱。
           </>
         ) : (
           <>
-            默认只列请求数、tokens 合计、费用与占比；「展开分桶」出现 <span className="text-muted">I/M I/W I/C I/T O R O/T</span>，
+            默认只列 <span className="text-muted">Q</span>、<span className="text-muted">T</span>、费用与占比；
+            「展开分桶」出现 <span className="text-muted">I/M I/W I/C I/T O R O/T</span>，
             并可在数量 / 费用 / 占比之间切换。
           </>
         )}
@@ -514,7 +525,7 @@ const COLUMNS: readonly SessionColumn[] = [
   { key: 'reasoning', label: 'R', kind: 'num', title: '其中思考' },
   { key: 'tokens', label: 'T', kind: 'num', always: true, title: 'token 总计（计费桶）' },
   { key: 'cost', label: '费用', kind: 'num', always: true },
-  { key: 'lastUsage', label: '最后使用', kind: 'num', title: '最后一次计费请求的时间' },
+  { key: 'lastUsage', label: '最近', kind: 'num', title: '最后一次计费请求的时间' },
 ];
 
 /** The kind of every column, for the default sort direction. */
@@ -613,12 +624,16 @@ function SessionCell({
       return num(formatTokens(session.requests));
     case 'inputMiss':
       return num(formatTokens(session.tokens.input, true));
-    case 'cacheRead':
+    case 'cacheRead': {
+      // The share beside `I/C` is the CLI's: how much of the input came from the
+      // cache (`I/C ÷ I/T`), not how much of everything billed.
+      const inputTotal = session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite;
       return num(
         `${formatTokens(session.tokens.cacheRead, true)}${
-          billedTotal(session.tokens) === 0 ? '' : ` (${formatShare(session.tokens.cacheRead / billedTotal(session.tokens))})`
+          inputTotal === 0 ? '' : ` (${formatShare(session.tokens.cacheRead / inputTotal)})`
         }`,
       );
+    }
     case 'cacheWrite':
       return num(formatTokens(session.tokens.cacheWrite, true));
     case 'output':
@@ -673,7 +688,7 @@ export function TokenTable({
               return (
                 <tr key={bucket.key} className="border-b border-line last:border-0">
                   <td className="truncate px-1 py-1" title={bucket.label}>
-                    {bucket.label}
+                    <span className="tnum text-fg">{bucket.short}</span>
                   </td>
                   <Num value={formatTokens(tokens, true)} />
                   <td className="tnum px-2 py-1 text-right text-faint">{formatShare(entry?.share ?? 0)}</td>
@@ -685,7 +700,8 @@ export function TokenTable({
         </table>
       </div>
       <p className="mt-2 text-[11px] text-faint">
-        占比以四个计费桶（输入＋输出＋缓存读＋缓存写）为分母；思考 token 已包含在输出里，不另外计费。
+        占比以四个计费桶为分母（<span className="text-muted">I/T + O/T = T</span>）；
+        <span className="text-muted">R</span> 已经含在 <span className="text-muted">O/T</span> 里，不另外计费。
       </p>
     </Card>
   );
@@ -728,10 +744,10 @@ export function ModelTable({
             <tr className="text-[11px] text-faint">
               <th className="px-2 py-1 text-left font-medium">agent</th>
               <th className="px-2 py-1 text-left font-medium">模型</th>
-              <th className="px-2 py-1 text-right font-medium">请求</th>
-              <th className="px-2 py-1 text-right font-medium">tokens</th>
-              <th className="px-2 py-1 text-right font-medium">费用</th>
-              <th className="px-2 py-1 text-right font-medium">占比</th>
+              <th className="px-2 py-1 text-right font-medium" title="请求数">Q</th>
+              <th className="px-2 py-1 text-right font-medium" title="计费桶 token 合计 = I/T + O/T">T</th>
+              <th className="px-2 py-1 text-right font-medium" title="这个模型的总费用">费用</th>
+              <th className="px-2 py-1 text-right font-medium" title="占当前范围总费用的比例">占比</th>
             </tr>
           </thead>
           <tbody>
@@ -763,6 +779,26 @@ export function ModelTable({
       </div>
     </Card>
   );
+}
+
+/**
+ * The metric a rate-card item bills, in the same vocabulary as the figures above.
+ *
+ * The provider's component id is what makes the mapping possible; an id we do not
+ * know keeps the rate card's own wording, which is the best name available. This
+ * mirrors `COMPONENT_METRICS` in `src/format.ts`, so a band's `I/C` here is the
+ * `I/C` the terminal prints for the same card item.
+ */
+const COMPONENT_METRICS: Readonly<Record<string, string>> = {
+  'input-miss': 'I/M',
+  'input-hit': 'I/C',
+  'input-write': 'I/W',
+  output: 'O/T',
+};
+
+/** The name to print for one rate-card item. */
+function componentMetric(component: BandComponentRow): string {
+  return COMPONENT_METRICS[component.id] ?? component.label;
 }
 
 /**
@@ -803,8 +839,8 @@ export function BandTable({
               <th className="px-2 py-1 text-left font-medium">模型 · 价格区间</th>
               <th className="px-2 py-1 text-left font-medium">生效窗口</th>
               <th className="px-2 py-1 text-left font-medium">档位</th>
-              <th className="px-2 py-1 text-right font-medium">请求</th>
-              <th className="px-2 py-1 text-right font-medium">费用</th>
+              <th className="px-2 py-1 text-right font-medium" title="请求数">Q</th>
+              <th className="px-2 py-1 text-right font-medium" title="这个区间的总费用">费用</th>
             </tr>
           </thead>
           <tbody>
@@ -875,15 +911,15 @@ export function BandTable({
                             {row.components.map((component) => (
                               <tr key={component.id}>
                                 <td className="px-1 py-0.5" title={`${component.label}（${component.id}）`}>
-                                  <div className="cell-title">{component.label}</div>
+                                  <div className="cell-title tnum">{componentMetric(component)}</div>
                                   {component.excess !== undefined && (
                                     <div className="text-[10px] text-warn">
-                                      超出部分 {formatTokens(component.excess.tokens, true)} tok × {component.excess.rate}
+                                      超出 {formatTokens(component.excess.tokens, true)} tokens 部分 {component.excess.rate}
                                     </div>
                                   )}
                                   {component.ttl !== undefined && (
                                     <div className="text-[10px] text-faint">
-                                      {component.ttl.tier} 缓存倍率 ×{component.ttl.multiplier}
+                                      {component.ttl.tier} 缓存写入 ×{component.ttl.multiplier}
                                     </div>
                                   )}
                                 </td>

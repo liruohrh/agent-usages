@@ -14,13 +14,19 @@ import type { CostTotals, TokenBuckets } from '../types';
 import { formatCost, formatShare, formatTokens, metricItems } from '../format';
 import { Card, Chip } from './Bits';
 
-/** The five disjoint buckets, in the order the CLI prints them. */
+/**
+ * The five disjoint buckets, in the order the CLI prints them.
+ *
+ * `short` is the name the reader sees — the CLI's own vocabulary — and `label`
+ * is the definition, kept for `title` tooltips and prose. A screen never prints
+ * both: it prints `I/M` and says 未命中缓存输入 on hover.
+ */
 export const BUCKETS: { key: keyof TokenBuckets; label: string; short: string; color: string }[] = [
   { key: 'input', label: '未命中缓存输入', short: 'I/M', color: '#58a6ff' },
   { key: 'cacheRead', label: '缓存命中输入', short: 'I/C', color: '#a78bfa' },
-  { key: 'cacheWrite', label: '缓存写入', short: 'I/W', color: '#f59e0b' },
-  { key: 'output', label: '输出（含思考）', short: 'O', color: '#34d399' },
-  { key: 'reasoning', label: '其中思考', short: 'R', color: '#f472b6' },
+  { key: 'cacheWrite', label: '缓存写入输入', short: 'I/W', color: '#f59e0b' },
+  { key: 'output', label: '输出（不含思考）', short: 'O', color: '#34d399' },
+  { key: 'reasoning', label: '思考（含在 O/T 里）', short: 'R', color: '#f472b6' },
 ];
 
 /** The money each bucket produced. Reasoning shares the output bill. */
@@ -44,17 +50,10 @@ export interface TokenPiece {
 /** Split a row into the five pieces a bar or a table can draw. */
 export function tokenPieces(tokens: TokenBuckets, cost: CostTotals): TokenPiece[] {
   const money = bucketMoney(tokens, cost);
-  const label: Record<string, string> = {
-    input: '未命中缓存输入',
-    cacheRead: '缓存命中输入',
-    cacheWrite: '缓存写入',
-    output: '输出（不含思考）',
-    reasoning: '思考',
-  };
   return BUCKETS.map((bucket) => ({
     key: bucket.key,
     short: bucket.short,
-    label: label[bucket.key] ?? bucket.label,
+    label: bucket.label,
     color: bucket.color,
     tokens: bucket.key === 'output' ? Math.max(0, tokens.output - tokens.reasoning) : tokens[bucket.key],
     money: money[bucket.key] ?? '0',
@@ -80,8 +79,10 @@ export function subtract(left: string, right: string): string {
 
 /** One headline figure. */
 export interface Kpi {
-  /** What it is. */
+  /** What it is — the CLI's abbreviation, e.g. `Q`, `T`. */
   label: string;
+  /** The definition behind the abbreviation, for hover. */
+  title?: string;
   /** The number itself, already formatted — this is the one big thing. */
   value: string;
   /** What it means, under the number. */
@@ -101,7 +102,9 @@ export function KpiRow({ items }: { items: readonly Kpi[] }): React.ReactElement
           key={item.label}
           className="rounded-xl border border-line bg-panel px-4 py-3.5"
         >
-          <div className="text-[12px] font-medium tracking-wide text-muted">{item.label}</div>
+          <div className="text-[12px] font-medium tracking-wide text-muted" title={item.title ?? item.label}>
+            {item.label}
+          </div>
           <div
             className={`mt-1.5 text-[26px] font-semibold leading-none tracking-tight tnum ${item.tone === 'accent' ? 'text-accent' : 'text-fg'}`}
             title={item.value}
@@ -154,7 +157,7 @@ export function Composition({
               key={piece.key}
               className="h-full"
               style={{ width: `${share * 100}%`, backgroundColor: piece.color }}
-              title={`${piece.short} ${piece.label}：${formatShare(share)}`}
+              title={`${piece.label}：占 ${formatShare(share)}`}
             />
           );
         })}
@@ -173,7 +176,7 @@ export function Composition({
           <tr className="text-[11px] text-faint">
             <th className="pb-1 text-left font-medium">计费桶</th>
             <th className="pb-1 text-right font-medium">tokens</th>
-            <th className="pb-1 text-right font-medium">占比</th>
+            <th className="pb-1 text-right font-medium" title="该项占本行 T 的比例">占 T</th>
             <th className="pb-1 text-right font-medium">费用</th>
           </tr>
         </thead>
@@ -184,10 +187,9 @@ export function Composition({
               <tr key={piece.key} className="border-t border-line">
                 <td className="py-1.5">
                   <span className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ backgroundColor: piece.color }} />
-                  <span className="text-fg" title={piece.key === 'reasoning' ? '思考是输出的一部分，不另行计费' : piece.label}>
-                    {piece.label}
+                  <span className="tnum text-fg" title={piece.label}>
+                    {piece.short}
                   </span>
-                  <span className="ml-1 text-[10px] text-faint">{piece.short}</span>
                 </td>
                 <td className="tnum py-1.5 text-right">{formatTokens(piece.tokens, true)}</td>
                 <td className="tnum py-1.5 text-right text-muted">{formatShare(share)}</td>
@@ -198,8 +200,8 @@ export function Composition({
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-faint">
-        条长按占比：上图按 token，下图按费用。五项互不重叠（I/M + I/C + I/W + O + R = 全部），
-        其中 O 是"输出里不算思考的那部分"。合计{' '}
+        条长按占比：上图按 T，下图按费用。五项互不重叠且加起来正好是{' '}
+        <span className="text-muted">T</span>（I/M + I/C + I/W + O + R = T，其中 O = O/T − R）。合计{' '}
         <span className="tnum text-muted">{formatTokens(totalTokens, true)}</span> tokens ·{' '}
         <span className="tnum text-muted">{formatCost(cost.total, symbol)}</span>
       </p>
@@ -243,12 +245,12 @@ export function ScopeSplitTable({
         <thead>
           <tr className="text-[11px] text-faint">
             <th className="pb-1 text-left font-medium">范围</th>
-            <th className="pb-1 text-right font-medium">请求</th>
-            <th className="pb-1 text-right font-medium">输入</th>
-            <th className="pb-1 text-right font-medium">输出</th>
-            <th className="pb-1 text-right font-medium">缓存命中</th>
-            <th className="pb-1 text-right font-medium">tokens</th>
-            <th className="pb-1 text-right font-medium">费用</th>
+            <th className="pb-1 text-right font-medium" title="请求数">Q</th>
+            <th className="pb-1 text-right font-medium" title="输入合计 = I/M + I/C + I/W">I/T</th>
+            <th className="pb-1 text-right font-medium" title="输出合计 = O + R">O/T</th>
+            <th className="pb-1 text-right font-medium" title="缓存命中输入 ÷ 输入合计（I/C ÷ I/T）">I/C 占比</th>
+            <th className="pb-1 text-right font-medium" title="计费桶 token 合计 = I/T + O/T">T</th>
+            <th className="pb-1 text-right font-medium" title="这个范围的总费用">费用</th>
           </tr>
         </thead>
         <tbody>
@@ -271,7 +273,8 @@ export function ScopeSplitTable({
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-faint">
-        子代理占 {formatShare(spawnedShare)}；与 CLI 的 <code>usage --subagent</code> 同一口径。
+        子代理占 {formatShare(spawnedShare)}；与 CLI 的 <code>usage --subagent</code> 同一口径，缩写也同 CLI
+        （<span className="text-muted">Q I/M I/C I/W I/T O R O/T T</span>）。
       </p>
     </Card>
   );

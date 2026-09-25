@@ -133,8 +133,8 @@ export function MoneyTokens({
   return (
     <span className="tnum shrink-0 text-right text-[11px] text-muted" title={hint}>
       <span className="text-fg">{formatCost(cost, symbol)}</span>
-      <span className="text-faint"> · {formatTokens(tokens, true)} tok</span>
-      {requests !== undefined && <span className="text-faint"> · {formatTokens(requests)} req</span>}
+      <span className="text-faint"> · T {formatTokens(tokens, true)}</span>
+      {requests !== undefined && <span className="text-faint"> · Q {formatTokens(requests)}</span>}
     </span>
   );
 }

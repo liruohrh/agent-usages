@@ -6,7 +6,7 @@
  * weight as the price-band detail. Now a tab answers one question, and the URL
  * carries it (`?view=usage`), so a link can point at a section.
  *
- * 概览   费用、请求、token、缓存命中率，加上构成与时序
+ * 概览   费用、Q、T、I/C 占比，加上构成与时序
  * 项目   项目（或一个项目里的工作区）排行榜：同一套条形 + 展开全部计费桶
  * agent  被读到的 agent 排行榜，同样可排序、可展开
  * 会话   会话排行榜（可切换含子代理，或切表格视图）

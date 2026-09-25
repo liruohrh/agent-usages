@@ -47,7 +47,10 @@ export function Overview({
   const subagents = project === null ? dashboard.totals.subagentSessions : project.subagentSessions;
   const agents = project === null ? dashboard.agents : project.agentTotals;
   const billed = tokens.input + tokens.cacheRead + tokens.cacheWrite + tokens.output;
-  const cacheHit = billed === 0 ? 0 : tokens.cacheRead / billed;
+  // The hit rate is a share of the *input* (`I/C ÷ I/T`), which is the ratio the
+  // CLI prints beside `I/C` — not a share of everything that was billed.
+  const inputTotal = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  const cacheHit = inputTotal === 0 ? 0 : tokens.cacheRead / inputTotal;
   const unpriced = project === null ? dashboard.totals.unpriced : project.unpriced;
   const firstUsage = project === null ? dashboard.totals.firstUsage : project.firstUsage;
   const lastUsage = project === null ? dashboard.totals.lastUsage : project.lastUsage;
@@ -60,27 +63,31 @@ export function Overview({
         items={[
           {
             label: '费用',
+            title: '当前范围的总费用',
             value: formatCost(cost.total, symbol),
             hint: `${dashboard.currency} · ${dashboard.pricingLabel}`,
             tone: 'accent',
           },
           {
-            label: '请求',
+            label: 'Q',
+            title: '请求数',
             value: formatTokens(requests),
             hint: `${sessions} 个会话（含 ${subagents} 个子代理）`,
             ...(unpriced > 0 ? { note: `未计价 ${unpriced}` } : {}),
           },
           {
-            label: 'tokens（计费桶）',
+            label: 'T',
+            title: '计费桶 token 合计 = I/T + O/T',
             value: formatTokens(billed, true),
-            hint: `思考 ${formatTokens(tokens.reasoning, true)}`,
-            ...(tokens.cacheWrite > 0 ? { note: `缓存写入 ${formatTokens(tokens.cacheWrite, true)}` } : {}),
+            ...(tokens.reasoning > 0 ? { hint: `R ${formatTokens(tokens.reasoning, true)}` } : {}),
+            ...(tokens.cacheWrite > 0 ? { note: `I/W ${formatTokens(tokens.cacheWrite, true)}` } : {}),
           },
           {
-            label: '缓存命中率',
+            label: 'I/C 占比',
+            title: '缓存命中输入 ÷ 输入合计（I/C ÷ I/T）',
             value: formatShare(cacheHit),
-            hint: `${formatTokens(tokens.cacheRead, true)} 来自缓存`,
-            note: `${formatTokens(billed, true)} 计费桶`,
+            hint: `I/C ${formatTokens(tokens.cacheRead, true)}`,
+            note: `I/T ${formatTokens(inputTotal, true)}`,
           },
         ]}
       />
@@ -110,8 +117,8 @@ export function Overview({
                   {(
                     [
                       { key: 'cost', label: '费用' },
-                      { key: 'requests', label: '请求' },
-                      { key: 'tokens', label: 'tokens' },
+                      { key: 'requests', label: 'Q' },
+                      { key: 'tokens', label: 'T' },
                     ] as const
                   ).map((option) => (
                     <button
