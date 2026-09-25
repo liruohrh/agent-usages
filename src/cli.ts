@@ -2,11 +2,12 @@
 /**
  * `agent-usages` — usage and cost reporting for coding agents.
  *
- * Four commands:
+ * Five commands:
  *   - `usage`        — token consumption and cost, by all / project / session
  *   - `session list` — the project-and-session inventory, newest first
  *   - `price`        — the price list the cost calculation uses
  *   - `agents`       — which agents and pricing sources this build supports
+ *   - `serve`        — the local web analysis platform over the same data
  *
  * The tool is deliberately two-axis: `--agent` picks where usage is read from,
  * `--provider` picks whose price list turns it into money. Neither axis knows
@@ -27,7 +28,7 @@ import {
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
 import { resolveLanguage, setLanguage, t } from './i18n/index.ts';
-import { renderDiagnostic, type Warning } from './i18n/errors.ts';
+import { renderDiagnostic, UserError, type Warning } from './i18n/errors.ts';
 import { mergeDatasets } from './core/merge.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
@@ -87,6 +88,21 @@ interface UsageOptions extends GlobalOptions {
   html?: string | boolean;
 }
 
+/** Options accepted by `serve`. */
+interface ServeOptions extends GlobalOptions {
+  port?: number;
+  host?: string;
+  open?: boolean;
+  refresh?: number;
+  /** `--dev [target]`: `true` for the default Vite address, or the target itself. */
+  dev?: boolean | string;
+  devTarget?: string;
+  snapshot?: string;
+  quiet?: boolean;
+  /** Write one snapshot and exit instead of listening. */
+  writeSnapshot?: string;
+}
+
 /** A dataset plus everything needed to price and describe it. */
 interface Loaded {
   /** Every agent's data, merged into one dataset. */
@@ -108,6 +124,29 @@ function parseRateOption(value: string): string {
     throw new InvalidArgumentError(renderDiagnostic('rateNotPositiveDecimal', { value: JSON.stringify(value) }));
   }
   return value.trim();
+}
+
+/**
+ * Validate `--port`: 0 is legal, because it asks the OS for a free port.
+ *
+ * @param value - whatever followed the flag.
+ * @returns the port number.
+ */
+function parsePortOption(value: string): number {
+  const port = Number(value.trim());
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new InvalidArgumentError(renderDiagnostic('servePortNotInteger', { value: JSON.stringify(value) }));
+  }
+  return port;
+}
+
+/** Validate `--refresh`: seconds between rescans, where 0 switches them off. */
+function parseRefreshOption(value: string): number {
+  const seconds = Number(value.trim());
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    throw new InvalidArgumentError(renderDiagnostic('serveRefreshNotSeconds', { value: JSON.stringify(value) }));
+  }
+  return seconds;
 }
 
 /**
@@ -672,6 +711,79 @@ function runAgents(options: GlobalOptions): void {
 }
 
 /**
+ * The `serve` command implementation.
+ *
+ * The web stack is imported here rather than at the top of the file: `usage` is
+ * the command that runs on every shell prompt, and it should not pay to load
+ * Express for a report it never serves.
+ *
+ * @param options - the command line, already merged with the global options.
+ */
+async function runServe(options: ServeOptions): Promise<void> {
+  // `--provider` and `--json` are program-level options, so commander accepts
+  // them before the subcommand name. A platform that quietly ignored them would
+  // answer with a different price list or a different rendering than the one
+  // asked for, so they are refused instead.
+  if (options.provider !== undefined) throw new UserError('serveOptionUnsupported', { option: '--provider' });
+  if (options.json === true) throw new UserError('serveOptionUnsupported', { option: '--json' });
+
+  const { openStore, startServer } = await import('./serve/index.ts');
+  const scan = {
+    ...(options.agent === undefined ? {} : { agent: options.agent.join(',') }),
+    ...(options.home === undefined ? {} : { home: options.home }),
+    ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
+    // Unlike the library default, the command follows the CLI's convention: the
+    // price list and the rates are refreshed when they are stale, unless the run
+    // says `--no-update`.
+    noUpdate: options.update === false,
+  };
+
+  if (options.writeSnapshot !== undefined) {
+    const store = await openStore(scan);
+    const dashboard = store.dashboard();
+    await store.writeSnapshot(options.writeSnapshot);
+    process.stdout.write(
+      `${t().serve.snapshotWritten(
+        options.writeSnapshot,
+        String(dashboard.projects.length),
+        String(dashboard.totals.requests),
+      )}\n`,
+    );
+    return;
+  }
+
+  // `--dev-target` says where the proxy should point, which only means anything
+  // in dev mode; passing it turns `--dev` on rather than being silently ignored.
+  const devTarget = typeof options.dev === 'string' ? options.dev : options.devTarget;
+  const dev = (options.dev !== undefined && options.dev !== false) || devTarget !== undefined;
+  // The front end is looked for in the repo's `web/dist`; the variable lets a
+  // packaged install — or a test — point somewhere else, and it has to work
+  // through this entry point as well as through `node src/serve/main.ts`.
+  const webRoot = process.env['AGENT_USAGES_WEB_DIST'];
+  const running = await startServer({
+    ...scan,
+    port: options.port ?? 7788,
+    host: options.host ?? '127.0.0.1',
+    open: options.open === true,
+    quiet: options.quiet === true,
+    dev,
+    ...(options.refresh === undefined ? {} : { refresh: options.refresh }),
+    ...(devTarget === undefined ? {} : { devTarget }),
+    ...(webRoot === undefined ? {} : { webRoot }),
+  });
+
+  // Ctrl-C is how a server is normally stopped. Waiting for it is the whole
+  // point of the command; closing the listener first lets a request in flight
+  // finish rather than dropping it.
+  await new Promise<void>((resolvePromise) => {
+    const stop = (): void => resolvePromise();
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
+  await running.close();
+}
+
+/**
  * Accumulate a repeatable option, splitting commas.
  *
  * `--agent dsh,codex` and `--agent dsh --agent codex` mean the same thing; both
@@ -771,6 +883,28 @@ export function buildProgram(): Command {
       runAgents(withGlobals(command, options));
     },
   );
+
+  // `serve` takes the options that decide *what* is read plus its own hosting
+  // ones; `--json` and `--provider` describe a rendering and a price list, which
+  // a running platform does not have, so they are deliberately not accepted.
+  program
+    .command('serve')
+    .description(t().help.serve)
+    .option('--agent <id>', t().help.agent, collectList)
+    .option('--home <dir>', t().help.home)
+    .option('--no-update', t().help.noUpdate)
+    .option('-p, --port <port>', t().help.servePort, parsePortOption)
+    .option('--host <address>', t().help.serveHost)
+    .option('--open', t().help.serveOpen)
+    .option('--refresh <seconds>', t().help.serveRefresh, parseRefreshOption)
+    .option('--snapshot <file>', t().help.serveSnapshot)
+    .option('--dev [target]', t().help.serveDev)
+    .option('--dev-target <url>', t().help.serveDevTarget)
+    .option('-q, --quiet', t().help.serveQuiet)
+    .option('--write-snapshot <file>', t().help.serveWriteSnapshot)
+    .action(async (options: ServeOptions, command: Command) => {
+      await runServe(withGlobals(command, options));
+    });
 
   return program;
 }

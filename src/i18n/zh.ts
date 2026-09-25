@@ -169,6 +169,32 @@ export const zh = {
   check: {
     passed: '通过',
   },
+  /** What `serve` prints around the running platform. */
+  serve: {
+    /** `agent-usages serve: http://127.0.0.1:7788` — the line that is the point. */
+    started: (url: string) => `agent-usages serve: ${url}`,
+    sourceLive: (source: string) => `  数据：实时扫描 ${source}`,
+    sourceSnapshot: (source: string) => `  数据：快照 ${source}`,
+    /** `  agent：dsh、codex｜扫到项目 7 个，用时 2692 ms`. */
+    scanLine: (agents: string, projects: string, ms: string) => `  agent：${agents}｜扫到项目 ${projects} 个，用时 ${ms} ms`,
+    noAgents: '（无）',
+    /** `agent-usages serve: 已重扫（1120 ms，4 个 agent）`. */
+    rescanned: (ms: string, agents: string) => `agent-usages serve: 已重扫（${ms} ms，${agents} 个 agent）`,
+    refreshEvery: (seconds: string) => `  每 ${seconds} 秒重扫一次`,
+    devProxy: (target: string) => `  前端：开发模式，代理到 ${target}`,
+    /** `agent-usages serve: 已写入快照 <path>（7 个项目，7993 次请求）`. */
+    snapshotWritten: (path: string, projects: string, requests: string) =>
+      `agent-usages serve: 已写入快照 ${path}（${projects} 个项目，${requests} 次请求）`,
+    /** `serve --write-snapshot` without a file to write to. */
+    snapshotNeedsPath: '--write-snapshot 需要一个写入路径',
+    /** The front end was never built: a page that says so beats a bare 404. */
+    webNotBuilt: '前端还没构建',
+    webNotBuiltHint: (build: string, dev: string) =>
+      `先运行 ${build}，或用 ${dev} 配合 Vite 开发服务器；API 本身已经可用：`,
+    webNotBuiltLooking: (path: string) => `找的是：${path}`,
+    /** `EADDRINUSE` — the one startup failure a user can act on. */
+    portInUse: (port: string) => `端口 ${port} 已被占用；换一个 --port，或先关掉占用它的进程。`,
+  },
   /** Command descriptions and option help. */
   help: {
     program: '统计 coding agent 的 token 消耗与费用',
@@ -206,6 +232,16 @@ export const zh = {
     updateForce: '忽略"今天已经检查过"，立即检查',
     updateWrite: '把拉到的汇率写回仓库的 config/rates.json，供 review 后提交',
     checkConfig: '校验 config/ 下的价格表与汇率表（改完提交前跑一次）',
+    serve: '起本地 Web 分析平台：项目/工作区/会话/子代理树，按 agent 分列与总计，时间序列与计价明细（只读）',
+    servePort: '监听端口（默认 7788；0 表示随机空闲端口）',
+    serveHost: '绑定地址（默认 127.0.0.1，只在本机可访问）',
+    serveOpen: '启动后用系统浏览器打开',
+    serveRefresh: '每隔多少秒重扫一次（默认不重扫）',
+    serveSnapshot: '读离线 JSON 快照，不扫描任何 agent 数据',
+    serveDev: '前端走 Vite 开发服务器（默认代理到 127.0.0.1:5173），配合 `pnpm --filter web dev` 做热更新',
+    serveDevTarget: '--dev 代理的目标地址（给出即隐含 --dev）',
+    serveQuiet: '不打印启动信息（脚本里起服务用）',
+    serveWriteSnapshot: '扫一次并把整份仪表盘写成快照 JSON，然后退出',
   },
   /** The session inventory. */
   list: {
@@ -380,6 +416,11 @@ export const zh = {
     noUsageData: (p: { home: string; known: string }) =>
       `在 ${p.home} 没有找到可统计的用量数据；可用 --agent / --home 指定（当前支持：${p.known}）`,
     defaultLocation: '默认位置',
+    /* ---- serve ---- */
+    servePortNotInteger: (p: { value: string }) => `--port 需要 0…65535 的整数，收到 ${p.value}`,
+    serveRefreshNotSeconds: (p: { value: string }) => `--refresh 需要非负秒数，收到 ${p.value}`,
+    serveOptionUnsupported: (p: { option: string }) =>
+      `serve 不接受 ${p.option}：仪表盘的计价来源按 agent 自动选择，输出固定是网页与 JSON API；去掉这个参数再试`,
     /* ---- billed components ---- */
     basisInput: '缓存未命中输入',
     basisOutput: '输出',

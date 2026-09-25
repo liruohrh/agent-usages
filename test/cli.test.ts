@@ -6,7 +6,8 @@
  * how the two extension axes (`--agent`, `--provider`) are selected.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { formatDecimal, parseDecimal, sumAmounts } from '../src/core/money.ts';
 
 const run = promisify(execFile);
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'cli.ts');
@@ -674,7 +677,7 @@ describe('help', () => {
   it('documents every command', async () => {
     const { code, stdout } = await cli(['--help']);
     expect(code).toBe(0);
-    for (const command of ['usage', 'session', 'price', 'agents']) expect(stdout).toContain(command);
+    for (const command of ['usage', 'session', 'price', 'agents', 'serve']) expect(stdout).toContain(command);
     expect(stdout).toContain('--agent');
     expect(stdout).toContain('--provider');
   });
@@ -686,6 +689,200 @@ describe('help', () => {
     expect(stdout).toContain('--html [path]');
     expect(stdout).toContain('自包含');
   });
+});
+
+describe('serve', () => {
+  /** Wait for the child to print something matching `pattern`, and answer with it. */
+  function firstMatch(child: ChildProcess, pattern: RegExp, timeoutMs = 30_000): Promise<string> {
+    return new Promise((resolvePromise, reject) => {
+      let seen = '';
+      let settled = false;
+      const finish = (error?: Error, value?: string): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error !== undefined) reject(error);
+        else resolvePromise(value ?? '');
+      };
+      const timer = setTimeout(() => finish(new Error(`nothing matched ${String(pattern)} yet:\n${seen}`)), timeoutMs);
+      child.stdout?.on('data', (chunk: Buffer) => {
+        seen += chunk.toString();
+        const match = seen.match(pattern);
+        if (match !== null) finish(undefined, match[0]);
+      });
+      child.once('exit', (code) => finish(new Error(`serve exited early (${String(code)}):\n${seen}`)));
+    });
+  }
+
+  /** Start the platform against the fixture, exactly as the command line would. */
+  function startServe(args: string[], env: Record<string, string> = {}): ChildProcess {
+    return spawn(process.execPath, [CLI, 'serve', ...args], {
+      env: { ...process.env, LANG: 'zh_CN.UTF-8', HOME: home, DSH_HOME: join(home, '.dsh'), ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  /** Ask a running server to stop, the way Ctrl-C does, and wait for it to go. */
+  async function stop(child: ChildProcess): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const ended = once(child, 'exit');
+    child.kill('SIGINT');
+    await ended;
+  }
+
+  /**
+   * A snapshot of the fixture, written once for the whole file.
+   *
+   * Written by the command itself, so the round trip `--write-snapshot` →
+   * `--snapshot` is what every test here exercises.
+   */
+  let snapshotFile: string | undefined;
+  async function fixtureSnapshot(): Promise<string> {
+    if (snapshotFile !== undefined) return snapshotFile;
+    const target = join(home, 'serve-fixture.snapshot.json');
+    const written = await cli([
+      'serve',
+      '--agent',
+      'dsh',
+      '--home',
+      join(home, '.dsh'),
+      '--no-update',
+      '--write-snapshot',
+      target,
+    ]);
+    expect(written.code).toBe(0);
+    expect(written.stdout).toContain('已写入快照');
+    snapshotFile = target;
+    return target;
+  }
+
+  it('documents the platform and every option it takes', async () => {
+    const { code, stdout } = await cli(['serve', '--help']);
+    expect(code).toBe(0);
+    expect(stdout).toContain('Web 分析平台');
+    for (const flag of ['--port', '--host', '--open', '--refresh', '--snapshot', '--dev', '--quiet', '--write-snapshot']) {
+      expect(stdout).toContain(flag);
+    }
+  });
+
+  it('refuses a port, a refresh interval, and options it does not have', async () => {
+    const port = await cli(['serve', '--port', '70000']);
+    expect(port.code).toBe(1);
+    expect(port.stderr).toContain('0…65535');
+
+    const refresh = await cli(['serve', '--refresh', '-1']);
+    expect(refresh.code).toBe(1);
+    expect(refresh.stderr).toContain('非负秒数');
+
+    // `--json` and `--provider` are global, so commander takes them before the
+    // subcommand name; a platform that ignored them would answer with someone
+    // else's price list, so they are refused rather than dropped.
+    const json = await cli(['--json', 'serve', '--port', '0']);
+    expect(json.code).toBe(1);
+    expect(json.stderr).toContain('serve 不接受 --json');
+
+    const provider = await cli(['--provider', 'deepseek', 'serve', '--port', '0']);
+    expect(provider.code).toBe(1);
+    expect(provider.stderr).toContain('serve 不接受 --provider');
+  });
+
+  it('writes a snapshot that needs no agent data to serve', async () => {
+    const file = await fixtureSnapshot();
+    const snapshot = JSON.parse(await readFile(file, 'utf8')) as {
+      projects: unknown[];
+      totals: { requests: number };
+    };
+    expect(snapshot.projects.length).toBeGreaterThan(0);
+    expect(snapshot.totals.requests).toBeGreaterThan(0);
+  });
+
+  it(
+    'narrows a snapshot to the agents --agent names',
+    async () => {
+      const file = await fixtureSnapshot();
+
+      // An unknown id is an error here too: the flag must not be accepted and
+      // then ignored just because the data came from a file.
+      const unknown = await cli(['serve', '--snapshot', file, '--agent', 'nosuch', '--port', '0']);
+      expect(unknown.code).toBe(1);
+      expect(unknown.stderr).toContain('未知的 agent');
+
+      // The file holds dsh only, so asking for pi is an empty dashboard rather
+      // than the whole file: that is the difference the flag makes.
+      const other = startServe(['--snapshot', file, '--agent', 'pi', '--port', '0']);
+      try {
+        const url = await firstMatch(other, /http:\/\/127\.0\.0\.1:\d+/);
+        const summary = (await (await fetch(`${url}/api/summary`)).json()) as {
+          agents: unknown[];
+          totals: { requests: number };
+        };
+        expect(summary.agents).toEqual([]);
+        expect(summary.totals.requests).toBe(0);
+      } finally {
+        await stop(other);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'serves the front end from AGENT_USAGES_WEB_DIST when it is set',
+    async () => {
+      // The packaged build may put the bundle elsewhere, and the variable has to
+      // work through the CLI entry point too — not only through `pnpm serve`.
+      const child = startServe(['--snapshot', await fixtureSnapshot(), '--port', '0'], {
+        AGENT_USAGES_WEB_DIST: join(home, 'no-such-dist'),
+      });
+      try {
+        const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
+        const page = await fetch(`${url}/`);
+        expect(page.status).toBe(503);
+        expect(await page.text()).toContain('前端还没构建');
+        // The API is independent of where the front end lives.
+        expect((await (await fetch(`${url}/api/health`)).json()) as { ok: boolean }).toMatchObject({ ok: true });
+      } finally {
+        await stop(child);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'answers the API with figures that add up, then stops on a signal',
+    async () => {
+      const child = startServe(['--port', '0', '--agent', 'dsh', '--home', join(home, '.dsh'), '--no-update']);
+      try {
+        const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
+        const health = (await (await fetch(`${url}/api/health`)).json()) as {
+          ok: boolean;
+          agents: { id: string }[];
+        };
+        expect(health.ok).toBe(true);
+        expect(health.agents.map((agent) => agent.id)).toEqual(['dsh']);
+
+        const summary = (await (await fetch(`${url}/api/summary`)).json()) as {
+          agents: { requests: number; tokens: { input: number }; cost: { total: string } }[];
+          totals: { requests: number; tokens: { input: number }; cost: { total: string } };
+        };
+        expect(summary.totals.requests).toBeGreaterThan(0);
+        // The identity the whole dashboard rests on: the agents *are* the total.
+        expect(summary.agents.reduce((sum, agent) => sum + agent.requests, 0)).toBe(summary.totals.requests);
+        expect(summary.agents.reduce((sum, agent) => sum + agent.tokens.input, 0)).toBe(summary.totals.tokens.input);
+        expect(formatDecimal(sumAmounts(summary.agents.map((agent) => parseDecimal(agent.cost.total))), 4)).toBe(
+          summary.totals.cost.total,
+        );
+
+        // A snapshot the server cannot refresh is a client error, not a crash.
+        const unknown = await fetch(`${url}/api/nope`);
+        expect(unknown.status).toBe(404);
+        expect(unknown.headers.get('content-type')).toContain('application/json');
+      } finally {
+        await stop(child);
+      }
+      expect(child.exitCode).toBe(0);
+    },
+    30_000,
+  );
 });
 
 describe('configuration commands', () => {

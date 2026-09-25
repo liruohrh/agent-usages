@@ -110,8 +110,10 @@ agent-usages usage --provider deepseek
 
 ```bash
 pnpm install
-pnpm test        # vitest，477 个用例
+pnpm test        # vitest，488 个用例
 pnpm typecheck   # tsc --noEmit
+pnpm --filter web build   # 前端（serve 要用；改了 web/ 就跑）
+pnpm web:smoke            # 服务端端到端冒烟（加 --live 连真实数据）
 ```
 
 测试按层组织：
@@ -129,8 +131,9 @@ pnpm typecheck   # tsc --noEmit
 | `test/unit/git.test.ts` | 仓库识别：主工作区、worktree、子模块、仓库内子目录、相对 `gitdir`、detached HEAD、不在仓库里 |
 | `test/agents/pi.test.ts` | pi 适配器：消息级用量、标题取最后一个 `session_info`、子 agent 目录识别 |
 | `test/agents/dsh.test.ts` | DSH 适配器：逐请求用量提取、项目归组、委派树重建、多帧 zstd 日志读取、无 storages 时的合成项目、归档标记、仓库归属 |
-| `test/cli.test.ts` | 端到端：真正拉起进程，校验 JSON 结构、退出码、`--agent`/`--provider` 选择 |
+| `test/cli.test.ts` | 端到端：真正拉起进程，校验 JSON 结构、退出码、`--agent`/`--provider` 选择、`serve` 起停与接口加性 |
 | `test/cli-agents.test.ts` | 端到端（多 agent）：DSH + Claude Code 双份数据、`--agent all`/逗号/重复、`--html` 到 stdout、配置项目并入与非法配置提示 |
+| `web/scripts/smoke.mjs` | 服务端端到端：起真实 HTTP 服务打每个接口，断言加性恒等式与 404/409 语义 |
 
 `test/support/` 提供合成数据集与**合成价格表**（`stub-pricing.ts`），因此机制类测试不依赖任何真实厂商或 agent 的文件格式。
 
@@ -171,7 +174,17 @@ src/
 ├── timerange.ts           时间范围解析
 ├── format.ts              纯排版：token 树、计价区间、JSON 序列化（不读价格表）
 ├── html.ts                纯排版：单文件 HTML 报告（内联样式与 SVG，无脚本）
-└── cli.ts                 命令行入口
+├── i18n/                  文案目录（zh 是源、en 按类型对齐）与带 code 的诊断
+├── serve/                 本地 Web 分析平台的服务端（只读 HTTP + 前端静态托管）
+│   ├── data.ts            逐 adapter 读盘 → merge.ts 合并 → runQuery → 仪表盘 JSON
+│   ├── server.ts          Express 应用、startServer()、`--dev` 代理
+│   ├── types.ts           API 与快照的字段契约
+│   └── main.ts            不经过 CLI 的裸入口（`node src/serve/main.ts`）
+└── cli.ts                 命令行入口（`serve` 子命令在这一层接线）
 ```
+
+`web/` 是唯一的工作区包（Vite + React + Tailwind + ECharts），只依赖 `src/serve/types.ts`
+的 HTTP 契约，不 import 服务端代码；构建产物 `web/dist` 由 `serve` 静态托管。设计、API 与
+快照格式见 [本地 Web 分析平台](web.md)。
 
 `src/index.ts`、`src/agents/index.ts`、`src/pricing/index.ts` 是库入口，可以只作为依赖使用而不走 CLI。

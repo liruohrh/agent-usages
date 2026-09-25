@@ -130,6 +130,25 @@ export const en: Messages = {
   check: {
     passed: 'ok',
   },
+  serve: {
+    started: (url: string) => `agent-usages serve: ${url}`,
+    sourceLive: (source: string) => `  data: live scan of ${source}`,
+    sourceSnapshot: (source: string) => `  data: snapshot ${source}`,
+    scanLine: (agents: string, projects: string, ms: string) =>
+      `  agents: ${agents} | ${projects} projects scanned in ${ms} ms`,
+    noAgents: '(none)',
+    rescanned: (ms: string, agents: string) => `agent-usages serve: rescanned (${ms} ms, ${agents} agents)`,
+    refreshEvery: (seconds: string) => `  rescanning every ${seconds}s`,
+    devProxy: (target: string) => `  front end: dev mode, proxying to ${target}`,
+    snapshotWritten: (path: string, projects: string, requests: string) =>
+      `agent-usages serve: wrote snapshot ${path} (${projects} projects, ${requests} requests)`,
+    snapshotNeedsPath: '--write-snapshot needs a path to write to',
+    webNotBuilt: 'The front end is not built yet',
+    webNotBuiltHint: (build: string, dev: string) =>
+      `Run ${build} first, or use ${dev} with the Vite dev server. The API itself is already up:`,
+    webNotBuiltLooking: (path: string) => `Looking for: ${path}`,
+    portInUse: (port: string) => `port ${port} is already in use; pick another --port or stop the process holding it`,
+  },
   help: {
     program: 'Token usage and cost for coding agents',
     agent: 'agent (defaults to all: every installed agent; comma-separate or repeat, e.g. `dsh,codex`)',
@@ -166,6 +185,17 @@ export const en: Messages = {
     updateForce: 'ignore "already checked today" and check now',
     updateWrite: 'write the fetched rates back to config/rates.json, for review and commit',
     checkConfig: 'validate the price and rate files under config/ (run before committing)',
+    serve:
+      'run the local web analysis platform: a project / workspace / session / subagent tree, per-agent and total figures, time series and pricing detail (read-only)',
+    servePort: 'port to listen on (default 7788; 0 picks a free one)',
+    serveHost: 'interface to bind (default 127.0.0.1, reachable from this machine only)',
+    serveOpen: 'open the dashboard in the system browser once it is listening',
+    serveRefresh: 'seconds between automatic rescans (default: never)',
+    serveSnapshot: 'read an offline JSON snapshot instead of scanning any agent data',
+    serveDev: 'serve the front end from the Vite dev server (default 127.0.0.1:5173); pair with `pnpm --filter web dev` for hot reload',
+    serveDevTarget: 'what --dev proxies to (giving it implies --dev)',
+    serveQuiet: 'do not print the startup lines (for scripts that start the server)',
+    serveWriteSnapshot: 'scan once, write the whole dashboard as a snapshot JSON, and exit',
   },
   list: {
     projects: 'Projects',
@@ -322,6 +352,10 @@ export const en: Messages = {
     noUsageData: (p: { home: string; known: string }) =>
       `no usage data found under ${p.home}; point at it with --agent / --home (currently supported: ${p.known})`,
     defaultLocation: 'the default location',
+    servePortNotInteger: (p: { value: string }) => `--port wants an integer 0…65535, got ${p.value}`,
+    serveRefreshNotSeconds: (p: { value: string }) => `--refresh wants a non-negative number of seconds, got ${p.value}`,
+    serveOptionUnsupported: (p: { option: string }) =>
+      `serve does not take ${p.option}: the dashboard picks its pricing provider per agent and always answers as a web page plus a JSON API; drop the flag and try again`,
     basisInput: 'cache-miss input',
     basisOutput: 'output',
     basisCacheRead: 'cache-hit input',

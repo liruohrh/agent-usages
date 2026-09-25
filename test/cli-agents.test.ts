@@ -8,13 +8,16 @@
  * accept, copied from the per-adapter test suites.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { formatDecimal, parseDecimal, sumAmounts } from '../src/core/money.ts';
 
 const run = promisify(execFile);
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'cli.ts');
@@ -291,6 +294,95 @@ describe('--html to stdout', () => {
     expect(stdout).toContain(`已写入 ${file}`);
     expect((await readFile(file, 'utf8')).startsWith('<!doctype html>')).toBe(true);
   });
+});
+
+describe('serve with two agents in one project', () => {
+  /** Wait for the child to print something matching `pattern`, and answer with it. */
+  function firstMatch(child: ChildProcess, pattern: RegExp, timeoutMs = 30_000): Promise<string> {
+    return new Promise((resolvePromise, reject) => {
+      let seen = '';
+      let settled = false;
+      const finish = (error?: Error, value?: string): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error !== undefined) reject(error);
+        else resolvePromise(value ?? '');
+      };
+      const timer = setTimeout(() => finish(new Error(`nothing matched ${String(pattern)} yet:\n${seen}`)), timeoutMs);
+      child.stdout?.on('data', (chunk: Buffer) => {
+        seen += chunk.toString();
+        const match = seen.match(pattern);
+        if (match !== null) finish(undefined, match[0]);
+      });
+      child.once('exit', (code) => finish(new Error(`serve exited early (${String(code)}):\n${seen}`)));
+    });
+  }
+
+  /** Start the platform against the two-agent fixture. */
+  function startServe(args: string[]): ChildProcess {
+    return spawn(process.execPath, [CLI, 'serve', ...args], {
+      env: {
+        ...process.env,
+        LANG: 'zh_CN.UTF-8',
+        HOME: home,
+        DSH_HOME: join(home, '.dsh'),
+        XDG_CONFIG_HOME: configHome,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  it(
+    'leaves no other agent behind when the dashboard is filtered to one',
+    async () => {
+      // Both agents ran in the same directory, so the merge layer made it one
+      // project with two agents. Filtering to `dsh` must drop claude's sessions,
+      // models and money from that project as well — a project-level test alone
+      // would keep them and the rows would sum to more than the totals they were
+      // filtered to.
+      const child = startServe(['--port', '0', '--no-update']);
+      try {
+        const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
+        const dashboard = (await (await fetch(`${url}/api/dashboard?agent=dsh`)).json()) as {
+          agents: { id: string }[];
+          totals: { requests: number; cost: { total: string } };
+          projects: {
+            agents: string[];
+            requests: number;
+            cost: { total: string };
+            sessionReports: { agent: string }[];
+          }[];
+          loadedAgents: { id: string }[];
+        };
+        expect(dashboard.agents.map((agent) => agent.id)).toEqual(['dsh']);
+        expect(dashboard.totals.requests).toBeGreaterThan(0);
+        expect(dashboard.projects.length).toBeGreaterThan(0);
+        for (const project of dashboard.projects) {
+          expect(project.agents).toEqual(['dsh']);
+          expect(project.sessionReports.every((session) => session.agent === 'dsh')).toBe(true);
+        }
+        expect(dashboard.projects.reduce((total, project) => total + project.requests, 0)).toBe(
+          dashboard.totals.requests,
+        );
+        expect(
+          formatDecimal(
+            sumAmounts(dashboard.projects.map((project) => parseDecimal(project.cost.total))),
+            4,
+          ),
+        ).toBe(dashboard.totals.cost.total);
+        // Both agents are still loaded, so the UI can offer the other one again.
+        expect(dashboard.loadedAgents.map((agent) => agent.id).sort()).toEqual(['claude', 'dsh']);
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          const ended = once(child, 'exit');
+          child.kill('SIGINT');
+          await ended;
+        }
+      }
+    },
+    30_000,
+  );
 });
 
 describe('configured projects', () => {

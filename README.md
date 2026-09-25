@@ -40,6 +40,9 @@ pnpm cli session list
 # 查看价格表；列出支持的 agent 与计价来源
 pnpm cli price
 pnpm cli agents
+
+# 本地 Web 分析平台（前端需先 pnpm --filter web build 一次）
+pnpm cli serve --open
 ```
 
 也可以直接用 Node 运行（无需构建，Node 原生擦除 TypeScript 类型）：
@@ -113,6 +116,8 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 
 ### `agents`
 
+列出支持的 agent 与计价来源：各自的 id、默认数据目录、认哪些环境变量，以及读取该 agent 数据时需要注意的事项。支持 `--json`。
+
 ### `update`
 
 更新价格表与汇率：`agent-usages update [all|prices|rates] [--force] [--write-config]`，默认 `all`。
@@ -122,7 +127,18 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 
 校验 `config/pricing.json` 与 `config/rates.json`，提交前跑一次；`--json` 输出结构化结果。
 
-列出支持的 agent 与计价来源：各自的 id、默认数据目录、认哪些环境变量，以及读取该 agent 数据时需要注意的事项。支持 `--json`。
+### `serve`
+
+起本地 Web 分析平台：项目 → 工作区 → 会话 → 子代理的树，按 agent 分列与总计的消耗、时间序列、模型与计价区间明细。只读，默认只绑 `127.0.0.1:7788`。
+
+```bash
+agent-usages serve                 # http://127.0.0.1:7788
+agent-usages serve --port 0 --open # 随机空闲端口并打开浏览器
+agent-usages serve --dev           # 前端走 Vite 开发服务器，热更新
+agent-usages serve --snapshot web/mock/dashboard.snapshot.json   # 离线快照，不读任何 agent 数据
+```
+
+前端要先构建一次：`pnpm --filter web build`（产物 `web/dist`，未构建时首页会直接告诉你）。装法、API、数据契约与快照格式见 [本地 Web 分析平台](docs/web.md)。
 
 ---
 
