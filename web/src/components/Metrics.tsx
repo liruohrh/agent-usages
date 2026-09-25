@@ -15,7 +15,7 @@ import { formatCost, formatShare, formatTokens, metricItems } from '../format';
 import { Card, Chip } from './Bits';
 
 /** The five disjoint buckets, in the order the CLI prints them. */
-const BUCKETS: { key: keyof TokenBuckets; label: string; short: string; color: string }[] = [
+export const BUCKETS: { key: keyof TokenBuckets; label: string; short: string; color: string }[] = [
   { key: 'input', label: '未命中缓存输入', short: 'I/M', color: '#58a6ff' },
   { key: 'cacheRead', label: '缓存命中输入', short: 'I/C', color: '#a78bfa' },
   { key: 'cacheWrite', label: '缓存写入', short: 'I/W', color: '#f59e0b' },
@@ -24,7 +24,7 @@ const BUCKETS: { key: keyof TokenBuckets; label: string; short: string; color: s
 ];
 
 /** The money each bucket produced. Reasoning shares the output bill. */
-function bucketMoney(tokens: TokenBuckets, cost: CostTotals): Record<string, string> {
+export function bucketMoney(tokens: TokenBuckets, cost: CostTotals): Record<string, string> {
   const reasoning = tokens.reasoning > 0 ? cost.reasoningCost : '0';
   return {
     input: cost.cacheMissInputCost,
@@ -36,7 +36,7 @@ function bucketMoney(tokens: TokenBuckets, cost: CostTotals): Record<string, str
 }
 
 /** Money strings subtracted as scaled integers, never as floats. */
-function subtract(left: string, right: string): string {
+export function subtract(left: string, right: string): string {
   const scale = 10_000;
   return ((Math.round(Number(left) * scale) - Math.round(Number(right) * scale)) / scale).toFixed(4);
 }

@@ -124,6 +124,19 @@ function apiTriple(row: ApiRow, withPeriod = false): string {
   return `${AGENT_LABELS[row.agent] ?? row.agent}|${model}|${row.requests}`;
 }
 
+/** Open one session page, chosen from the API rather than from a link. */
+async function openSession(page: Page, project?: string): Promise<{ uid: string; title: string | null }> {
+  const dashboard = await apiDashboard(page);
+  const rows = rootSessions(dashboard);
+  const wanted = project === undefined ? rows : rows.filter((session) => session.projectName === project);
+  const billed0 = wanted.filter((session) => session.requests > 0);
+  const chosen = (billed0[0] ?? wanted[0]) as ApiSession | undefined;
+  test.skip(chosen === undefined, 'no session to open');
+  if (chosen === undefined) return { uid: '', title: null };
+  await page.goto(`/s/${encodeURIComponent(chosen.uid)}`);
+  return { uid: chosen.uid, title: chosen.title };
+}
+
 /** The sessions the table shows by default: one row per delegation subtree. */
 function rootSessions(dashboard: ApiDashboard): ApiSession[] {
   const all = dashboard.projects.flatMap((project) => project.sessionReports);
@@ -223,11 +236,10 @@ test.describe('scope switching', () => {
     const roots = project.sessionReports.filter(
       (session) => !(session.isSubagent && session.parentId !== null && ids.has(session.parentId)),
     );
-    const table = cardStartingWith(page, '会话');
-    await expect(table.locator('tbody tr')).toHaveCount(roots.length);
+    await expect(page.locator('main ol > li')).toHaveCount(roots.length);
 
-    await table.getByRole('button', { name: '合并子代理' }).click();
-    await expect(table.locator('tbody tr')).toHaveCount(project.sessionReports.length);
+    await page.locator('main section header').getByRole('button', { name: '合并子代理' }).click();
+    await expect(page.locator('main ol > li')).toHaveCount(project.sessionReports.length);
   });
 });
 
@@ -294,13 +306,7 @@ test.describe('a session', () => {
     await page.goto('/');
     const project = (await twoProjects(page))[0];
     if (project === undefined) return;
-    await selectProject(page, project.name);
-
-    const link = page.locator('main a[href^="/s/"]').first();
-    test.skip((await link.count()) === 0, 'no billed session to open');
-    const href = (await link.getAttribute('href')) ?? '/';
-    const uid = decodeURIComponent(href.replace('/s/', ''));
-    await link.click();
+    const { uid } = await openSession(page, project.name);
 
     const detail = (await page.evaluate(
       async (id) => (await fetch(`/api/sessions/${encodeURIComponent(id)}`)).json(),
@@ -333,79 +339,98 @@ test.describe('a session', () => {
   });
 });
 
-test.describe('the session comparison', () => {
-  test('lists every session with the columns that explain the money', async ({ page }) => {
+test.describe('the session leaderboard', () => {
+  /** One row of the leaderboard, by index. */
+  const rowAt = (page: Page, index: number): Locator => page.locator('main ol > li').nth(index);
+
+  test('ranks every session, and the first row is the dearest', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
-    const table = cardStartingWith(page, '会话');
-    await expect(table.locator('tbody tr')).toHaveCount(sessions.length);
+    const rows = page.locator('main ol > li');
+    await expect(rows).toHaveCount(sessions.length);
 
-    // Every indicator is on screen by default — hiding buckets behind a toggle is
-    // what made the comparison view useless.
-    const head = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.replace(/[↕▼▲]/g, '').trim());
-    for (const column of ['会话', '项目', 'agent', 'Q', 'I/M', 'I/C', 'O', 'T', '缓存金额', '费用', '最后使用']) {
-      expect(head, `column ${column}`).toContain(column);
-    }
-
-    // Default order is cost, dearest first — the first question a reader has.
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    await expect(table.locator('tbody tr').first()).toContainText(dearest?.title ?? dearest?.id ?? '');
+    const first = await rowAt(page, 0).innerText();
+    expect(first).toContain(dearest?.title ?? '');
+    expect(first).toContain(dearest?.cost.total ?? '');
+    // The row also says how many tokens and how much of the cache it used.
+    expect(first).toContain('Q ');
+    expect(first).toContain('缓存 ');
   });
 
-  test('sorts by cost, tokens and cache money on click', async ({ page }) => {
+  test('sorts by cost, tokens and cache money', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
-    const table = cardStartingWith(page, '会话');
-    const firstRow = (): Locator => table.locator('tbody tr').first();
-    const header = (label: string): Locator =>
-      table.locator('thead th').filter({ has: page.getByRole('button', { name: new RegExp(`^${label}`) }) }).locator('button');
+    const firstTitle = async (): Promise<string> => (await rowAt(page, 0).innerText()).split('\n')[0] ?? '';
+    const measure = (label: string): Locator =>
+      page.locator('main section header').getByRole('button', { name: label, exact: true });
 
-    const byCostDesc = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    const byCostAsc = [...sessions].sort((left, right) => Number(left.cost.total) - Number(right.cost.total))[0];
-    const byTokens = [...sessions].sort((left, right) => billed(right) - billed(left))[0];
-    const byCacheMoney = [...sessions].sort(
+    const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
+    const mostTokens = [...sessions].sort((left, right) => billed(right) - billed(left))[0];
+    const mostCache = [...sessions].sort(
       (left, right) => Number(right.cost.cacheHitInputCost) - Number(left.cost.cacheHitInputCost),
     )[0];
 
-    // 费用 is the default sort; one click flips it, the next flips it back.
-    await expect(firstRow()).toContainText(byCostDesc?.title ?? '');
-    await header('费用').click();
-    await expect(firstRow()).toContainText(byCostAsc?.title ?? '');
-    await header('费用').click();
-    await expect(firstRow()).toContainText(byCostDesc?.title ?? '');
+    await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
+    await measure('tokens').click();
+    await expect(rowAt(page, 0)).toContainText(mostTokens?.title ?? '');
+    await measure('缓存金额').click();
+    await expect(rowAt(page, 0)).toContainText(mostCache?.title ?? '');
 
-    // Tokens: the session with the most billed tokens comes first.
-    await header('T').click();
-    await expect(firstRow()).toContainText(byTokens?.title ?? '');
-
-    // Cache money: same, on the cache column.
-    await header('缓存金额').click();
-    await expect(firstRow()).toContainText(byCacheMoney?.title ?? '');
+    // Ascending puts the smallest first — the same session as the largest, at the
+    // other end of the list.
+    await measure('花费').click();
+    await page.locator('main section header').getByRole('button', { name: /降序/ }).click();
+    const cheapest = [...sessions].sort((left, right) => Number(left.cost.total) - Number(right.cost.total))[0];
+    await expect(rowAt(page, 0)).toContainText(cheapest?.title ?? '');
+    expect(await firstTitle()).not.toBe('');
   });
 
-  test('can be reduced to the main columns, then restored', async ({ page }) => {
+  test('expands one session into every bucket, with money', async ({ page }) => {
     await page.goto('/?view=sessions');
-    const table = cardStartingWith(page, '会话');
-    const head = async (): Promise<string[]> =>
-      (await table.locator('thead th').allInnerTexts()).map((cell) => cell.replace(/[↕▼▲]/g, '').trim());
+    const first = rowAt(page, 0);
+    await first.locator('button').first().click();
 
-    await table.getByRole('button', { name: '精简列' }).click();
-    const compact = await head();
-    expect(compact).toContain('Q');
-    expect(compact).not.toContain('I/M');
-    await table.getByRole('button', { name: '全部列' }).click();
-    expect(await head()).toContain('I/M');
+    const detail = page.locator('main ol > li').first();
+    const buckets = await detail.locator('table tbody tr').allInnerTexts();
+    expect(buckets.join(' ')).toContain('I/M');
+    expect(buckets.join(' ')).toContain('I/C');
+    expect(buckets.join(' ')).toContain('合计');
+    // Every bucket line carries its own money.
+    expect((buckets.join(' ').match(/¥/g) ?? []).length).toBeGreaterThanOrEqual(4);
+
+    const sessions = rootSessions(await apiDashboard(page));
+    const first0 = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
+    expect(buckets.join(' ')).toContain(first0?.cost.total ?? '');
+    await expect(detail.getByRole('link', { name: /打开会话详情/ })).toBeVisible();
+
+    // Clicking again folds it back.
+    await first.locator('button').first().click();
+    await expect(page.locator('main ol > li').first().locator('table')).toHaveCount(0);
   });
 
-  test('the overview ranks the dearest sessions and links to the table', async ({ page }) => {
+  test('still offers the column view for anyone who wants it', async ({ page }) => {
+    await page.goto('/?view=sessions');
+    await page.locator('main section header').getByRole('button', { name: '表格视图' }).click();
+    const table = page.locator('main section table').first();
+    await expect(table).toBeVisible();
+    const head = (await page.locator('main section thead th').allInnerTexts()).map((cell) =>
+      cell.replace(/[↕▼▲]/g, '').trim(),
+    );
+    for (const column of ['会话', '项目', 'agent', 'Q', 'I/M', 'I/C', 'O', 'T', '费用']) {
+      expect(head, `column ${column}`).toContain(column);
+    }
+  });
+
+  test('the overview ranks the dearest sessions and links to the list', async ({ page }) => {
     await page.goto('/');
     const sessions = rootSessions(await apiDashboard(page));
-    const card = cardStartingWith(page, '花费最多的会话');
-    await expect(card).toBeVisible();
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    await expect(card.locator('tbody tr').first()).toContainText(dearest?.title ?? '');
-    await expect(card.locator('tbody tr')).toHaveCount(Math.min(8, sessions.length));
-    await card.getByRole('link', { name: /全部 .* 个会话/ }).click();
+    // The overview's own ranking is the same list, five rows deep.
+    const ranked = page.locator('main ol > li');
+    await expect(ranked.first()).toContainText(dearest?.title ?? '');
+    await expect(ranked).toHaveCount(Math.min(5, sessions.length));
+    await page.getByRole('link', { name: /全部 .* 个会话/ }).click();
     await expect(page).toHaveURL(/view=sessions/);
   });
 });
@@ -432,10 +457,7 @@ test.describe('layout', () => {
     await page.goto('/');
     const project = (await twoProjects(page))[0];
     if (project === undefined) return;
-    await selectProject(page, project.name);
-    const link = page.locator('main a[href^="/s/"]').first();
-    test.skip((await link.count()) === 0, 'no billed session to open');
-    await link.click();
+    await openSession(page, project.name);
     await expect(cardOf(page, '本会话模型明细')).toBeVisible();
     await expectStacked(page, '本会话模型明细', '本会话计价区间');
   });
@@ -457,11 +479,13 @@ test.describe('layout', () => {
       expect(measured.table, `${view}/${title} fits its card`).toBeLessThanOrEqual(measured.wrapper + 1);
     }
 
-    // The comparison table carries twelve columns; at 1440 it scrolls inside its
-    // own card, and the page itself must never scroll sideways.
+    // The optional table view carries a dozen columns; at 1440 it scrolls inside
+    // its own card (which is the point of keeping it optional), and the page
+    // itself must never scroll sideways. The default leaderboard has no table.
     await page.goto('/?view=sessions');
-    const measured = await cardStartingWith(page, '会话')
-      .locator('table')
+    await page.locator('main section header').getByRole('button', { name: '表格视图' }).click();
+    const measured = await page
+      .locator('main section table')
       .first()
       .evaluate((table) => ({ table: table.scrollWidth, wrapper: table.parentElement?.clientWidth ?? 0 }));
     expect(measured.table).toBeGreaterThan(0);

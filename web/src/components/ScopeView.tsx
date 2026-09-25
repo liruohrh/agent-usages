@@ -17,7 +17,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
 import { Overview } from './Overview';
 import { UsageTab } from './Usage';
-import { BandTable, ModelTable, SessionTable } from './Tables';
+import { BandTable, ModelTable } from './Tables';
+import { SessionLeaderboard } from './Sessions';
 import type { SeriesMetric } from '../charts';
 
 /** The tabs, in reading order. */
@@ -118,7 +119,7 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
         </div>
       )}
       {active === 'sessions' && (
-        <SessionTable
+        <SessionLeaderboard
           sessions={sessions}
           symbol={symbol}
           title={project === null ? '会话' : `会话（${project.name}）`}
