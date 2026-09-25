@@ -561,16 +561,30 @@ test.describe('the session leaderboard', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(`全部 ${sessions.length} 项`);
 
-    // Every entry, biggest first, no "其余 N 项合计" left behind.
-    const shares = await dialog
-      .locator('li')
-      .evaluateAll((nodes) =>
-        nodes.map((node) => Number(/([\d.]+)%/.exec(node.getAttribute('title') ?? '')?.[1] ?? '0')),
-      );
+    // Every entry, biggest first, no "其余 N 项合计" left behind. Each entry is
+    // two lines: the bar row (the one carrying `title`) and the chip row under
+    // it, indented.
+    const barRows = dialog.locator('li[title]');
+    const shares = await barRows.evaluateAll((nodes) =>
+      nodes.map((node) => Number(/([\d.]+)%/.exec(node.getAttribute('title') ?? '')?.[1] ?? '0')),
+    );
     expect(shares.length).toBe(sessions.length);
     expect(shares).toEqual([...shares].sort((left, right) => right - left));
     expect(shares.reduce((sum, share) => sum + share, 0)).toBeGreaterThan(99);
     expect(await dialog.innerText()).not.toContain('其余');
+
+    // Under each name, what else that entry is made of — the same buckets a
+    // leaderboard row shows under its bar.
+    const chipRows = dialog.locator('li:not([title])');
+    await expect(chipRows).toHaveCount(sessions.length);
+    const chips = await chipRows.first().innerText();
+    expect(chips).toMatch(/I\/M|I\/C|O|R/);
+    expect(chips).toContain('¥');
+    const indented = await chipRows.first().evaluate((row) => {
+      const style = getComputedStyle(row);
+      return Number.parseFloat(style.paddingLeft) || 0;
+    });
+    expect(indented, 'the chip line is indented under the name').toBeGreaterThan(0);
 
     // It fits the viewport instead of hanging off it.
     const box = await dialog.boundingBox();
@@ -580,6 +594,18 @@ test.describe('the session leaderboard', () => {
     // Escape and the close button both dismiss it.
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
+
+    // Charting a bucket leaves that bucket out of the line: the bar above it is
+    // already showing the same figure.
+    await page.locator('[data-chart="cacheRead"]').getByRole('button', { name: /展示更多/ }).click();
+    const cacheDialog = page.locator('[data-metric-dialog="cacheRead"]');
+    await expect(cacheDialog).toBeVisible();
+    const cacheFirst = await cacheDialog.locator('li:not([title])').first().innerText();
+    expect(cacheFirst).not.toMatch(/I\/C/);
+    expect(cacheFirst).toMatch(/I\/M/);
+    await page.keyboard.press('Escape');
+    await expect(cacheDialog).toHaveCount(0);
+
     await card.getByRole('button', { name: /展示更多/ }).click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: '关闭' }).click();

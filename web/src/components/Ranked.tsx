@@ -10,7 +10,7 @@
  * number on the right. Clicking a row opens every bucket with its own money.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 
@@ -128,12 +128,18 @@ function MetricRows({
   total,
   colors,
   format,
+  symbol,
+  metricKey,
   size = 'small',
 }: {
   valued: readonly ValuedEntry[];
   total: number;
   colors: ReadonlyMap<string, string>;
   format: (value: number) => string;
+  /** Needed only by the dialog's chip line: the money each bucket produced. */
+  symbol: string;
+  /** The metric being charted — left out of the chip line, it is the bar above. */
+  metricKey: string;
   size?: 'small' | 'large';
 }): React.ReactElement {
   const nameWidth = size === 'large' ? 'w-32 sm:w-48 lg:w-64' : 'w-36';
@@ -146,8 +152,8 @@ function MetricRows({
         // A non-zero slice that rounds to `0%` reads as "nothing"; say so instead.
         const percent = share > 0 && share < 0.0005 ? '<0.1%' : formatShare(share);
         return (
+          <Fragment key={item.entry.key}>
           <li
-            key={item.entry.key}
             className="flex items-center gap-2"
             title={`${item.entry.title}：${format(item.value)}（占该指标的 ${percent}）`}
           >
@@ -161,6 +167,15 @@ function MetricRows({
             <span className={`tnum w-20 shrink-0 text-right ${text} text-fg`}>{format(item.value)}</span>
             <span className={`tnum w-12 shrink-0 text-right ${text} text-faint`}>{percent}</span>
           </li>
+          {size !== 'large' ? null : (
+            // Under the name, indented: what else this entry is made of, the same
+            // line a leaderboard row carries under its bar. The metric being
+            // charted is left out — it is already the bar and the number above.
+            <li className="mt-1 pl-5">
+              <BucketChips entry={item.entry} symbol={symbol} omit={metricKey} />
+            </li>
+          )}
+          </Fragment>
         );
       })}
     </ul>
@@ -174,6 +189,7 @@ function MetricDialog({
   total,
   colors,
   format,
+  symbol,
   onClose,
 }: {
   metric: SortMetric;
@@ -181,6 +197,7 @@ function MetricDialog({
   total: number;
   colors: ReadonlyMap<string, string>;
   format: (value: number) => string;
+  symbol: string;
   onClose: () => void;
 }): React.ReactElement {
   useEffect(() => {
@@ -225,7 +242,15 @@ function MetricDialog({
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
-          <MetricRows valued={valued} total={total} colors={colors} format={format} size="large" />
+          <MetricRows
+            valued={valued}
+            total={total}
+            colors={colors}
+            format={format}
+            symbol={symbol}
+            metricKey={metric.key}
+            size="large"
+          />
         </div>
       </div>
     </div>,
@@ -272,7 +297,7 @@ function MetricChart({
           {format(total)}
         </span>
       </div>
-      <MetricRows valued={shown} total={total} colors={colors} format={format} />
+      <MetricRows valued={shown} total={total} colors={colors} format={format} symbol={symbol} metricKey={metric.key} />
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-faint">
           {folded > 0 ? `其余 ${folded} 项合计 ${format(rest)}` : `共 ${valued.length} 项，已全部列出`}
@@ -292,6 +317,7 @@ function MetricChart({
           total={total}
           colors={colors}
           format={format}
+          symbol={symbol}
           onClose={() => setOpen(false)}
         />
       )}
@@ -621,18 +647,8 @@ export function RankedList({
                       </span>
 
                       {/* Then every bucket with the money it produced. */}
-                      <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
-                        {metricChips(entry, symbol).map((chip) => (
-                          <span key={chip.key} className="flex items-center gap-1 whitespace-nowrap text-[11px]" title={chip.hint}>
-                            {chip.color !== undefined && (
-                              <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: chip.color }} />
-                            )}
-                            <span className="text-faint">{chip.label}</span>
-                            <span className="tnum text-muted">{chip.value}</span>
-                            {chip.extra !== undefined && <span className="tnum text-faint">{chip.extra}</span>}
-                            {chip.money !== undefined && <span className="tnum text-fg">{chip.money}</span>}
-                          </span>
-                        ))}
+                      <span className="mt-1 block">
+                        <BucketChips entry={entry} symbol={symbol} />
                       </span>
                     </span>
 
@@ -709,6 +725,43 @@ function metricChips(entry: RankedEntry, symbol: string): MetricChip[] {
       money: formatCost(piece.money, symbol),
       color: piece.color,
     }));
+}
+
+/**
+ * A row's buckets, each with the tokens it counted and the money it produced.
+ *
+ * The one line under a leaderboard row's bar, and — indented under the name — the
+ * second line of a dialog row: the figures a reader compares across the list.
+ * `omit` drops the metric the surrounding chart is already drawing, so a reader
+ * never sees the same number twice on one row.
+ */
+function BucketChips({
+  entry,
+  symbol,
+  omit,
+}: {
+  entry: RankedEntry;
+  symbol: string;
+  /** A {@link SortMetric} key to leave out, when the row already shows it. */
+  omit?: string | undefined;
+}): React.ReactElement {
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+      {metricChips(entry, symbol)
+        .filter((chip) => chip.key !== omit)
+        .map((chip) => (
+          <span key={chip.key} className="flex items-center gap-1 whitespace-nowrap text-[11px]" title={chip.hint}>
+            {chip.color !== undefined && (
+              <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: chip.color }} />
+            )}
+            <span className="text-faint">{chip.label}</span>
+            <span className="tnum text-muted">{chip.value}</span>
+            {chip.extra !== undefined && <span className="tnum text-faint">{chip.extra}</span>}
+            {chip.money !== undefined && <span className="tnum text-fg">{chip.money}</span>}
+          </span>
+        ))}
+    </span>
+  );
 }
 
 /** The agents of a scope, as a ranking. */
