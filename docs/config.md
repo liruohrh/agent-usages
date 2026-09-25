@@ -65,7 +65,7 @@ DeepSeek 英文站直接写 UTC）。
 {
   "version": 1,
   "projects": [
-    { "name": "Memolink", "paths": ["~/ws/apps/Memolink", "/abs/other"] }
+    { "name": "demo-app", "paths": ["~/ws/apps/demo-app", "/abs/other"] }
   ]
 }
 ```
@@ -86,7 +86,7 @@ DeepSeek 英文站直接写 UTC）。
 
 规则 1 先于规则 2，所以一条被显式写在别的项目下的路径不会被更宽的仓库规则抢走。
 
-这条规则主要服务 worktree：配置里只写主仓库 `~/ws/apps/Memolink`，从它切出去、落在别处（例如 `~/orca/workspaces/Memolink/lynx-rewrite`）的 worktree 以及在其中产生的会话，会在运行时自动并进 `Memolink` 这一个项目，无需逐条登记。
+这条规则主要服务 worktree：配置里只写主仓库 `~/ws/apps/demo-app`，从它切出去、落在别处（例如 `~/orca/workspaces/demo-app/feature-x`）的 worktree 以及在其中产生的会话，会在运行时自动并进 `demo-app` 这一个项目，无需逐条登记。
 
 ## 合并规则（用户 > 默认）
 

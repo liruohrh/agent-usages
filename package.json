@@ -54,7 +54,8 @@
     "web:build": "pnpm --filter web build",
     "web:typecheck": "pnpm --filter web typecheck",
     "web:smoke": "node web/scripts/smoke.mjs",
-    "web:snapshot": "node src/serve/main.ts --write-snapshot web/mock/dashboard.snapshot.json"
+    "web:snapshot": "node src/serve/main.ts --write-snapshot web/mock/dashboard.snapshot.json",
+    "web:e2e": "pnpm --filter web test:e2e"
   },
   "dependencies": {
     "commander": "^14.0.0",

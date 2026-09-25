@@ -212,7 +212,9 @@ export function Overview({
         </p>
       </Card>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+      {/* Stacked, not side by side: both tables carry six or seven columns, and
+          two of them abreast is what forced a horizontal scrollbar. */}
+      <div className="space-y-3">
         <ModelTable models={models} symbol={symbol} />
         <BandTable bands={bands} symbol={symbol} />
       </div>

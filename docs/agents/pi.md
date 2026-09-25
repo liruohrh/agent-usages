@@ -18,7 +18,7 @@
 会话文件是纯 JSONL（不压缩）：首行是头，之后每行一个事件。
 
 ```jsonc
-{"type":"session","version":3,"id":"019fc20a-…","timestamp":"2026-08-02T10:35:20.835Z","cwd":"/home/liruohrh/ws/apps/Memolink"}
+{"type":"session","version":3,"id":"019fc20a-…","timestamp":"2026-08-02T10:35:20.835Z","cwd":"/home/liruohrh/ws/apps/demo-app"}
 {"type":"message","id":"3b6e9c6d","parentId":"b44c130e","timestamp":"2026-08-02T10:38:05.195Z",
  "message":{"role":"assistant","content":[…],"api":"openai-completions",
    "provider":"deepseek","model":"deepseek-v4-flash",

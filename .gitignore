@@ -10,3 +10,8 @@ web/dist/
 # (`pnpm web:snapshot`, see web/mock/README.md) and deliberately not tracked.
 web/mock/dashboard.snapshot.json
 web/mock/screenshots/
+# Playwright's run artifacts: traces, videos and the failure-only HTML report.
+web/test-results/
+web/playwright-report/
+# `playwright-cli` drops page snapshots here when driving the app by hand.
+.playwright-cli/

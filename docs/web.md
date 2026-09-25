@@ -107,6 +107,9 @@ web/                       # 前端 workspace 包（package.json name = "web"）
       Tables.tsx           #   按 agent / 模型 / 计价区间 / token 五桶四张表
       Bits.tsx             #   徽标、卡片、统计块、提示条
   scripts/smoke.mjs        # 冒烟测试（起服务 → 打接口 → 断言 → 关闭）
+  scripts/e2e-server.mjs   # 给 Playwright 起的服务（优先离线快照，没有就实时扫）
+  e2e/dashboard.spec.ts    # 浏览器里的端到端测试：切项目/切会话/布局与溢出
+  playwright.config.ts     # 默认用系统 Chrome（PW_CHANNEL=chromium 换内置浏览器）
   mock/
     README.md                # 为什么这两样东西不入库、怎么生成
     dashboard.snapshot.json  # 离线快照 fixture（pnpm web:snapshot 生成；gitignore）
@@ -123,6 +126,7 @@ web/                       # 前端 workspace 包（package.json name = "web"）
 | `pnpm web:build` | `pnpm --filter web build` |
 | `pnpm web:typecheck` | 前端的 `tsc --noEmit` |
 | `pnpm web:smoke` | `node web/scripts/smoke.mjs`（加 `--live` 再跑一遍真实数据） |
+| `pnpm web:e2e` | `playwright test`：真浏览器里的端到端用例（切项目、切会话、量布局） |
 | `pnpm web:snapshot` | 扫一次并写出 `web/mock/dashboard.snapshot.json` |
 
 依赖（新增）：服务端 `express`、`http-proxy-middleware`、`open`（+ `@types/express`）；
@@ -175,22 +179,22 @@ CLI 的 `bin` / `files` / `version` 未改动。
 ```jsonc
 // agents[]（全局、项目、工作区三个层级都用这一种）
 { "id": "dsh", "label": "DeepSeek Harness (DSH)", "source": "/home/me/.dsh",
-  "sessions": 33, "subagentSessions": 19, "activeSessions": 24,
-  "requests": 4007, "unpriced": 0, "firstUsage": 1785651356311, "lastUsage": 1790330891867,
+  "sessions": 12, "subagentSessions": 4, "activeSessions": 9,
+  "requests": 812, "unpriced": 0, "firstUsage": 1785651356311, "lastUsage": 1790330891867,
   "tokens": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "reasoning": 0 },
-  "cost": { "total": "71.0973", "…": "…" } }
+  "cost": { "total": "20.1234", "…": "…" } }
 
 // totals：所有 agent 的合计 + 五个桶各自的数量/占比/金额
-{ "sessions": 76, "subagentSessions": 33, "projects": 7, "workspaces": 8,
-  "requests": 7868, "unpriced": 0,
-  "tokens": { "…": 0 }, "tokenBreakdown": { "cacheRead": { "tokens": 0, "share": 0.994, "cost": "89.3695" } },
-  "cost": { "total": "128.0071", "…": "…" } }
+{ "sessions": 41, "subagentSessions": 12, "projects": 3, "workspaces": 4,
+  "requests": 1234, "unpriced": 0,
+  "tokens": { "…": 0 }, "tokenBreakdown": { "cacheRead": { "tokens": 0, "share": 0.512, "cost": "12.3456" } },
+  "cost": { "total": "34.5678", "…": "…" } }
 
 // projects[]：kind 是 repo（一个 git 仓库，含各 worktree）或 path（没人认领的目录）
-{ "id": "repo:/home/me/ws/apps/Memolink", "name": "Memolink", "kind": "repo",
-  "workspaces": ["/home/me/ws/apps/Memolink", "/home/me/orca/.../lynx-rewrite"],
-  "agents": ["dsh", "pi"], "sessions": 27, "subagentSessions": 10, "activeSessions": 21,
-  "requests": 5010, "tokens": { "…": 0 }, "cost": { "total": "98.5006", "…": "…" },
+{ "id": "repo:/home/me/ws/apps/demo-app", "name": "demo-app", "kind": "repo",
+  "workspaces": ["/home/me/ws/apps/demo-app", "/home/me/orca/.../feature-x"],
+  "agents": ["dsh", "pi"], "sessions": 17, "subagentSessions": 5, "activeSessions": 12,
+  "requests": 501, "tokens": { "…": 0 }, "cost": { "total": "15.6789", "…": "…" },
   "agentTotals": [ /* 同 agents[] 的结构，Σ = 本项目总计 */ ],
   "workspaceNodes": [ /* 工作区一级，带自己的 agentTotals 与 sessionReports */ ],
   "sessionReports": [ { "uid": "dsh:session-…", "id": "…", "agent": "dsh", "title": "…",
@@ -198,7 +202,7 @@ CLI 的 `bin` / `files` / `version` 未改动。
                         "subagentCount": 2, "parentId": null, "depth": 0,
                         "firstUsage": 0, "lastUsage": 0,
                         "own": {}, "spawned": {}, "total": {} } ],
-  "models": [], "bands": [], "repo": { "name": "Memolink", "root": "…", "kind": "main" } }
+  "models": [], "bands": [], "repo": { "name": "demo-app", "root": "…", "kind": "main" } }
 ```
 
 ### 数字口径（和 CLI 一致，且每一级都能对上）
@@ -232,8 +236,8 @@ CLI 的 `bin` / `files` / `version` 未改动。
 `serveAgentNoData`（目录里没数据）、`serveAgentNoRoot`（找不到默认目录）、
 `serveAgentLoadFailed`（读了但失败）。
 
-本机实测（2026-09-25 18:28，dsh 333 MB / pi 237 MB / claude 9 MB / codex 122 MB）：
-四个 agent 全量扫描 **2.5 秒**，首次聚合到能应答约 3 秒；此后每个请求都在 10 ms 量级。
+本机实测：四个 agent 全量扫描在**秒级**（数据目录合计不到 1 GB 时约 2–5 秒），
+首次聚合到能应答再多几百毫秒；此后每个请求都在 10 ms 量级。
 
 ### 离线快照（`--snapshot`）
 
@@ -283,18 +287,25 @@ pnpm --filter web build                             # tsc --noEmit && vite build
 pnpm web:snapshot                                   # 生成离线 fixture（不入库，先跑一次）
 pnpm web:smoke                                      # 离线快照，37 项断言
 node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 75 项
+pnpm web:e2e                                        # 真浏览器：5 条，起服务 + 切项目/会话 + 量布局
 CI=true pnpm typecheck                              # 根 tsconfig 覆盖 src/serve/**
 CI=true pnpm test                                   # 488 个用例
 ```
+
+`pnpm web:e2e`（Playwright）跑的是**真实页面**：点项目树切范围，然后把 模型明细 /
+计价区间明细 的每一行与页面自己请求到的 `/api/dashboard` 逐项比对——这正是两条真实缺陷
+（切项目后表格留旧行、明细表并排导致横向滚动）逃过单测的地方。默认用系统 Chrome
+（`channel: 'chrome'`）；想用内置浏览器先 `npx playwright install chromium`，再
+`PW_CHANNEL=chromium pnpm web:e2e`。服务由 `web/scripts/e2e-server.mjs` 起：有离线快照就用
+快照（数字稳定），没有就实时扫一次。
 
 构建产物体积（2026-09-25 18:46 实测，`pnpm --filter web build` 539 ms）：`web/dist` 共
 **874,839 B**，其中 `echarts-*.js` 552.25 KB（gzip 187.24 KB）、`react-*.js` 258.27 KB
 （gzip 81.91 KB）、`index-*.js` 45.78 KB（gzip 12.13 KB）、`index-*.css` 16.98 KB
 （gzip 4.28 KB）、`rolldown-runtime-*.js` 0.71 KB。
 
-截图（`web/mock/screenshots/`，用 headless Chrome 150 生成；服务需先起在 7788。本机
-2026-09-25 18:34 的三张：`overview.png` 253,698 B、`project.png` 395,539 B、
-`session.png` 186,220 B；截图含真实项目名与金额，同样不入库）：
+截图（`web/mock/screenshots/`，用 headless Chrome 生成；服务需先起在 7788。
+截图含真实项目名与金额，因此不入库）：
 
 ```sh
 mkdir -p web/mock/screenshots
@@ -316,6 +327,9 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 | 过滤在服务端做 | 总计必须与所见的行一致，重算交给唯一会算钱的那一层 |
 | 深色默认、CSS 变量切换 | 一个 `.light` 类就能整体换肤，图表颜色跟着 `dark` 参数走 |
 | 长标题 `line-clamp-2` + `title` | 表格 `table-fixed`，会话标题/路径再长也不撑宽列；CLI 的 HTML 报告用同一套修法（`table-layout:fixed` + `colgroup` + `title` 全文） |
+| 明细表纵向排列 | 模型明细 6 列、计价区间明细 7 列，并排时半宽放不下只能横滚；纵向各占整宽后 1440px 下不再需要滚动（Playwright 每条都量） |
+| 一行一个 (agent, 项目, 模型) / (agent, 项目, 模型, 区间, 档位) | 表格的行身份就是 React 的 key：按会话出数会给出重复 key，切范围时旧行不会被卸载（真实缺陷）。服务端在 `mergeModelRows` / `mergeBandRows` 里把同一身份的行相加，一行一条后再交给前端 |
+| Playwright | 只有真浏览器能发现"key 不唯一 → 切项目留旧行"和"并排太窄"这类问题；断言直接与页面自己拿到的 API 数据比对 |
 
 ---
 
@@ -327,4 +341,4 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 | `src/serve/server.ts` | `startServer` / `createApp` / `defaultWebRoot` |
 | `src/serve/types.ts` | 契约（本文件 §4 的权威版本） |
 | `web/scripts/smoke.mjs` | 冒烟测试：起服务 → 打 12 个接口 → 断言加性与字段 → 关闭 |
-| `web/mock/dashboard.snapshot.json` | 离线快照 fixture（656 KB，2026-09-25 18:08 生成） |
+| `web/mock/dashboard.snapshot.json` | 离线快照 fixture（约 0.6 MB，本机生成、不入库） |

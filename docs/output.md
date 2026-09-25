@@ -24,9 +24,9 @@ Agent     dsh（DeepSeek Harness (DSH)）
 文本报告是一棵树：**总 → 项目 → 会话**（`--subagent` / `--subagents` 再往下加范围层）。每个节点占两行——
 
 ```
-Memolink (~/ws/apps/Memolink) 2026-08-16
+demo-app (~/ws/apps/demo-app) 2026-08-16
   I/M 889K ¥2.8527 · I/C 257.6M / 99.7% ¥12.1085 · I/T 258.5M ¥14.9612 · O 368K ¥2.8015 · R 558K / 60.3% ¥4.2527 · O/T 926K ¥7.0542 · T 259.4M · Q 1,027 · ¥22.0154
-  重启后继续lynx-rewrite开发 2026-09-06
+  重启后继续feature-x开发 2026-09-06
     I/M 107K ¥0.1606 · I/C 18.4M / 99.4% ¥0.9207 · I/T 18.5M ¥1.0813 · O 44K ¥0.1995 · R 58K / 56.6% ¥0.2604 · O/T 102K ¥0.4599 · T 18.6M · Q 151 · ¥1.5412
 ```
 
@@ -56,7 +56,7 @@ agent-usages · 2026-09-17 · claude·codex·dsh · 12 会话 · 19 子代理
 
 按 agent 的完整数字也在 JSON 里：顶层 `agents[]`、每个项目的 `agents` / `agentTotals[]`。
 
-同一个 git 仓库出现多个项目时，树里还会多一层**仓库行**（`Memolink 仓库 · 2 个项目`），仓库行的数字是下面各项目之和；只有它一个节点时连根节点那行都省掉。项目行上的徽标说明它跟仓库的关系——`· git worktree · lynx-rewrite`、`· git submodule · inner`、`· git repo · Memolink`（git 的术语不翻译）；主工作区不加徽标，因为仓库行就写着它。详见 [Git 工作区](README.md#git-工作区worktree)。
+同一个 git 仓库出现多个项目时，树里还会多一层**仓库行**（`demo-app 仓库 · 2 个项目`），仓库行的数字是下面各项目之和；只有它一个节点时连根节点那行都省掉。项目行上的徽标说明它跟仓库的关系——`· git worktree · feature-x`、`· git submodule · inner`、`· git repo · demo-app`（git 的术语不翻译）；主工作区不加徽标，因为仓库行就写着它。详见 [Git 工作区](README.md#git-工作区worktree)。
 
 ## 指标字段
 
@@ -129,7 +129,7 @@ token 数字用紧凑写法（`K` / `M` / `B`，三位有效数字），显示�
 | `--subagents` | 在 `--subagent` 之外，把每个子代理也逐个列出 |
 
 ```
-Memolink (~/ws/apps/Memolink) 2026-08-16
+demo-app (~/ws/apps/demo-app) 2026-08-16
   总      I/M 889K ¥2.8527 · I/C 257.6M / 99.7% ¥12.1085 · … · Q 1,027 · ¥22.0154
   自身    I/M 680K ¥2.0000 · I/C 252.3M / 99.7% ¥11.9000 · … · Q 931 · ¥18.0882
   子代理  I/M 209K ¥0.9400 · I/C 5.27M / 96.2% ¥0.7912 · … · Q 96 · ¥3.9273

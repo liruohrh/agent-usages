@@ -157,8 +157,8 @@ DSH 的每一次子代理调用都是一个**独立会话**，因此每笔子代
 | `--subagents` | 在 `--subagent` 之外，把每个子代理也逐个列出 |
 
 ```
-$ agent-usages usage -p Memolink --subagent
-Memolink (~/ws/apps/Memolink) 2026-08-16
+$ agent-usages usage -p demo-app --subagent
+demo-app (~/ws/apps/demo-app) 2026-08-16
   总      I/M 889K ¥2.8527 · I/C 257.6M / 99.7% ¥12.1085 · I/T 258.5M ¥14.9612 · O 368K ¥2.8015 · R 558K / 60.3% ¥4.2527 · O/T 926K ¥7.0542 · T 259.4M · Q 1,027 · ¥22.0154
   自身    I/M 680K ¥1.9127 · I/C 252.3M / 99.7% ¥11.3174 · I/T 253.0M ¥13.2301 · O 274K ¥1.7461 · R 489K / 64.1% ¥3.112 · O/T 763K ¥4.8581 · T 253.8M · Q 931 · ¥18.0882
   子代理  I/M 209K ¥0.94 · I/C 5.27M / 96.2% ¥0.7912 · I/T 5.48M ¥1.7312 · O 93K ¥1.2607 · R 69K / 42.6% ¥0.9354 · O/T 163K ¥2.1961 · T 5.65M · Q 96 · ¥3.9273
@@ -237,7 +237,7 @@ agent-usages 2026-09-17
   ❯ pnpm cli $ node 2026-09-22
     I/M 561K ¥0.5614 · I/C 234.0M / 99.8% ¥4.68 · I/T 234.6M ¥5.2414 · O 630K ¥2.522 · O/T 630K ¥2.522 · T 235.2M · Q 653 · ¥7.7634
 
-Memolink (~/ws/apps/Memolink) 2026-08-16
+demo-app (~/ws/apps/demo-app) 2026-08-16
   I/M 889K ¥2.8527 · I/C 257.6M / 99.7% ¥12.1085 · I/T 258.5M ¥14.9612 · O 368K ¥2.8015 · R 558K / 60.3% ¥4.2527 · O/T 926K ¥7.0542 · T 259.4M · Q 1,027 · ¥22.0154
   查看草稿未解决问题
     I/M 258K ¥0.7729 · I/C 178.9M / 99.9% ¥4.4717 · I/T 179.1M ¥5.2446 · O 141K ¥0.8469 · R 342K / 70.8% ¥2.049 · O/T 483K ¥2.8959 · T 179.6M · Q 488 · ¥8.1405
@@ -249,7 +249,7 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 - **项目名后是开始日，会话/子代理名后是结束日**；与上一级日期相同就省略。
 - 窗口标题带数据实际跨度：`本周 · 2026-09-17 ~ 18`（同月只写一次月份）、`今日 · 2026-09-18 0h~3h`（同日才带小时；整段在同一小时写作 `8h ~`）。
 - 只有一个会话的项目、只有一个子代理的会话会省掉重复的聚合行。
-- 同一个 git 仓库出现多个项目时，多一层 `Memolink 仓库 · 2 个项目`，项目行带 `· git worktree · 分支名` 徽标——见 [Git 工作区](#git-工作区worktree)。
+- 同一个 git 仓库出现多个项目时，多一层 `demo-app 仓库 · 2 个项目`，项目行带 `· git worktree · 分支名` 徽标——见 [Git 工作区](#git-工作区worktree)。
 - 指标字段：`I/M` 未命中输入、`I/C` 缓存命中（后跟 `/ 缓存命中比`）、`I/W` 缓存写入（仅在不为 0 时出现）、`I/T` 输入合计、`O` 输出（非思考）、`R` 思考（后跟 `/ 思考占比`，仅在不为 0 时出现）、`O/T` 输出合计、`T` Token 总计、`Q` 请求数、行尾是费用总额。
 - 每一项都带自己的费用：`I/M`、`I/C`、`I/W` 是三个独立计费项，`O` 与 `R` 是输出账单的拆分（在单价已知的那一段里按 token 占比分），`I/T`、`O/T` 是组成部分之和——所以 `I/T + O/T` 永远等于行尾总额，而且上下各行相加也永远相等。
 
@@ -276,7 +276,7 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 {
   "version": 1,
   "projects": [
-    { "name": "Memolink", "paths": ["~/ws/apps/Memolink", "/abs/other"] }
+    { "name": "demo-app", "paths": ["~/ws/apps/demo-app", "/abs/other"] }
   ]
 }
 ```
@@ -303,8 +303,8 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 agent 是按**目录**记项目的，而一个 git 仓库不是目录：主工作区、每个 `git worktree`、被人单独打开的 monorepo 子包，在 agent 眼里都是互不相干的项目。于是同一笔账被拆成好几行——本机就有现成的例子：
 
 ```
-Memolink (~/ws/apps/Memolink)                      主工作区
-lynx-rewrite (~/workspaces/Memolink/lynx-rewrite)  ← ~/ws/apps/Memolink 的 worktree
+demo-app (~/ws/apps/demo-app)                      主工作区
+feature-x (~/ws/apps/demo-app/feature-x)  ← ~/ws/apps/demo-app 的 worktree
 ```
 
 工具会**读 `.git` 而不调用 git**（零依赖、无副作用）：向上找到最近的 `.git`，是目录就是主工作区；是文件就读里面的 `gitdir:` 指针——指向 `.git/worktrees/<name>` 就是 worktree，指向 `.git/modules/<name>` 就是子模块。分支名从 `HEAD` 直接读。
@@ -314,16 +314,16 @@ lynx-rewrite (~/workspaces/Memolink/lynx-rewrite)  ← ~/ws/apps/Memolink 的 wo
 - **一个仓库有两个以上项目时，多一层仓库行**（单项目时保持原样，不重复说同一个数字）：
 
   ```
-  Memolink 仓库 · 2 个项目 2026-08-16
+  demo-app 仓库 · 2 个项目 2026-08-16
     I/M 1.61M ¥3.9391 · … · Q 1,712 · ¥45.3964
-    Memolink (~/ws/apps/Memolink) 2026-08-16
+    demo-app (~/ws/apps/demo-app) 2026-08-16
       … Q 1,027 · ¥22.0152
-    lynx-rewrite (~/workspaces/Memolink/lynx-rewrite) 2026-08-29 · git worktree · lynx-rewrite
+    feature-x (~/ws/apps/demo-app/feature-x) 2026-08-29 · git worktree · feature-x
       … Q 685 · ¥23.3812
   ```
 
   仓库行永远是下面各行之和，主工作区排在自己的 worktree 前面。
-- **worktree / 子模块 / 仓库内子目录的项目行带 `git <种类> · <细节>` 徽标**（`git worktree · lynx-rewrite`、`git submodule · inner`、`git repo · Memolink`）——git 自己的术语两种语言都不译；被单独筛出来时也认得它是什么：`-p lynx-rewrite` 仍然显示 `· git worktree · lynx-rewrite`。
+- **worktree / 子模块 / 仓库内子目录的项目行带 `git <种类> · <细节>` 徽标**（`git worktree · feature-x`、`git submodule · inner`、`git repo · demo-app`）——git 自己的术语两种语言都不译；被单独筛出来时也认得它是什么：`-p feature-x` 仍然显示 `· git worktree · feature-x`。
 - **`session list` 的项目行带同样的徽标**，并可 `-r/--repo-filter` 过滤。
 - 指向已删除的目录、或本来就不在仓库里（`/tmp` 之类）的项目**不加任何东西**——宁可不说，也不猜。
 - JSON 里永远给出完整信息（`repos[]` 与每个项目的 `repo`），文本只在值得时才多一行：数据要全，表格要好读。
@@ -373,7 +373,7 @@ pnpm link --global && agent-usages usage
   "rateMode": "historical",       // 可选：按记录当天的汇率折算（默认 latest）
   "updates": { "pricing": true, "rates": false },   // 默认值
   "projects": [                   // 可选：显式声明项目（见「项目与工作区」）
-    { "name": "Memolink", "paths": ["~/ws/apps/Memolink"] }
+    { "name": "demo-app", "paths": ["~/ws/apps/demo-app"] }
   ],
   "pricing": {                    // 覆盖厂商的某些价格区间，其余仍用默认表
     "version": 1, "updatedAt": "2026-09-21",

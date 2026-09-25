@@ -76,6 +76,7 @@ import { inRange, resolveRange, type TimeRange } from '../timerange.ts';
 
 import type {
   AgentTotals,
+  BandComponentRow,
   BandRow,
   Dashboard,
   DashboardTotals,
@@ -892,8 +893,8 @@ function buildDashboard(input: BuildInput): Dashboard {
     projects,
     repos: drafts.repos,
     timeseries: { day: pricePoints(facts.day, engine), hour: pricePoints(facts.hour, engine) },
-    models: drafts.projects.flatMap((draft) => draft.models),
-    bands: drafts.projects.flatMap((draft) => draft.bands),
+    models: mergeModelRows(drafts.projects.flatMap((draft) => draft.models)),
+    bands: mergeBandRows(drafts.projects.flatMap((draft) => draft.bands)),
     warnings: [...input.warnings],
   };
   detailIndex.set(dashboard, drafts.reports);
@@ -1230,8 +1231,8 @@ function finishProject(draft: ProjectDraft): ProjectSummary {
     agentTotals: [...draft.agentTotals.values()].sort((left, right) => left.id.localeCompare(right.id)),
     workspaceNodes: workspaces,
     sessionReports: sessions,
-    models: draft.models,
-    bands: draft.bands,
+    models: mergeModelRows(draft.models),
+    bands: mergeBandRows(draft.bands),
     repo: draft.repo,
   };
 }
@@ -1294,6 +1295,85 @@ function bandRow(agent: string, projectId: string, band: BandSummary): BandRow {
 // ---------------------------------------------------------------------------
 // Filtering, series aggregation, session detail
 // ---------------------------------------------------------------------------
+
+/**
+ * One row per (agent, project, model), which is what the model table shows.
+ *
+ * A session bills the same model many times over its life and every root session
+ * contributes its own row, so the collected list repeats: the UI then draws
+ * identical rows — and, because the row key *is* this triple, duplicate React
+ * keys, which is how a scope switch leaves stale rows behind. The figures are
+ * added, never re-derived, so the rows still sum to the project's own totals.
+ *
+ * @param rows - the per-session rows.
+ * @returns one row per (agent, project, model), in first-seen order.
+ */
+function mergeModelRows(rows: readonly ModelRow[]): ModelRow[] {
+  const merged = new Map<string, ModelRow>();
+  for (const row of rows) {
+    const key = `${row.agent}\u0000${row.projectId}\u0000${row.model}`;
+    const known = merged.get(key);
+    if (known === undefined) {
+      merged.set(key, { ...row, tokens: { ...row.tokens }, cost: { ...row.cost } });
+      continue;
+    }
+    known.requests += row.requests;
+    known.tokens = addTokens(known.tokens, row.tokens);
+    known.cost = addCostTotals(known.cost, row.cost);
+  }
+  return [...merged.values()];
+}
+
+/** Fold one band's rate card into another's: same components, added quantities. */
+function mergeBandComponents(known: BandComponentRow[], incoming: readonly BandComponentRow[]): void {
+  const byId = new Map(known.map((component) => [component.id, component]));
+  for (const component of incoming) {
+    const existing = byId.get(component.id);
+    if (existing === undefined) {
+      const copy: BandComponentRow = {
+        ...component,
+        ...(component.excess === undefined ? {} : { excess: { ...component.excess } }),
+        ...(component.ttl === undefined ? {} : { ttl: { ...component.ttl } }),
+      };
+      known.push(copy);
+      byId.set(copy.id, copy);
+      continue;
+    }
+    existing.tokens += component.tokens;
+    existing.amount = addAmounts(existing.amount, component.amount);
+    if (existing.excess !== undefined && component.excess !== undefined) {
+      existing.excess.tokens += component.excess.tokens;
+      existing.excess.amount = addAmounts(existing.excess.amount, component.excess.amount);
+    }
+    if (existing.ttl !== undefined && component.ttl !== undefined) existing.ttl.tokens += component.ttl.tokens;
+  }
+}
+
+/**
+ * One row per (agent, project, model, price band) — the band table's contract,
+ * the same rule as {@link mergeModelRows} one level finer.
+ *
+ * @param rows - the per-session rows.
+ * @returns one row per band, in first-seen order.
+ */
+function mergeBandRows(rows: readonly BandRow[]): BandRow[] {
+  const merged = new Map<string, BandRow>();
+  for (const row of rows) {
+    const key = [row.agent, row.projectId, row.model, row.periodId, row.tier].join('\u0000');
+    const known = merged.get(key);
+    if (known === undefined) {
+      const copy: BandRow = { ...row, tokens: { ...row.tokens }, cost: { ...row.cost }, components: [] };
+      mergeBandComponents(copy.components, row.components);
+      merged.set(key, copy);
+      continue;
+    }
+    known.requests += row.requests;
+    known.tokens = addTokens(known.tokens, row.tokens);
+    known.cost = addCostTotals(known.cost, row.cost);
+    mergeBandComponents(known.components, row.components);
+  }
+  return [...merged.values()];
+}
 
 /**
  * One project, narrowed to the agents a query asked for.
@@ -1550,11 +1630,11 @@ function buildDetail(dashboard: Dashboard, project: ProjectSummary, session: Ses
   const models =
     report === undefined
       ? dashboard.models.filter((row) => row.projectId === project.id && row.agent === session.agent)
-      : report.models.map((model) => modelRow(session.agent, project.id, model));
+      : mergeModelRows(report.models.map((model) => modelRow(session.agent, project.id, model)));
   const bands =
     report === undefined
       ? dashboard.bands.filter((row) => row.projectId === project.id && row.agent === session.agent)
-      : report.bands.map((band) => bandRow(session.agent, project.id, band));
+      : mergeBandRows(report.bands.map((band) => bandRow(session.agent, project.id, band)));
   return { session, models, bands, ancestors, tree: treeOf(session, new Set()) };
 }
 
@@ -1859,8 +1939,24 @@ export function normalizeSnapshot(parsed: unknown, path: string): Dashboard {
     projects,
     repos: Array.isArray(root['repos']) ? (root['repos'] as unknown[]).map((item) => normalizeRepo(item)) : [],
     timeseries: { day: series(timeseriesRoot['day'], 'day'), hour: series(timeseriesRoot['hour'], 'hour') },
-    models: Array.isArray(root['models']) ? (root['models'] as unknown[]).map((item) => normalizeModelRow(item)) : [],
-    bands: Array.isArray(root['bands']) ? (root['bands'] as unknown[]).map((item) => normalizeBandRow(item)) : [],
+    // The global lists are the projects' rows added up, exactly as in live mode,
+    // so a snapshot cannot disagree with its own projects. A file whose projects
+    // are missing still gets what its root lists say (merged, since a row per
+    // session would give the tables duplicate keys).
+    models: mergeModelRows(
+      projects.length > 0
+        ? projects.flatMap((project) => project.models)
+        : Array.isArray(root['models'])
+          ? (root['models'] as unknown[]).map((item) => normalizeModelRow(item))
+          : [],
+    ),
+    bands: mergeBandRows(
+      projects.length > 0
+        ? projects.flatMap((project) => project.bands)
+        : Array.isArray(root['bands'])
+          ? (root['bands'] as unknown[]).map((item) => normalizeBandRow(item))
+          : [],
+    ),
     warnings,
   };
   const reports = new Map<string, SessionReport>();
@@ -1954,8 +2050,15 @@ function normalizeProject(value: unknown): ProjectSummary {
     agentTotals,
     workspaceNodes,
     sessionReports: sessions,
-    models: Array.isArray(entry['models']) ? (entry['models'] as unknown[]).map((item) => normalizeModelRow(item)) : [],
-    bands: Array.isArray(entry['bands']) ? (entry['bands'] as unknown[]).map((item) => normalizeBandRow(item)) : [],
+    // Snapshots are read as-is, but a snapshot written before the rows were
+    // merged (or a report JSON) can still carry one row per session: merging on
+    // the way in keeps the tables' keys unique either way.
+    models: Array.isArray(entry['models'])
+      ? mergeModelRows((entry['models'] as unknown[]).map((item) => normalizeModelRow(item)))
+      : [],
+    bands: Array.isArray(entry['bands'])
+      ? mergeBandRows((entry['bands'] as unknown[]).map((item) => normalizeBandRow(item)))
+      : [],
     repo: entry['repo'] === undefined ? undefined : normalizeRepoInfo(entry['repo']),
   };
 }
