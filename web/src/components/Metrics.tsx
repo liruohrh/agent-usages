@@ -166,7 +166,7 @@ export function Composition({
     <Card title="构成">
       <div className="space-y-2.5">
         {bar((piece) => (totalTokens === 0 ? 0 : piece.tokens / totalTokens), 'token')}
-        {bar((piece) => (totalMoney === 0 ? 0 : Number(piece.money) / totalMoney), '金额')}
+        {bar((piece) => (totalMoney === 0 ? 0 : Number(piece.money) / totalMoney), '费用')}
       </div>
       <table className="mt-4 w-full border-collapse text-[13px]">
         <thead>
@@ -174,7 +174,7 @@ export function Composition({
             <th className="pb-1 text-left font-medium">计费桶</th>
             <th className="pb-1 text-right font-medium">tokens</th>
             <th className="pb-1 text-right font-medium">占比</th>
-            <th className="pb-1 text-right font-medium">金额</th>
+            <th className="pb-1 text-right font-medium">费用</th>
           </tr>
         </thead>
         <tbody>
@@ -198,7 +198,7 @@ export function Composition({
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-faint">
-        条长按占比：上图按 token，下图按金额。五项互不重叠（I/M + I/C + I/W + O + R = 全部），
+        条长按占比：上图按 token，下图按费用。五项互不重叠（I/M + I/C + I/W + O + R = 全部），
         其中 O 是"输出里不算思考的那部分"。合计{' '}
         <span className="tnum text-muted">{formatTokens(totalTokens, true)}</span> tokens ·{' '}
         <span className="tnum text-muted">{formatCost(cost.total, symbol)}</span>

@@ -105,68 +105,33 @@ function CompositionBar({
   );
 }
 
-/** One colour per entry (not per bucket): the analysis pies slice by entry. */
-const PIE_COLORS = ['#58a6ff', '#a78bfa', '#34d399', '#f59e0b', '#f472b6', '#22d3ee', '#84cc16', '#fb7185'];
+/**
+ * One colour per entry, keyed by the entry itself rather than by its rank in a
+ * given chart: the same project keeps the same colour in every chart, so the eye
+ * can follow it across metrics.
+ */
+const ENTRY_COLORS = ['#58a6ff', '#a78bfa', '#34d399', '#f59e0b', '#f472b6', '#22d3ee', '#84cc16', '#fb7185'];
 
-/** One slice of an analysis pie. */
-interface Slice {
-  key: string;
-  label: string;
-  value: number;
-  share: number;
-  color: string;
-  hint: string;
-}
-
-/** A donut, drawn from slices whose shares add up to 1. */
-function Donut({ slices, size = 112 }: { slices: readonly Slice[]; size?: number }): React.ReactElement {
-  const stroke = 16;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  let offset = 0;
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="构成">
-      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={stroke} style={{ stroke: 'var(--raised)' }} />
-      {slices.map((slice) => {
-        const length = slice.share * circumference;
-        const circle = (
-          <circle
-            key={slice.key}
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke={slice.color}
-            strokeWidth={stroke}
-            strokeDasharray={`${length} ${circumference - length}`}
-            strokeDashoffset={-offset}
-            transform={`rotate(-90 ${size / 2} ${size / 2})`}
-          >
-            <title>{slice.hint}</title>
-          </circle>
-        );
-        offset += length;
-        return circle;
-      })}
-    </svg>
-  );
-}
+/** How many entries a chart names before folding the rest into a total. */
+const CHART_ROWS = 6;
 
 /**
- * One metric, split across the whole list — the "who owns this total" view.
+ * One metric, split across the list — the "who owns this total" view.
  *
- * The row bars answer "what is this row made of"; these pies answer "where does
- * this figure come from" (all projects' `I/M`, all sessions' cost, …). The biggest
- * five are named and the rest are folded into 其他: a pie with twenty-nine slices
- * cannot be read.
+ * A horizontal bar per entry, longest first, whose length is that entry's **share
+ * of the metric's total**: a full bar means "all of it" in every chart, so the
+ * charts stay comparable with each other. The row bars answer "what is this entry
+ * made of"; these answer "where does this figure come from".
  */
-function MetricPie({
+function MetricChart({
   metric,
   entries,
+  colors,
   symbol,
 }: {
   metric: SortMetric;
   entries: readonly RankedEntry[];
+  colors: ReadonlyMap<string, string>;
   symbol: string;
 }): React.ReactElement {
   const valued = entries
@@ -174,55 +139,52 @@ function MetricPie({
     .filter((item) => item.value > 0)
     .sort((left, right) => right.value - left.value);
   const total = valued.reduce((sum, item) => sum + item.value, 0);
-  const asMoney = metric.key === 'cost' || metric.key === 'cacheCost';
+  const asMoney = metric.key === 'cost';
   const format = (value: number): string => (asMoney ? formatCost(String(value), symbol) : formatTokens(value, true));
+  const shown = valued.slice(0, CHART_ROWS);
 
-  const slices: Slice[] = valued.slice(0, 5).map((item, index) => ({
-    key: item.entry.key,
-    label: item.entry.title,
-    value: item.value,
-    share: total === 0 ? 0 : item.value / total,
-    color: PIE_COLORS[index % PIE_COLORS.length] ?? '#8b949e',
-    hint: `${item.entry.title}：${format(item.value)}（${formatShare(total === 0 ? 0 : item.value / total)}）`,
-  }));
-  const rest = valued.slice(5);
-  if (rest.length > 0) {
-    const value = rest.reduce((sum, item) => sum + item.value, 0);
-    slices.push({
-      key: '__rest',
-      label: `其他 ${rest.length} 项`,
-      value,
-      share: total === 0 ? 0 : value / total,
-      color: '#6b7d92',
-      hint: `其他 ${rest.length} 项：${format(value)}`,
-    });
-  }
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-line p-3" data-pie={metric.key}>
-      <Donut slices={slices} />
-      <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-fg" data-metric={metric.key}>
-          {metric.label}
-        </div>
-        <ul className="mt-1 space-y-0.5">
-          {slices.map((slice) => (
-            <li key={slice.key} className="flex items-center gap-1.5 text-[11px]">
-              <span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: slice.color }} />
-              <span className="min-w-0 flex-1 truncate text-muted" title={slice.label}>
-                {slice.label}
-              </span>
-              <span className="tnum shrink-0 text-fg">{format(slice.value)}</span>
-              <span className="tnum w-10 shrink-0 text-right text-faint">{formatShare(slice.share)}</span>
-            </li>
-          ))}
-        </ul>
+    <div className="rounded-lg border border-line p-3" data-chart={metric.key}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[13px] font-medium text-fg">{metric.label}</span>
+        <span className="tnum shrink-0 text-[11px] text-faint" title="这个指标的合计">
+          {format(total)}
+        </span>
       </div>
+      <ul className="mt-2 space-y-1.5">
+        {shown.length === 0 && <li className="text-[11px] text-faint">这个指标全是 0。</li>}
+        {shown.map((item) => {
+          const share = total === 0 ? 0 : item.value / total;
+          return (
+            <li
+              key={item.entry.key}
+              className="flex items-center gap-2"
+              title={`${item.entry.title}：${format(item.value)}（占该指标的 ${formatShare(share)}）`}
+            >
+              <span className="w-36 shrink-0 truncate text-[11px] text-muted">{item.entry.title}</span>
+              <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-raised">
+                <span
+                  className="block h-full rounded-full"
+                  style={{ width: `${share * 100}%`, backgroundColor: colors.get(item.entry.key) ?? '#8b949e' }}
+                />
+              </span>
+              <span className="tnum w-16 shrink-0 text-right text-[11px] text-fg">{format(item.value)}</span>
+              <span className="tnum w-10 shrink-0 text-right text-[11px] text-faint">{formatShare(share)}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {valued.length > shown.length && (
+        <p className="mt-1.5 text-[11px] text-faint">
+          其余 {valued.length - shown.length} 项合计 {format(total - shown.reduce((sum, item) => sum + item.value, 0))}
+        </p>
+      )}
     </div>
   );
 }
 
-/** The analysis panel: one pie per metric, across every row of the list. */
-function MetricPies({
+/** The analysis panel: one chart per metric, across every row of the list. */
+function MetricCharts({
   entries,
   symbol,
   metrics,
@@ -231,15 +193,21 @@ function MetricPies({
   symbol: string;
   metrics: readonly SortMetric[];
 }): React.ReactElement {
+  // Colours follow the list's own order, so an entry keeps its colour whichever
+  // metric is being charted.
+  const colors = new Map(
+    entries.map((entry, index) => [entry.key, ENTRY_COLORS[index % ENTRY_COLORS.length] ?? '#8b949e']),
+  );
   return (
     <div className="mb-3 rounded-lg border border-line bg-panel/60 p-3">
       <p className="mb-3 text-[11px] leading-5 text-faint">
-        每个指标一张饼：把列表里所有条目的这个指标加起来，看「这个总数是谁贡献的」（各饼只列前五项，其余合并为
-        「其他」）。想知道单个条目自己的构成，看每行的条。
+        每个指标一张横向柱状图：把这个指标在列表所有条目上的值加起来，看「这个总数是谁贡献的」。条长 =
+        该条目占这个指标总量的比例（每张图都是「占满 = 全部」），右边是数值与占比；只列前 {CHART_ROWS} 项，
+        其余在下面给合计。想知道单个条目自己的构成，看每行的条。
       </p>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {metrics.map((metric) => (
-          <MetricPie key={metric.key} metric={metric} entries={entries} symbol={symbol} />
+          <MetricChart key={metric.key} metric={metric} entries={entries} colors={colors} symbol={symbol} />
         ))}
       </div>
     </div>
@@ -277,13 +245,7 @@ export const SORT_METRICS: SortMetric[] = [
   },
   { key: 'reasoning', label: 'R', hint: '思考（输出的一部分，O 里已扣除）', value: (entry) => entry.tokens.reasoning, optional: true },
   { key: 'tokens', label: '总 token', hint: '计费桶 token 合计', value: (entry) => billedTokens(entry.tokens) },
-  {
-    key: 'cacheCost',
-    label: '缓存金额',
-    hint: '缓存命中这条计费项花掉的钱',
-    value: (entry) => Number(entry.cost.cacheHitInputCost),
-  },
-  { key: 'cost', label: '费用', hint: '总费用', value: (entry) => Number(entry.cost.total) },
+  { key: 'cost', label: '费用', hint: '总费用（缓存命中的钱＝I/C 那一项的钱，不单列）', value: (entry) => Number(entry.cost.total) },
   { key: 'recent', label: '最近', hint: '最后一次计费时间', value: (entry) => entry.lastUsage ?? 0 },
 ];
 
@@ -311,7 +273,7 @@ export function BucketDetail({
             <th className="pb-1 text-left font-medium">计费桶</th>
             <th className="pb-1 text-right font-medium">tokens</th>
             <th className="pb-1 text-right font-medium">占比</th>
-            <th className="pb-1 text-right font-medium">金额</th>
+            <th className="pb-1 text-right font-medium">费用</th>
           </tr>
         </thead>
         <tbody>
@@ -412,9 +374,9 @@ export function RankedList({
             type="button"
             onClick={() => setAnalysis((value) => !value)}
             className={`rounded border px-2 py-0.5 text-[11px] ${analysis ? 'border-accent/50 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
-            title="每个指标一张饼：这个总数是谁贡献的"
+            title="每个指标一张横向柱状图：这个总数是谁贡献的"
           >
-            {analysis ? '收起饼图' : '饼图分析'}
+            {analysis ? '收起图表' : '图表分析'}
           </button>
           <label className="flex items-center gap-1 text-[11px] text-muted">
             排序
@@ -448,10 +410,10 @@ export function RankedList({
         <p className="py-8 text-center text-[13px] text-faint">{emptyText}</p>
       ) : (
         <>
-          {/* A pie of timestamps would be meaningless: the pies cover the figures
-              that add up to something, not the recency. */}
+          {/* A chart of timestamps would be meaningless: the charts cover the
+              figures that add up to something, not the recency. */}
           {analysis && (
-            <MetricPies
+            <MetricCharts
               entries={rows}
               symbol={symbol}
               metrics={metrics.filter((candidate) => candidate.key !== 'recent')}
@@ -490,8 +452,9 @@ export function RankedList({
               </span>
             </div>
             <p className="mt-1.5 text-[11px] leading-5 text-faint" title={BAR_RULE}>
-              条 = 这一行自己的 token 构成（整条 100%，<span className="text-muted">不表示大小</span>，大小看数字）；
-              条下每个指标都能点，点谁按谁排序，当前排序是「{metric.label} {desc ? '降序' : '升序'}」。
+              条 = 这一行自己的 token 构成（整条 100%，<span className="text-muted">不表示大小</span>——大小看右边的数字）；
+              条下是五个计费桶各自的 tokens 与费用。排序用「排序」下拉，当前是「{metric.label}
+              {desc ? '降序' : '升序'}」；点一行展开这一行的全部计费桶。
             </p>
           </div>
 
@@ -657,7 +620,7 @@ export function AgentBoard({
       symbol={symbol}
       title={title}
       emptyText="当前范围没有被读到的 agent。"
-      footnote="点一行展开这个 agent 的每个计费桶；金额都是它自己产生的。"
+      footnote="点一行展开这个 agent 的每个计费桶；费用都是它自己产生的。"
     />
   );
 }
@@ -756,7 +719,7 @@ export function ProjectBoard({
       emptyText="当前范围没有项目。"
       footnote={
         projects === undefined
-          ? '点一行展开这个工作区的每个计费桶；金额都是它自己产生的。'
+          ? '点一行展开这个工作区的每个计费桶；费用都是它自己产生的。'
           : '点一行展开这个项目的每个计费桶；点名字进入项目页。'
       }
     />

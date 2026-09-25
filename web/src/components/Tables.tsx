@@ -121,7 +121,7 @@ export function AgentTable({
             {(
               [
                 { key: 'tokens', label: '数量' },
-                { key: 'cost', label: '金额' },
+                { key: 'cost', label: '费用' },
                 { key: 'share', label: '占比' },
               ] as const
             ).map((option) => (
@@ -226,18 +226,18 @@ export function AgentTable({
         {detailed ? (
           <>
             四个桶互不重叠：<span className="text-muted">I/T = I/M + I/W + I/C</span>，思考含在输出里，
-            <span className="text-muted">O/T = O + R</span>。切到「金额」时每格是该项自己的钱。
+            <span className="text-muted">O/T = O + R</span>。切到「费用」时每格是该项自己的钱。
           </>
         ) : (
           <>
             默认只列请求数、tokens 合计、费用与占比；「展开分桶」出现 <span className="text-muted">I/M I/W I/C I/T O R O/T</span>，
-            并可在数量 / 金额 / 占比之间切换。
+            并可在数量 / 费用 / 占比之间切换。
           </>
         )}
       </p>
       {agents.some((agent) => agent.unpriced > 0) && (
         <p className="mt-2 text-[11px] text-warn">
-          有 {agents.reduce((total, agent) => total + agent.unpriced, 0)} 条记录的价格表里没有对应模型，未计入金额。
+          有 {agents.reduce((total, agent) => total + agent.unpriced, 0)} 条记录的价格表里没有对应模型，未计入费用。
         </p>
       )}
     </Card>
@@ -488,7 +488,6 @@ type SortKey =
   | 'output'
   | 'reasoning'
   | 'tokens'
-  | 'cacheCost'
   | 'cost'
   | 'lastUsage';
 
@@ -510,7 +509,6 @@ const COLUMNS: readonly SessionColumn[] = [
   { key: 'requests', label: 'Q', kind: 'num', always: true, title: '请求数' },
   { key: 'inputMiss', label: 'I/M', kind: 'num', title: '未命中缓存的输入' },
   { key: 'cacheRead', label: 'I/C', kind: 'num', always: true, title: '缓存命中输入（tokens）' },
-  { key: 'cacheCost', label: '缓存金额', kind: 'num', always: true, title: '缓存命中输入这条计费项花掉的钱' },
   { key: 'cacheWrite', label: 'I/W', kind: 'num', title: '缓存写入输入' },
   { key: 'output', label: 'O', kind: 'num', title: '输出（含思考）' },
   { key: 'reasoning', label: 'R', kind: 'num', title: '其中思考' },
@@ -547,8 +545,6 @@ function sortValue(session: SessionNode, key: SortKey): number | string {
       return session.tokens.reasoning;
     case 'tokens':
       return session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite + session.tokens.output;
-    case 'cacheCost':
-      return Number(session.cost.cacheHitInputCost);
     case 'cost':
       return Number(session.cost.total);
     case 'lastUsage':
@@ -631,8 +627,6 @@ function SessionCell({
       return num(formatTokens(session.tokens.reasoning, true));
     case 'tokens':
       return num(formatTokens(billedTotal(session.tokens), true));
-    case 'cacheCost':
-      return num(formatCost(session.cost.cacheHitInputCost, symbol));
     case 'cost':
       return (
         <td className="tnum whitespace-nowrap px-2 py-1.5 text-right">
@@ -874,7 +868,7 @@ export function BandTable({
                               <th className="px-1 py-0.5 text-left font-medium">计费项</th>
                               <th className="px-1 py-0.5 text-right font-medium">单价</th>
                               <th className="px-1 py-0.5 text-right font-medium">tokens</th>
-                              <th className="px-1 py-0.5 text-right font-medium">金额</th>
+                              <th className="px-1 py-0.5 text-right font-medium">费用</th>
                             </tr>
                           </thead>
                           <tbody>

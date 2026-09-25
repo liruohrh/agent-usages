@@ -396,7 +396,7 @@ test.describe('the usage tab', () => {
 
     const firstBucket = table.locator('tbody tr').first().locator('td').nth(3);
     const asTokens = await firstBucket.innerText();
-    await table.getByRole('button', { name: '金额' }).click();
+    await table.getByRole('button', { name: '费用' }).click();
     expect(await firstBucket.innerText()).not.toBe(asTokens);
     expect(await firstBucket.innerText()).toContain('¥');
     await table.getByRole('button', { name: '占比' }).click();
@@ -492,36 +492,38 @@ test.describe('the session leaderboard', () => {
     await expect(rowAt(page, 0)).toContainText(cheapest?.title ?? '');
   });
 
-  test('folds a per-metric pie chart behind one button', async ({ page }) => {
+  test('folds the per-metric charts behind one button', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
-    const button = page.locator('main section header').getByRole('button', { name: '饼图分析' });
+    const button = page.locator('main section header').getByRole('button', { name: '图表分析' });
 
-    // Folded away by default: no pies until asked.
-    expect(await page.locator('main section svg').count()).toBe(0);
+    // Folded away by default: no charts until asked.
+    expect(await page.locator('[data-chart]').count()).toBe(0);
     await button.click();
 
-    const panel = page.locator('main section div.mb-3').first();
-    await expect(panel).toBeVisible();
-    const titles = await panel.locator('[data-metric]').allInnerTexts();
-    for (const metric of ['Q', 'I/M', 'I/C', 'O', '总 token', '费用']) {
-      expect(titles, `pie ${metric}`).toContain(metric);
+    const charts = page.locator('[data-chart]');
+    const labels = (await charts.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-chart')))).filter(
+      (key): key is string => key !== null,
+    );
+    for (const metric of ['requests', 'input', 'cacheRead', 'output', 'tokens', 'cost']) {
+      expect(labels, `chart ${metric}`).toContain(metric);
     }
-    // One donut per metric, minus the recency figure, which has no meaningful sum.
-    expect(await panel.locator('svg').count()).toBe(titles.length);
-    expect(titles).not.toContain('最近');
+    // No cache-money chart (it is the I/C figure's money) and no recency chart
+    // (timestamps do not add up to anything).
+    expect(labels).not.toContain('cacheCost');
+    expect(labels).not.toContain('recent');
 
-    // The cost pie names the dearest session first, with its share of the list.
+    // The cost chart names the dearest session first, with its share of the list.
     const total = sessions.reduce((sum, session) => sum + Number(session.cost.total), 0);
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    const costPie = panel.locator('[data-pie="cost"]');
-    const legend = await costPie.locator('li').allInnerTexts();
-    expect(legend[0]).toContain(dearest?.title ?? '');
-    expect(legend[0]).toContain(((Number(dearest?.cost.total ?? 0) / total) * 100).toFixed(1));
+    const costChart = page.locator('[data-chart="cost"]');
+    const rows = await costChart.locator('li').allInnerTexts();
+    expect(rows[0]).toContain(dearest?.title ?? '');
+    expect(rows[0]).toContain(((Number(dearest?.cost.total ?? 0) / total) * 100).toFixed(1));
 
     // And it folds back.
-    await page.locator('main section header').getByRole('button', { name: '收起饼图' }).click();
-    expect(await page.locator('main section svg').count()).toBe(0);
+    await page.locator('main section header').getByRole('button', { name: '收起图表' }).click();
+    expect(await page.locator('[data-chart]').count()).toBe(0);
   });
 
   test('each row draws its own composition, including reasoning', async ({ page }) => {

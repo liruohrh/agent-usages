@@ -80,9 +80,6 @@ export function SessionLeaderboard({
               <span className="tnum text-fg">{formatCost(session.spawned.cost.total, symbol)}</span>
             </div>
             <div>
-              缓存命中金额 <span className="tnum text-fg">{formatCost(session.cost.cacheHitInputCost, symbol)}</span>
-            </div>
-            <div>
               请求 <span className="tnum text-fg">{formatTokens(session.requests)}</span>
             </div>
             <Link to={`/s/${encodeURIComponent(session.uid)}`} className="inline-block text-accent hover:underline">
@@ -126,7 +123,7 @@ export function SessionLeaderboard({
           {flat
             ? '含子代理：子代理行与父行会重复计算同一笔用量。'
             : '每行是一个委派子树的根（自身 + 它派生的全部）。'}{' '}
-          点一行展开该会话的全部计费桶与金额。
+          点一行展开该会话的全部计费桶与费用。
           {rows.length > 0 && (
             <>
               {' '}
