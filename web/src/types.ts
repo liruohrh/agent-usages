@@ -222,6 +222,21 @@ export interface DashboardWarning {
   params?: Record<string, unknown>;
 }
 
+/** The languages this build ships; the page can be switched between them. */
+export type Language = 'zh' | 'en';
+
+/** `GET`/`PUT /api/settings`: the language, and where it is remembered. */
+export interface SettingsPayload {
+  /** The language in effect for this answer. */
+  language: Language;
+  /** The language written in the configuration file, if any. */
+  configured: Language | null;
+  /** The file a `PUT` writes to. */
+  path: string;
+  /** Every language this build speaks. */
+  languages: Language[];
+}
+
 export interface DashboardMeta {
   generatedAt: number;
   mode: 'live' | 'snapshot';

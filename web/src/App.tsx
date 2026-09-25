@@ -15,8 +15,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes, useMatch, useNavigate } from 'react-router-dom';
 
-import { fetchDashboard, fetchSession, fetchTimeseries, refresh as refreshApi, type Filters as ApiFilters } from './api';
-import type { Dashboard, SessionDetail, TimeseriesBucket } from './types';
+import {
+  fetchDashboard,
+  fetchSession,
+  fetchSettings,
+  fetchTimeseries,
+  refresh as refreshApi,
+  setApiLanguage,
+  type Filters as ApiFilters,
+} from './api';
+import type { Dashboard, Language, SessionDetail, TimeseriesBucket } from './types';
+import { LanguageProvider, useT } from './i18n';
 import { Filters, type FilterState } from './components/Filters';
 import { ProjectTree } from './components/Tree';
 import { ScopeView } from './components/ScopeView';
@@ -34,8 +43,46 @@ function decodeParam(value: string | undefined): string | null {
   }
 }
 
-/** The dashboard. */
+/**
+ * The dashboard, once the page knows what language to speak.
+ *
+ * The settings answer decides it — the file the CLI reads, so the page opens in
+ * whatever the terminal would print — and nothing is drawn until it lands: one
+ * round trip to a service on this machine, and no flash of the wrong language.
+ */
 export function App(): React.ReactElement {
+  const [language, setLanguage] = useState<Language | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchSettings(controller.signal)
+      .then((settings) => {
+        setApiLanguage(settings.language);
+        setLanguage(settings.language);
+      })
+      // A page that cannot read the settings still works: the server's own
+      // language is what an unqualified request already gets.
+      .catch(() => setLanguage('zh'));
+    return () => controller.abort();
+  }, []);
+
+  if (language === null) return <div className="h-full bg-bg" />;
+  return (
+    <LanguageProvider language={language}>
+      <Dashboard language={language} onLanguage={setLanguage} />
+    </LanguageProvider>
+  );
+}
+
+/** The shell: filters, tree, and the scope the route selects. */
+function Dashboard({
+  language,
+  onLanguage,
+}: {
+  language: Language;
+  onLanguage: (next: Language) => void;
+}): React.ReactElement {
+  const t = useT();
   const navigate = useNavigate();
   // `useParams` only sees the params of a matched route *below* it, and the tree
   // lives above `<Routes>`: `useMatch` answers the same question from anywhere.
@@ -133,6 +180,8 @@ export function App(): React.ReactElement {
     <div className="flex h-full min-h-0 flex-col bg-bg text-fg">
       <Filters
         dashboard={dashboard}
+        language={language}
+        onLanguage={onLanguage}
         filters={filters}
         onChange={setFilters}
         onRefresh={onRefresh}
@@ -147,7 +196,7 @@ export function App(): React.ReactElement {
           className={`${sidebar ? 'absolute inset-y-0 left-0 z-30 w-80 border-r border-line bg-panel shadow-xl' : 'hidden'} min-h-0 shrink-0 lg:relative lg:block lg:w-[340px] lg:border-r lg:border-line lg:bg-panel/60`}
         >
           {dashboard === null ? (
-            <p className="px-3 py-4 text-[12px] text-faint">加载中…</p>
+            <p className="px-3 py-4 text-[12px] text-faint">{t.app.loading}</p>
           ) : (
             <ProjectTree
               dashboard={dashboard}
@@ -169,7 +218,7 @@ export function App(): React.ReactElement {
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3">
           {error !== null && (
             <div className="mb-3">
-              <Notice tone="bad" title="请求失败">
+              <Notice tone="bad" title={t.app.requestFailed}>
                 {error}
               </Notice>
             </div>
@@ -179,7 +228,7 @@ export function App(): React.ReactElement {
               path="/"
               element={
                 dashboard === null ? (
-                  <Notice title="加载中…">正在向本地服务要数据。</Notice>
+                  <Notice title={t.app.loading}>{t.app.loadingHint}</Notice>
                 ) : (
                   <ScopeView
                     dashboard={dashboard}
@@ -200,10 +249,10 @@ export function App(): React.ReactElement {
               path="/p/:id"
               element={
                 dashboard === null ? (
-                  <Notice title="加载中…">正在向本地服务要数据。</Notice>
+                  <Notice title={t.app.loading}>{t.app.loadingHint}</Notice>
                 ) : project === null ? (
-                  <Notice tone="warn" title="没有这个项目">
-                    当前筛选下找不到这个项目，可能是被 agent 或时间范围过滤掉了。
+                  <Notice tone="warn" title={t.app.noProject}>
+                    {t.app.noProjectHint}
                   </Notice>
                 ) : (
                   <ScopeView

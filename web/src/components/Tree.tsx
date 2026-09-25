@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import type { Dashboard, ProjectSummary, SessionNode, WorkspaceNode } from '../types';
 import { formatCost, formatInstant, formatTokens, metricText, shortenPath } from '../format';
 import { AgentBadge, Chip, MoneyTokens } from './Bits';
+import { useT } from '../i18n';
 
 /** The four billed buckets, which is what the compact tree row counts as `T`. */
 function billed(tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }): number {
@@ -57,6 +58,7 @@ export function ProjectTree({
 }): React.ReactElement {
   const [open, setOpen] = useState<OpenState>({});
   const toggle = (key: string): void => setOpen((state) => ({ ...state, [key]: state[key] !== true }));
+  const t = useT();
   const projects = dashboard.projects;
 
   const totalCost = useMemo(
@@ -68,7 +70,7 @@ export function ProjectTree({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
         <div className="text-[12px] font-semibold text-muted">
-          项目 <span className="tnum text-faint">{projects.length}</span>
+          {t.tree.title} <span className="tnum text-faint">{projects.length}</span>
         </div>
         <button
           type="button"
@@ -77,11 +79,11 @@ export function ProjectTree({
             selectedProjectId === null ? 'border-accent/60 bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'
           }`}
         >
-          全部
+          {t.tree.all}
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
-        {projects.length === 0 && <p className="px-2 py-4 text-[12px] text-faint">没有匹配的项目。</p>}
+        {projects.length === 0 && <p className="px-2 py-4 text-[12px] text-faint">{t.tree.none}</p>}
         {projects.map((project) => (
           <ProjectRow
             key={project.id}
@@ -97,7 +99,7 @@ export function ProjectTree({
         ))}
       </div>
       <div className="border-t border-line px-3 py-1.5 text-[11px] text-faint">
-        共 {formatCost(String(totalCost), symbol)} · Q {formatTokens(dashboard.totals.requests)}
+        {t.tree.total(formatCost(String(totalCost), symbol), formatTokens(dashboard.totals.requests))}
       </div>
     </div>
   );
@@ -123,6 +125,7 @@ function ProjectRow({
   onSelectProject: (id: string | null) => void;
   onSelectSession: (uid: string) => void;
 }): React.ReactElement {
+  const t = useT();
   const key = `p:${project.id}`;
   const expanded = open[key] === true;
   const selected = selectedProjectId === project.id;
@@ -135,7 +138,7 @@ function ProjectRow({
           type="button"
           onClick={() => toggle(key)}
           className="mt-0.5 w-3 shrink-0 text-[10px] text-faint hover:text-fg"
-          aria-label={expanded ? '收起' : '展开'}
+          aria-label={expanded ? t.tree.collapse : t.tree.expand}
         >
           {expanded ? '▾' : '▸'}
         </button>
@@ -144,7 +147,7 @@ function ProjectRow({
             <span className="cell-title font-medium" title={`${project.name}\n${project.workspaces.join('\n')}`}>
               {project.name}
             </span>
-            <Chip tone={project.kind === 'repo' ? 'accent' : 'muted'} title={project.kind === 'repo' ? 'git 仓库（含各 worktree）' : '单个目录'}>
+            <Chip tone={project.kind === 'repo' ? 'accent' : 'muted'} title={project.kind === 'repo' ? t.tree.repoHint : t.tree.pathHint}>
               {project.kind === 'repo' ? 'repo' : 'path'}
             </Chip>
           </div>
@@ -153,11 +156,11 @@ function ProjectRow({
               <AgentBadge key={agent} id={agent} small />
             ))}
             <span className="tnum text-[11px] text-faint">
-              会话 {project.sessions}／子代理 {project.subagentSessions}／工作区 {project.workspaces.length}
+              {t.tree.counts(String(project.sessions), String(project.subagentSessions), String(project.workspaces.length))}
             </span>
           </div>
           <div className="mt-0.5 flex items-center justify-between gap-2">
-            <span className="tnum text-[11px] text-faint">最近 {formatInstant(project.lastUsage)}</span>
+            <span className="tnum text-[11px] text-faint">{t.tree.last(formatInstant(project.lastUsage))}</span>
             <MoneyTokens
               cost={project.cost.total}
               tokens={billed(project.tokens)}
@@ -172,12 +175,12 @@ function ProjectRow({
         // the full breakdown belongs in the panel the row opens.
         <div className="ml-3 space-y-0.5 border-l border-line pl-3 pb-1 text-[12px] text-muted">
           <div>
-            自身 <span className="tnum text-fg">{formatCost(project.own.cost.total, symbol)}</span>
+            {t.tree.own} <span className="tnum text-fg">{formatCost(project.own.cost.total, symbol)}</span>
             <span className="text-faint"> · Q {formatTokens(project.own.requests)}</span>
           </div>
           {project.spawned.requests > 0 && (
             <div>
-              子代理 <span className="tnum text-fg">{formatCost(project.spawned.cost.total, symbol)}</span>
+              {t.tree.spawned} <span className="tnum text-fg">{formatCost(project.spawned.cost.total, symbol)}</span>
               <span className="text-faint"> · Q {formatTokens(project.spawned.requests)}</span>
             </div>
           )}
@@ -218,6 +221,7 @@ function WorkspaceRow({
   selectedSessionUid: string | null;
   onSelectSession: (uid: string) => void;
 }): React.ReactElement {
+  const t = useT();
   const key = `w:${workspace.path}`;
   const expanded = open[key] === true;
   const sessions = useMemo(() => sortSessions(workspace.sessionReports), [workspace.sessionReports]);
@@ -233,7 +237,7 @@ function WorkspaceRow({
           type="button"
           onClick={() => toggle(key)}
           className="mt-0.5 w-3 shrink-0 text-[10px] text-faint hover:text-fg"
-          aria-label={expanded ? '收起' : '展开'}
+          aria-label={expanded ? t.tree.collapse : t.tree.expand}
         >
           {expanded ? '▾' : '▸'}
         </button>
@@ -246,7 +250,7 @@ function WorkspaceRow({
               <AgentBadge key={agent} id={agent} small />
             ))}
             <span className="tnum text-[11px] text-faint">
-              会话 {workspace.sessionCount}／子代理 {workspace.subagentCount}
+              {t.tree.workspaceCounts(String(workspace.sessionCount), String(workspace.subagentCount))}
             </span>
             <MoneyTokens
               cost={workspace.cost.total}
@@ -259,7 +263,7 @@ function WorkspaceRow({
       </div>
       {expanded && (
         <div className="ml-3 border-l border-line pl-1">
-          {roots.length === 0 && <p className="px-2 py-1 text-[11px] text-faint">这个工作区在当前时间范围内没有消耗。</p>}
+          {roots.length === 0 && <p className="px-2 py-1 text-[11px] text-faint">{t.tree.noUsage}</p>}
           {roots.map((session) => (
             <SessionRow
               key={session.uid}
@@ -299,11 +303,12 @@ function SessionRow({
   selectedSessionUid: string | null;
   onSelectSession: (uid: string) => void;
 }): React.ReactElement {
+  const t = useT();
   const children = useMemo(() => childrenOf(sessions, session, present), [sessions, session, present]);
   const key = `s:${session.uid}`;
   const expanded = open[key] === true;
   const selected = selectedSessionUid === session.uid;
-  const title = session.title ?? `（无标题会话 ${session.id.slice(0, 8)}）`;
+  const title = session.title ?? t.tree.untitled(session.id.slice(0, 8));
   return (
     <div>
       <div className={`flex items-start gap-1 rounded px-1.5 py-1 ${selected ? 'bg-accent-soft' : 'hover:bg-raised'}`}>
@@ -311,7 +316,7 @@ function SessionRow({
           type="button"
           onClick={() => (children.length > 0 ? toggle(key) : onSelectSession(session.uid))}
           className="mt-0.5 w-3 shrink-0 text-[10px] text-faint hover:text-fg"
-          aria-label={children.length > 0 ? (expanded ? '收起' : '展开') : '查看'}
+          aria-label={children.length > 0 ? (expanded ? t.tree.collapse : t.tree.expand) : t.tree.view}
         >
           {children.length > 0 ? (expanded ? '▾' : '▸') : '·'}
         </button>
@@ -321,8 +326,8 @@ function SessionRow({
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
             <AgentBadge id={session.agent} small />
-            {session.archived && <Chip tone="muted">已归档</Chip>}
-            {children.length > 0 && <Chip tone="muted">子代理 {children.length}</Chip>}
+            {session.archived && <Chip tone="muted">{t.tree.archived}</Chip>}
+            {children.length > 0 && <Chip tone="muted">{t.tree.subagents(String(children.length))}</Chip>}
             <span className="tnum text-[11px] text-faint">{formatInstant(session.lastUsage)}</span>
             <MoneyTokens
               cost={session.cost.total}
@@ -335,8 +340,8 @@ function SessionRow({
       </div>
       {selected && session.spawned.requests > 0 && (
         <div className="ml-6 border-l border-line pl-3 pb-1 text-[12px] text-muted">
-          自身 <span className="tnum text-fg">{formatCost(session.own.cost.total, symbol)}</span>
-          <span className="text-faint"> · 子代理 </span>
+          {t.tree.own} <span className="tnum text-fg">{formatCost(session.own.cost.total, symbol)}</span>
+          <span className="text-faint"> · {t.tree.spawned} </span>
           <span className="tnum text-fg">{formatCost(session.spawned.cost.total, symbol)}</span>
         </div>
       )}

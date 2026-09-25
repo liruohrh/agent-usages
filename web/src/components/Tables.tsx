@@ -20,7 +20,16 @@ import type {
   TokenBreakdown,
   TokenBuckets,
 } from '../types';
-import { agentColor, formatCost, formatInstant, formatShare, formatTokens, shortenPath, TOKEN_BUCKETS } from '../format';
+import {
+  agentColor,
+  bucketLabel,
+  formatCost,
+  formatInstant,
+  formatShare,
+  formatTokens,
+  shortenPath,
+  TOKEN_BUCKETS,
+} from '../format';
 import { AgentBadge, Card, Chip, ShareBar } from './Bits';
 
 /** Total tokens across the four billed buckets. */
@@ -691,7 +700,7 @@ export function TokenTable({
               const tokens = entry?.tokens ?? 0;
               return (
                 <tr key={bucket.key} className="border-b border-line last:border-0">
-                  <td className="truncate px-1 py-1" title={bucket.label}>
+                  <td className="truncate px-1 py-1" title={bucketLabel(bucket.key)}>
                     <span className="tnum text-fg">{bucket.short}</span>
                   </td>
                   <Num value={formatTokens(tokens, true)} />

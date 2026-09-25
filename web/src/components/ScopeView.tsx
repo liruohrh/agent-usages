@@ -23,18 +23,12 @@ import { BandTable, ModelTable } from './Tables';
 import { SessionLeaderboard } from './Sessions';
 import { AgentBoard, ProjectBoard } from './Ranked';
 import type { SeriesMetric } from '../charts';
+import { useT } from '../i18n';
 
-/** The tabs, in reading order. */
-const TABS = [
-  { key: 'overview', label: '概览' },
-  { key: 'projects', label: '项目' },
-  { key: 'agents', label: 'agent' },
-  { key: 'sessions', label: '会话' },
-  { key: 'usage', label: '用量' },
-  { key: 'models', label: '模型与计价' },
-] as const;
+/** The tabs, in reading order; their labels come from the catalogue. */
+const TABS = ['overview', 'projects', 'agents', 'sessions', 'usage', 'models'] as const;
 
-type TabKey = (typeof TABS)[number]['key'];
+type TabKey = (typeof TABS)[number];
 
 /** Everything the tabs need, in one prop bag. */
 export interface ScopeProps {
@@ -52,10 +46,11 @@ export interface ScopeProps {
 
 /** The tab bar plus the selected panel. */
 export function ScopeView(props: ScopeProps): React.ReactElement {
+  const t = useT();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const raw = params.get('view');
-  const active: TabKey = TABS.some((tab) => tab.key === raw) ? (raw as TabKey) : 'overview';
+  const active: TabKey = TABS.some((tab) => tab === raw) ? (raw as TabKey) : 'overview';
 
   const select = (key: TabKey): void => {
     const next = new URLSearchParams(params);
@@ -65,7 +60,7 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
   };
 
   const { dashboard, project, symbol } = props;
-  const scopeName = project === null ? '全部项目' : project.name;
+  const scopeName = project === null ? t.scope.allProjects : project.name;
   const sessions = project === null ? dashboard.projects.flatMap((entry) => entry.sessionReports) : project.sessionReports;
 
   return (
@@ -77,15 +72,17 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
           </h1>
           {project !== null && (
             <span className="text-[12px] text-faint">
-              {project.kind === 'repo' ? 'git 仓库' : '目录'} · {project.workspaces.length} 个工作区
+              {project.kind === 'repo' ? t.scope.repo : t.scope.path} ·{' '}
+              {t.scope.workspaces(String(project.workspaces.length))}
             </span>
           )}
           {project === null && (
             <span className="text-[12px] text-faint">
-              {dashboard.totals.projects} 个项目 · {dashboard.totals.workspaces} 个工作区
+              {t.scope.projectsCount(String(dashboard.totals.projects))} ·{' '}
+              {t.scope.workspaces(String(dashboard.totals.workspaces))}
             </span>
           )}
-          {props.loading && <span className="text-[12px] text-faint">加载中…</span>}
+          {props.loading && <span className="text-[12px] text-faint">{t.scope.loading}</span>}
         </div>
         {project !== null && (
           <button
@@ -93,7 +90,7 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
             onClick={() => navigate('/')}
             className="rounded border border-line px-2.5 py-1 text-[12px] text-muted hover:text-fg"
           >
-            回到全部项目
+            {t.scope.back}
           </button>
         )}
       </div>
@@ -101,16 +98,16 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
       <div className="flex flex-wrap items-center gap-1 border-b border-line pb-px">
         {TABS.map((tab) => (
           <button
-            key={tab.key}
+            key={tab}
             type="button"
-            onClick={() => select(tab.key)}
+            onClick={() => select(tab)}
             className={`-mb-px rounded-t border-b-2 px-3 py-2 text-[13px] ${
-              active === tab.key
+              active === tab
                 ? 'border-accent font-medium text-fg'
                 : 'border-transparent text-muted hover:text-fg'
             }`}
           >
-            {tab.label}
+            {t.scope.tabs[tab]}
           </button>
         ))}
       </div>
@@ -121,17 +118,17 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
           <ProjectBoard
             projects={dashboard.projects}
             symbol={symbol}
-            title="项目"
+            title={t.scope.tabs.projects}
             openHref={(entry) => `/p/${encodeURIComponent(entry.id)}`}
           />
         ) : (
-          <ProjectBoard workspaces={project.workspaceNodes} symbol={symbol} title={`工作区 · ${project.name}`} />
+          <ProjectBoard workspaces={project.workspaceNodes} symbol={symbol} title={t.scope.projectWorkspaces(project.name)} />
         ))}
       {active === 'agents' && (
         <AgentBoard
           agents={project === null ? dashboard.agents : project.agentTotals}
           symbol={symbol}
-          title={project === null ? 'agent（全部项目）' : `agent · ${project.name}`}
+          title={project === null ? t.scope.tabs.agents : t.scope.projectAgents(project.name)}
         />
       )}
       {active === 'usage' && <UsageTab {...props} />}
@@ -145,7 +142,7 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
         <SessionLeaderboard
           sessions={sessions}
           symbol={symbol}
-          title={project === null ? '会话' : `会话（${project.name}）`}
+          title={project === null ? t.scope.tabs.sessions : t.scope.projectSessions(project.name)}
           showProject={project === null}
         />
       )}

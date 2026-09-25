@@ -6,7 +6,15 @@
  * browser shows and the URL the server sees agree.
  */
 
-import type { Dashboard, RangeKey, RefreshReport, SessionDetail, TimeseriesBucket } from './types';
+import type {
+  Dashboard,
+  Language,
+  RangeKey,
+  RefreshReport,
+  SessionDetail,
+  SettingsPayload,
+  TimeseriesBucket,
+} from './types';
 
 /** What the dashboard is filtered by. */
 export interface Filters {
@@ -33,9 +41,30 @@ export function filterParams(filters: Filters): URLSearchParams {
   return params;
 }
 
+/**
+ * The language the page is in, for `?lang=`.
+ *
+ * The server renders the payload's sentences (the range label, the warnings) when
+ * it builds them, and the scan it builds them from is shared between requests —
+ * so every call says which language it wants back. Unset means "whatever the
+ * server itself speaks", which is what the first paint asks for.
+ */
+let language: Language | undefined;
+
+/** Ask for one language from now on. */
+export function setApiLanguage(next: Language): void {
+  language = next;
+}
+
+/** Add `lang=` to a path that may already carry a query string. */
+function withLanguage(path: string): string {
+  if (language === undefined) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}lang=${language}`;
+}
+
 /** One JSON request, with the server's own error message on failure. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const response = await fetch(withLanguage(path), init);
   const text = await response.text();
   let body: unknown;
   try {
@@ -80,4 +109,25 @@ export function fetchSession(uid: string, filters: Filters, signal?: AbortSignal
 /** Rescan the agents on the server. */
 export function refresh(): Promise<RefreshReport> {
   return request<RefreshReport>('/api/refresh', { method: 'POST' });
+}
+
+/** The language the server would speak: the configuration file, then the locale. */
+export function fetchSettings(signal?: AbortSignal): Promise<SettingsPayload> {
+  return request<SettingsPayload>('/api/settings', { signal });
+}
+
+/**
+ * Write a language into the tool's own configuration file.
+ *
+ * This is the one thing the page changes on disk, and it is deliberate: the CLI
+ * reads the same value, so switching here switches the terminal too.
+ * @param next - the language to remember.
+ * @returns the settings as they are after the write.
+ */
+export function saveLanguage(next: Language): Promise<SettingsPayload> {
+  return request<SettingsPayload>('/api/settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ language: next }),
+  });
 }

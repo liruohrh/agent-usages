@@ -5,30 +5,56 @@
  * or compared as a number for chart heights, never re-summed in the browser.
  */
 
+import { t } from './i18n';
 import type { CostTotals, TokenBuckets } from './types';
 
-const AMOUNT = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-const COMPACT = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 });
-const PLAIN = new Intl.NumberFormat('zh-CN');
-const PERCENT = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFractionDigits: 1 });
+/**
+ * The locale the page formats in.
+ *
+ * A module-level value rather than a parameter: `9.7亿` and `970M` are the same
+ * number, and every call site would otherwise have to carry the language around
+ * just to print it. `setFormatLocale` is called by the language provider, so a
+ * switch changes the numbers and the labels in the same render.
+ */
+let locale = 'zh-CN';
+
+/** Format numbers and dates in one locale from now on. */
+export function setFormatLocale(tag: string): void {
+  locale = tag;
+  formatters = undefined;
+}
+
+/** The formatters for the current locale, built once per switch. */
+let formatters: Record<'amount' | 'compact' | 'plain' | 'percent', Intl.NumberFormat> | undefined;
+
+/** The locale's number formatters. */
+function numbers(): Record<'amount' | 'compact' | 'plain' | 'percent', Intl.NumberFormat> {
+  formatters ??= {
+    amount: new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 4 }),
+    compact: new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }),
+    plain: new Intl.NumberFormat(locale),
+    percent: new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 }),
+  };
+  return formatters;
+}
 
 /** A token count: grouped, or compact once it gets long. */
 export function formatTokens(value: number, compact = false): string {
   if (!Number.isFinite(value)) return '0';
-  if (compact && Math.abs(value) >= 100_000) return COMPACT.format(value);
-  return PLAIN.format(Math.round(value));
+  if (compact && Math.abs(value) >= 100_000) return numbers().compact.format(value);
+  return numbers().plain.format(Math.round(value));
 }
 
 /** An exact money string, with the currency symbol in front. */
 export function formatCost(amount: string, symbol = ''): string {
   const value = Number(amount);
-  const text = Number.isFinite(value) ? AMOUNT.format(value) : amount;
+  const text = Number.isFinite(value) ? numbers().amount.format(value) : amount;
   return symbol.length === 0 ? text : `${symbol}${text}`;
 }
 
 /** A ratio as a percentage. */
 export function formatShare(value: number): string {
-  return Number.isFinite(value) ? PERCENT.format(value) : '—';
+  return Number.isFinite(value) ? numbers().percent.format(value) : '—';
 }
 
 /** One entry of the metric line: a label, a count, and the money it produced. */
@@ -139,11 +165,12 @@ export function formatDayShort(instant: number): string {
 
 /** How long ago, in words. */
 export function formatAgo(instant: number, now = Date.now()): string {
+  const words = t().ago;
   const seconds = Math.max(0, Math.round((now - instant) / 1000));
-  if (seconds < 60) return `${seconds} 秒前`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟前`;
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)} 小时前`;
-  return `${Math.round(seconds / 86_400)} 天前`;
+  if (seconds < 60) return words.seconds(String(seconds));
+  if (seconds < 3600) return words.minutes(String(Math.round(seconds / 60)));
+  if (seconds < 86_400) return words.hours(String(Math.round(seconds / 3600)));
+  return words.days(String(Math.round(seconds / 86_400)));
 }
 
 /** A path shortened for display, keeping both ends. */
@@ -166,14 +193,33 @@ export function shortenPath(path: string, max = 46): string {
 export const TOKEN_BUCKETS: {
   key: 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'reasoning';
   short: string;
-  label: string;
 }[] = [
-  { key: 'input', short: 'I/M', label: '未命中缓存输入' },
-  { key: 'output', short: 'O/T', label: '输出合计（含 R）' },
-  { key: 'cacheRead', short: 'I/C', label: '缓存命中输入' },
-  { key: 'cacheWrite', short: 'I/W', label: '缓存写入输入' },
-  { key: 'reasoning', short: 'R', label: '思考（含在 O/T 里）' },
+  { key: 'input', short: 'I/M' },
+  { key: 'output', short: 'O/T' },
+  { key: 'cacheRead', short: 'I/C' },
+  { key: 'cacheWrite', short: 'I/W' },
+  { key: 'reasoning', short: 'R' },
 ];
+
+/**
+ * The definition behind one bucket's abbreviation, in the current language.
+ *
+ * A function rather than a field because the catalogue is read at render time:
+ * a table built at import time would keep whichever language was active then.
+ * @param key - the bucket.
+ * @returns the words to show on hover.
+ */
+export function bucketLabel(key: (typeof TOKEN_BUCKETS)[number]['key']): string {
+  const words = t().vocabulary;
+  const known: Record<string, string> = {
+    input: words.inputMiss,
+    output: words.outputTotal,
+    cacheRead: words.cacheRead,
+    cacheWrite: words.cacheWrite,
+    reasoning: words.reasoning,
+  };
+  return known[key] ?? key;
+}
 
 /** Fixed hues per agent, so the same agent is the same colour everywhere. */
 const AGENT_COLORS: Record<string, string> = {

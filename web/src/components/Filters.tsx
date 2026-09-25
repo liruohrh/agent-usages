@@ -8,16 +8,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import type { Dashboard, RangeKey } from '../types';
+import type { Dashboard, Language, RangeKey } from '../types';
 import { agentColor, agentLabel, formatAgo, formatCost } from '../format';
+import { saveLanguage } from '../api';
+import { useT } from '../i18n';
 
 /** The range presets, in the order the buttons appear. */
-const RANGES: { key: RangeKey; label: string }[] = [
-  { key: 'today', label: '今日' },
-  { key: 'week', label: '本周' },
-  { key: 'month', label: '本月' },
-  { key: 'all', label: '全部' },
-];
+const RANGES: RangeKey[] = ['today', 'week', 'month', 'all'];
 
 /** Everything the user can change about what is being shown. */
 export interface FilterState {
@@ -29,6 +26,8 @@ export interface FilterState {
 /** The toolbar. */
 export function Filters({
   dashboard,
+  language,
+  onLanguage,
   filters,
   onChange,
   onRefresh,
@@ -38,6 +37,8 @@ export function Filters({
   onToggleSidebar,
 }: {
   dashboard: Dashboard | null;
+  language: Language;
+  onLanguage: (next: Language) => void;
   filters: FilterState;
   onChange: (next: FilterState) => void;
   onRefresh: () => void;
@@ -46,7 +47,10 @@ export function Filters({
   onToggleTheme: () => void;
   onToggleSidebar: () => void;
 }): React.ReactElement {
+  const t = useT();
   const [agentMenu, setAgentMenu] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const menuHost = useRef<HTMLDivElement | null>(null);
 
   // A click anywhere else closes the agent menu.
@@ -60,6 +64,23 @@ export function Filters({
   }, [agentMenu]);
 
   const loaded = dashboard?.loadedAgents ?? [];
+
+  /**
+   * Switch the page over, and write the same value into the configuration file.
+   *
+   * The page follows the click immediately: the write only decides what the next
+   * run (of the CLI, or of this server) starts from. A write that fails says so
+   * and leaves the language as it was — the setting is the point, not the click.
+   */
+  const switchLanguage = (next: Language): void => {
+    if (next === language || saving) return;
+    setSaving(true);
+    setFailed(null);
+    saveLanguage(next)
+      .then(() => onLanguage(next))
+      .catch((cause: unknown) => setFailed((cause as Error).message))
+      .finally(() => setSaving(false));
+  };
   const toggleAgent = (id: string): void => {
     const next = filters.agents.includes(id)
       ? filters.agents.filter((candidate) => candidate !== id)
@@ -73,26 +94,26 @@ export function Filters({
         type="button"
         onClick={onToggleSidebar}
         className="rounded border border-line px-2 py-0.5 text-[12px] text-muted hover:text-fg lg:hidden"
-        aria-label="切换项目树"
+        aria-label={t.app.sidebar}
       >
         ☰
       </button>
       <div className="flex items-center gap-1.5">
         <span className="text-[13px] font-semibold">agent-usages</span>
-        <span className="text-[11px] text-faint">本地用量分析</span>
+        <span className="text-[11px] text-faint">{t.filters.tagline}</span>
       </div>
 
       <div className="flex overflow-hidden rounded border border-line">
-        {RANGES.map((range) => (
+        {RANGES.map((key) => (
           <button
-            key={range.key}
+            key={key}
             type="button"
-            onClick={() => onChange({ ...filters, range: range.key })}
+            onClick={() => onChange({ ...filters, range: key })}
             className={`px-2 py-0.5 text-[11px] ${
-              filters.range === range.key ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'
+              filters.range === key ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'
             }`}
           >
-            {range.label}
+            {t.range[key]}
           </button>
         ))}
       </div>
@@ -103,7 +124,9 @@ export function Filters({
           onClick={() => setAgentMenu((open) => !open)}
           className="rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
         >
-          agent：{filters.agents.length === 0 ? '全部' : filters.agents.map(agentLabel).join('、')} ▾
+          {t.filters.agentButton(
+            filters.agents.length === 0 ? t.filters.all : filters.agents.map(agentLabel).join('、'),
+          )}
         </button>
         {agentMenu && (
           <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-lg border border-line bg-panel p-1 shadow-lg">
@@ -114,7 +137,7 @@ export function Filters({
                 filters.agents.length === 0 ? 'text-accent' : 'text-muted'
               }`}
             >
-              全部 agent
+              {t.filters.allAgents}
             </button>
             {loaded.map((agent) => (
               <label
@@ -140,16 +163,19 @@ export function Filters({
         type="search"
         value={filters.search}
         onChange={(event) => onChange({ ...filters, search: event.target.value })}
-        placeholder="搜索项目 / 路径"
+        placeholder={t.filters.search}
         className="w-40 rounded border border-line bg-raised px-2 py-0.5 text-[12px] text-fg placeholder:text-faint focus:border-accent focus:outline-none sm:w-52"
       />
 
       <div className="ml-auto flex flex-wrap items-center gap-2">
         {dashboard !== null && (
           <span className="hidden text-[11px] text-faint sm:inline">
-            {dashboard.mode === 'snapshot' ? '离线快照' : `扫描于 ${formatAgo(dashboard.scannedAt)}`} ·{' '}
-            {dashboard.loadedAgents.length} 个 agent · {formatCost(dashboard.totals.cost.total, dashboard.currencySymbol)} ·{' '}
-            {dashboard.rangeLabel}
+            {t.filters.summary(
+              String(dashboard.loadedAgents.length),
+              formatCost(dashboard.totals.cost.total, dashboard.currencySymbol),
+              dashboard.rangeLabel,
+            )}{' '}
+            · {dashboard.mode === 'snapshot' ? t.filters.snapshot : t.filters.scanned(formatAgo(dashboard.scannedAt))}
           </span>
         )}
         <button
@@ -157,19 +183,42 @@ export function Filters({
           onClick={onRefresh}
           disabled={refreshing}
           className="rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg disabled:opacity-50"
-          title="POST /api/refresh：重新扫描各 agent 的数据目录"
+          title={t.filters.rescanHint}
         >
-          {refreshing ? '重扫中…' : '重新扫描'}
+          {refreshing ? t.filters.rescanning : t.filters.rescan}
         </button>
         <button
           type="button"
           onClick={onToggleTheme}
           className="rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
-          title="切换明暗主题"
+          title={t.filters.theme}
         >
           {dark ? '☾' : '☀'}
         </button>
+
+        {/* The switch writes the configuration file the CLI reads, so the page
+            and the terminal end up in the same language. */}
+        <div className="flex overflow-hidden rounded border border-line" title={t.filters.languageHint}>
+          {(['zh', 'en'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              disabled={saving}
+              onClick={() => switchLanguage(option)}
+              className={`px-2 py-0.5 text-[11px] disabled:opacity-50 ${
+                language === option ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'
+              }`}
+            >
+              {option === 'zh' ? '中文' : 'EN'}
+            </button>
+          ))}
+        </div>
       </div>
+      {failed !== null && (
+        <div className="w-full text-[11px] text-bad" title={failed}>
+          {failed}
+        </div>
+      )}
     </header>
   );
 }
