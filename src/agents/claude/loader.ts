@@ -25,6 +25,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
+import { workspacePathsOf } from '../../core/paths.ts';
 import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRecord } from '../../core/types.ts';
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
@@ -285,6 +286,7 @@ function buildSession(walked: WalkedSession): SessionRecord {
   const records = [...session.records].sort((left, right) => left.time - right.time);
   return {
     id: session.id,
+    agent: 'claude',
     title: session.title,
     cwd: session.cwd,
     createdAt: session.createdAt,
@@ -414,6 +416,8 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       name: path.length > 0 ? basename(path) : projectKey,
       path,
       sessions: members,
+      agents: ['claude'],
+      workspaces: workspacePathsOf(members, path),
     });
   }
   await Promise.all(
@@ -427,6 +431,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
 
   return {
     agent: 'claude',
+    agents: ['claude'],
     source,
     projects,
     sessions,

@@ -6,15 +6,17 @@
 
 | 维度 | 作用 | 当前支持 |
 | --- | --- | --- |
-| **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness）— 目前唯一 |
+| **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness）、`pi`、`claude`（Claude Code）、`codex`（Codex）；默认**全部** |
 | **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek 官方）— 目前唯一 |
 
-DeepSeek 只是**目前唯一支持的计价来源**，DSH 只是**目前唯一支持的 agent**。两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱，因此新增任何一方都只是加一个模块 + 一条注册项（见[架构与扩展](docs/architecture.md)）。
+DeepSeek 只是**目前唯一支持的计价来源**。两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱，因此新增任何一方都只是加一个模块 + 一条注册项（见[架构与扩展](docs/architecture.md)）。
+
+一次运行默认读取**本机所有装了数据的 agent**，把同一路径、同一 git 仓库的数据合并成同一个项目，并在每一层标明数字来自哪个 agent——详见[项目与工作区](#项目与工作区)。
 
 - **维度**：全部 / 按项目 / 按会话 / 子代理，可按项目、会话筛选（各支持多个）
 - **时间范围**：`--range today|week|month|year`（支持偏移）或 `--range 起始..结束`，左闭右开；不指定即为全部时间
 - **费用**：按价格表**分时段（峰谷）逐条**计算；价格表用什么货币报价就存在什么货币，显示货币按系统语言选（中文人民币、英文美元），可 `--currency` / `--currency-rate` 覆盖
-- **`--json`**：所有命令都支持结构化输出
+- **`--json`**：所有命令都支持结构化输出；`--html` 可不带路径直接输出到 stdout
 
 读取 agent 自己的落盘数据，**只读**，不会修改任何 agent 文件。
 
@@ -57,16 +59,18 @@ pnpm link --global   # 之后可直接执行 agent-usages usage --month
 
 ### 目标 agent 与数据目录
 
-默认会**自动探测**：在数据目录下找不到任何已支持 agent 的数据时才报错，因此常见情况下不需要任何参数。
+默认读取**所有装了数据的 agent**（相当于 `--agent all`）：逐个适配器探测自己的数据目录，探到的都读、都合并，**探不到的既不报错也不占位**，因此常见情况下不需要任何参数。只有显式点名了某个 agent 而它又没有数据时才报错。
 
 ```bash
-agent-usages usage                       # 自动探测
-agent-usages usage --agent dsh           # 显式指定 agent
-agent-usages usage --home /path/to/.dsh  # 显式指定数据目录
-agent-usages agents                      # 看每个 agent 认哪些环境变量、默认目录在哪
+agent-usages usage                          # 默认：全部已安装的 agent
+agent-usages usage --agent dsh              # 只看一个
+agent-usages usage --agent dsh,codex        # 逗号分隔
+agent-usages usage --agent dsh --agent codex  # 重复给出，等价
+agent-usages usage --home /path/to/.dsh     # 显式指定数据目录（对所有被选中的 agent 生效）
+agent-usages agents                         # 看每个 agent 认哪些环境变量、默认目录在哪
 ```
 
-`--home` 也可用各 agent 自己的环境变量替代：DSH 用 `DSH_HOME`（默认 `~/.dsh`），pi 用 `PI_CODING_AGENT_DIR`（默认 `~/.pi/agent`）。`--agent` / `--home` / `--provider` / `--json` 都是全局选项，放在子命令前后都可以。
+`--home` 也可用各 agent 自己的环境变量替代：DSH 用 `DSH_HOME`（默认 `~/.dsh`），pi 用 `PI_CODING_AGENT_DIR`（默认 `~/.pi/agent`），Claude Code 用 `CLAUDE_CONFIG_DIR`（默认 `~/.claude`），Codex 用 `CODEX_HOME`（默认 `~/.codex`）。`--agent` / `--home` / `--provider` / `--json` 都是全局选项，放在子命令前后都可以。
 
 ---
 
@@ -84,16 +88,16 @@ agent-usages agents                      # 看每个 agent 认哪些环境变量
 | `--subagents` | 在 `--subagent` 之外，把每个子代理也单独列出 |
 | `--cost` | 附上 `计价区间`：每段含自己的指标行与单价（按计费项给） |
 | `--models` | 多模型的节点逐个模型展开成一行 |
-| `--html <路径>` | 把同一份报告写成一个自包含的单文件 HTML（内联样式与 SVG 条形图、无脚本）；只打印一行 `已写入 <路径>`，详见 [HTML 报告](docs/output.md#html-报告) |
-| `-p, --project-filter <sel>` | 只看指定项目：id、名称或路径；支持 `*` 通配；可重复 |
+| `--html [路径]` | 把同一份报告渲染成自包含的单文件 HTML（内联样式与 SVG 条形图、无脚本）：`--html <路径>` 写文件并只打印一行 `已写入 <路径>`；`--html` 或 `--html -` 直接写到 stdout（便于管道/重定向），详见 [HTML 报告](docs/output.md#html-报告) |
+| `-p, --project-filter <sel>` | 只看指定项目：id、名称或路径；支持 `*` 通配；可重复；配置里命名的项目也按名字匹配 |
 | `-r, --repo-filter <sel>` | 只看指定 git 仓库：仓库名或主工作区路径；支持 `*` 通配；可重复 |
 | `-s, --session-filter <sel>` | 只看指定会话：完整 id、唯一 id 前缀，或**标题**（标题需完全一致，忽略前后空格）；支持 `*` 通配；可重复 |
 | `--range <spec>` | 时间范围：`today` / `week` / `month` / `year`（支持 `week-1` 这类偏移）或 `起始..结束`（左闭右开） |
 | `--currency <code>` | 显示货币；默认按系统语言（中文 CNY、英文 USD…），可指定任意币种（用内置汇率表折算） |
 | `--currency-rate <rate>` | 1 单位计价货币 = <rate> 单位显示货币；只给汇率不给币种时照常折算但不显示货币 |
 | `--rate-mode <mode>` | `latest`（默认，全程一个汇率）/ `historical`（按每条记录当天的汇率） |
-| `--no-update` | 本次不检查价格表/汇率更新 |
-| `--agent` / `--home` / `--provider` / `--json` / `--no-update` | 见上 |
+| `--agent <id,...>` | 读哪些 agent；默认 `all`（所有已安装的），可逗号分隔或重复；见[目标 agent](#目标-agent-与数据目录) |
+| `--home` / `--provider` / `--json` / `--no-update` | 见上 |
 
 ### `session list`
 
@@ -235,6 +239,49 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 
 ---
 
+## 项目与工作区
+
+一次运行会读取多个 agent，所以「一个项目」不再等于「某个 agent 的某个项目」：工具会把所有 agent 的会话先按**工作区**（会话的 `cwd`）归拢，再按下面的规则合成**项目**。
+
+| 情况 | 结果 |
+| --- | --- |
+| 同一路径被多个 agent 用过 | 合成**一个项目**，`agents` 里列出用过的 agent |
+| 路径能归到某个 git 仓库（主工作区 / worktree / 子模块 / 仓库内子目录） | 整个仓库是**一个项目**（见 [Git 工作区](#git-工作区worktree)） |
+| 其余情况 | 一个路径一个项目 |
+| 在 `config.json` 的 `projects` 里声明过 | 按声明归组，项目名就是配置里的 `name` |
+
+会话身份是 **agent + id**：不同 agent 完全可能用同一个 id，两者都会保留，id 本身不会被改写（用户在 agent 界面里复制的 id 仍然能用）。`session list` 与 `usage --json` 里每行都带 `agent` 字段。
+
+### 在配置里声明项目
+
+`~/.config/agent-usages/config.json`（`XDG_CONFIG_HOME` 优先）可以显式声明项目，用来处理文件系统看不出来的归属：跨两个仓库的项目、不在仓库里的目录、想把几个目录算成一体：
+
+```jsonc
+{
+  "version": 1,
+  "projects": [
+    { "name": "Memolink", "paths": ["~/ws/apps/Memolink", "/abs/other"] }
+  ]
+}
+```
+
+- 路径支持 `~` 展开，相对路径按当前工作目录解析，最终都会变成绝对路径。
+- 配套规则是**自动并入**：只要某个工作区能证明属于某个已声明项目——① 落在该项目某个声明路径之下，或 ② 与某个声明路径**同属一个 git 仓库**——它就会在运行时并进那个项目，**不需要**把它写进配置。这条规则专门用来收编 worktree：配置里只写主仓库，从它切出去、落在别处的 worktree（以及在其中开的会话）会自动合并进同一个项目。
+- 声明过的路径优先：某条路径被显式写在另一个项目下时，按显式声明走，不会被仓库规则抢走。
+- **只读配置**：自动并入只发生在运行时，工具**不会**改写 `config.json`。
+- 配置项非法（缺少 `name`、`paths` 不是非空字符串数组等）会带上出错位置报错（`projects[0].paths: ...`），而不是悄悄忽略；其余配置照常生效。
+- `-p/--project-filter` 用 `name` 或项目 id（`project:<name>`）都能选中；`session list -p` 同样。
+
+### 多 agent 时的输出
+
+- 头部 `Agent` 一行列出本次读到的所有 agent：`Agent  claude·dsh`。
+- 项目行标注涉及的 agent 与会话数：`shared · 2026-09-11 · claude·dsh · 2 会话 · 0 子代理`。
+- 项目的指标行**按 agent 分列**：每个 agent 一行，最后一行是该项目自己的 `总`；各 agent 行逐项相加正好等于总计。
+- 会话与子代理行以 `· agent` 结尾。
+- **只读到一个 agent 时保持原样**：单 agent 报告不重复标同一个 id（上面这些标记只在合并了多个 agent 时出现）。
+
+---
+
 ## Git 工作区（worktree）
 
 agent 是按**目录**记项目的，而一个 git 仓库不是目录：主工作区、每个 `git worktree`、被人单独打开的 monorepo 子包，在 agent 眼里都是互不相干的项目。于是同一笔账被拆成好几行——本机就有现成的例子：
@@ -309,6 +356,9 @@ pnpm link --global && agent-usages usage
   "language": "en",               // 输出语言：zh / en（默认按系统语言探测，探测不到用 zh）
   "rateMode": "historical",       // 可选：按记录当天的汇率折算（默认 latest）
   "updates": { "pricing": true, "rates": false },   // 默认值
+  "projects": [                   // 可选：显式声明项目（见「项目与工作区」）
+    { "name": "Memolink", "paths": ["~/ws/apps/Memolink"] }
+  ],
   "pricing": {                    // 覆盖厂商的某些价格区间，其余仍用默认表
     "version": 1, "updatedAt": "2026-09-21",
     "providers": [{ "id": "deepseek", "label": "DeepSeek", "defaultModel": "deepseek-flash",
@@ -454,7 +504,14 @@ agent-usages usage --range 2026-09-01         # 只给一个时间 = 从这时�
                                         "rate": "0.02", "per": 1000000,
                                         "tokens": 130399872, "amount": "4.6782" } ] } ],
   "models":   [ { "model": "deepseek-v4-flash", "requests": 1730, "tokens": {}, "cost": {} } ],
+  "agents": [ { "agent": "dsh", "sessions": 45, "subagentSessions": 42,
+                "requests": 1730, "tokens": {}, "cost": {} } ],   // 全局按 agent 分列，Σ = totals
   "projects": [ { "id": "12345678-…", "name": "example-c", "path": "…",
+                  "kind": "repo",   // repo（整块属于一个 git 仓库）| directory
+                  "workspaces": ["/home/user/ws/example", "/home/user/ws/example-x"],
+                  "agents": ["dsh"],                 // 这个项目里出现过的 agent
+                  "agentTotals": [ { "agent": "dsh", "sessions": 44, "subagentSessions": 42,
+                                     "requests": 1447, "tokens": {}, "cost": {} } ],  // Σ = 本项目
                   "repo": { "name": "example", "root": "/home/user/ws/example",
                             "kind": "worktree", "branch": "feature-x" },
                   "sessions": 44, "activeSessions": 44,
@@ -463,7 +520,7 @@ agent-usages usage --range 2026-09-01         # 只给一个时间 = 从这时�
                   "tokens": {}, "cost": {}, "pricingBands": [], "models": [],
                   "own": {}, "spawned": {}, "nodeTotal": {},   // 自身 / 子代理 / 两者之和
                   "sessionReports": [
-                    { "id": "session-…", "isSubagent": false, "archived": false,
+                    { "id": "session-…", "agent": "dsh", "isSubagent": false, "archived": false,
                       "subagentCount": 42,
                       "parentId": null, "requests": 1374, "tokens": {}, "cost": {},
                       "own": {}, "spawned": {}, "nodeTotal": {} }
@@ -487,6 +544,7 @@ agent-usages usage --range 2026-09-01         # 只给一个时间 = 从这时�
 - `subagentMode` 说明当前档位；`subagents` 给出范围内的子代理会话数与派生它们的会话数。
 - `scopeBreakdown` 只在 `--subagent` / `--subagents` 时出现，三段各自带 `tokenBreakdown`，且 `own + subagents == total`。
 - 每行另有 `isSubagent`（是否子代理）、`subagentCount`（合并口径下并入的子代理个数）、`parentId`（子代理的父会话）。
+- **会话身份是 `agent` + `id`**：`sessions[].agent` / `sessionReports[].agent` 标明会话来自哪个 agent，id 保持该 agent 自己的写法不被改写。顶层 `agents[]` 按 agent 分列，`Σ agents[] = totals`；每个项目的 `agentTotals[]` 同理 `Σ = 该项目`（请求数、token、金额逐项精确相等）。`projects[].workspaces` 是该项目覆盖的全部路径（去重排序），`agents` 是其中出现过的 agent。
 - `pricingBands` 每一段都自带 `model`（请求当时写的模型名）、`window`（该区间的生效窗口）、`tokens`、`cost` 与 `components`：`components` 逐项列出「哪一项按什么单价计了多少 token、得到多少钱」，因此换计价来源后输出仍然自解释，也不需要额外再取一次价格表。
 - `projects[].sessions` 在合并口径下是一级会话数，拆分口径下是全部会话数；`subagentSessions` 始终是范围内的子代理会话数。
 - `session list --json` 每个项目有 `sessionCount`（范围内会话数）与 `listRows`（显示行数，合并口径下会少于前者）；每个会话有 `isSubagent`、`archived`、`depth`、`parentId`、`subagentCount`、`subagentRequests`、`nested`。`usage --json` 的 `projects[].sessionReports[]` 同样带 `archived`。

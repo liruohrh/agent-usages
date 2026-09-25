@@ -11,10 +11,13 @@
 import { UserError, type Warning } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
 import { LANGUAGES, type Language } from '../i18n/index.ts';
+import type { ProjectGroup } from '../core/merge.ts';
 import type { PricePeriod } from '../pricing/contract.ts';
 import { ConfigError, parsePricingConfig, type ProviderConfig } from './pricing.ts';
 import { userConfigPath } from './paths.ts';
 import { readJson } from './store.ts';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 /** One update switch. */
 export interface UpdateSettings {
@@ -39,6 +42,8 @@ export interface UserConfig {
   updates: UpdateSettings;
   /** Preferred rate source id, checked before the shipped order. */
   rateSource: string | undefined;
+  /** Project overrides: which directories are one project. */
+  projects: ProjectGroup[];
   /** Price overrides, in the shipped file's own shape. */
   pricing: ProviderConfig[];
 }
@@ -62,8 +67,76 @@ function emptyConfig(): UserConfig {
     rateMode: undefined,
     updates: { ...DEFAULT_UPDATES },
     rateSource: undefined,
+    projects: [],
     pricing: [],
   };
+}
+
+/** Narrow an unknown JSON value to a record. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Expand a leading `~` to the user's home directory.
+ *
+ * A configuration file is written once and read on machines with different
+ * home directories, so `~/ws/app` has to mean *this* user's home, not the one
+ * of whoever wrote the file. Only a leading `~` or `~/` is expanded; `~user`
+ * and an embedded `~` are left alone, as shells do.
+ * @param path - the configured path.
+ * @param env - environment to resolve the home directory from.
+ * @returns the path with `~` expanded.
+ */
+function expandHome(path: string, env: NodeJS.ProcessEnv): string {
+  if (path === '~') return env['HOME'] ?? homedir();
+  if (path.startsWith('~/') || path.startsWith('~\\')) return join(env['HOME'] ?? homedir(), path.slice(2));
+  return path;
+}
+
+/**
+ * Read the `projects` section, rejecting anything malformed.
+ *
+ * The shape is `[{ name, paths: [...] }]`; each path is made absolute here, so
+ * the merge layer never has to resolve anything relative to an unknown cwd. An
+ * invalid entry is an error rather than a silent skip: a project the user
+ * believes is configured but is not would quietly show up as several rows.
+ * @param value - the raw `projects` value from the file.
+ * @param env - environment for `~` expansion.
+ * @returns the configured groups, in file order.
+ * @throws {ConfigError} when the section is not an array of `{name, paths}`.
+ */
+function projectGroups(value: unknown, env: NodeJS.ProcessEnv): ProjectGroup[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new ConfigError('projects', 'configExpectsArray', { value: JSON.stringify(value) });
+  }
+  return value.map((entry, index) => {
+    const at = `projects[${index}]`;
+    const record = asRecord(entry);
+    if (record === undefined) {
+      throw new ConfigError(at, 'configExpectsObject', { value: JSON.stringify(entry) });
+    }
+    const name = record['name'];
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      throw new ConfigError(`${at}.name`, 'configProjectName', { value: JSON.stringify(name ?? null) });
+    }
+    const paths = record['paths'];
+    if (!Array.isArray(paths) || paths.length === 0) {
+      throw new ConfigError(`${at}.paths`, 'configProjectPaths', { value: JSON.stringify(paths ?? null) });
+    }
+    return {
+      name: name.trim(),
+      paths: paths.map((item, position) => {
+        if (typeof item !== 'string' || item.trim().length === 0) {
+          throw new ConfigError(`${at}.paths[${position}]`, 'configProjectPath', { value: JSON.stringify(item ?? null) });
+        }
+        return resolve(expandHome(item.trim(), env));
+      }),
+    };
+  });
 }
 
 /** Read a language name, rejecting anything this build cannot speak. */
@@ -139,6 +212,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): LoadedUser
               : (() => {
                   throw new ConfigError('rateSource', 'configRateSourceId', { value: JSON.stringify(rateSource) });
                 })(),
+        projects: projectGroups(node['projects'], env),
         pricing,
       },
       warnings,

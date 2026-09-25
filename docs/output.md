@@ -17,6 +17,7 @@ Agent     dsh（DeepSeek Harness (DSH)）
 - **汇率**只在真的折算时出现：写明等式、来源、汇率日期。只给了 `--currency-rate` 而没给币种时，计价来源会写成"按 1 CNY = 0.5 折算，未指定目标货币"，金额不带货币符号。
 - `--rate-mode historical` 时改为一行"按记录日期 · 来源与覆盖区间"，计价来源里写明"按每条记录当天的汇率折算为 X"。
 - 价格表里的单价也在折算范围内，所以 `计价区间` 的 `P（$ / 百万 token）` 与金额同币种。
+- **读到多个 agent 时**（默认的 `--agent all`），`Agent` 行列出全部 id（`claude·dsh`），`数据目录` 行按同样顺序列出各自的数据根，用 `, ` 分隔。
 
 ## 形态
 
@@ -32,6 +33,28 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 名称行**只有名字、日期和子代理数**，数字全在下一行。这样标题多长都不会把整行撑开，也就不需要表格的固定列宽。
 
 名称行还会带一个状态标记：被 agent 归档（在它自己的界面里被收起来）的会话写成 `名字（已归档）`。归档**不减少任何数字**——token 已经花掉了，标记只说明 agent 把它收在哪。
+
+### 合并了多个 agent 时
+
+一次运行读到多个 agent 时，每个层级都要说清数字是谁的：
+
+```
+agent-usages · 2026-09-17 · claude·codex·dsh · 12 会话 · 19 子代理
+  claude  I/M 82K ¥0.0894 · I/C 106K / 56.3% ¥0.0032 · … · T 189K · Q 10 · ¥0.0981
+   codex  I/M 97K ¥0.1067 · I/C 2.36M / 96.1% ¥0.0531 · … · T 2.48M · Q 109 · ¥0.2372
+     dsh  I/M 1.62M ¥1.8766 · I/C 747.8M / 99.8% ¥16.4545 · … · T 751.5M · Q 2,261 · ¥27.6934
+      总  I/M 1.80M ¥2.0727 · I/C 750.3M / 99.8% ¥16.5108 · … · T 754.2M · Q 2,380 · ¥28.0287
+  修复 pnpm cli 用量数据查找（8 个子代理） 2026-09-25 · dsh
+    I/M 1.62M ¥1.8765 · … · T 751.5M · Q 2,260 · ¥27.6928
+```
+
+- **项目行**多了三段：涉及哪些 agent（`claude·codex·dsh`，按 id 排序）、`N 会话`、`N 子代理`。
+- **指标行按 agent 分列**：每个 agent 一行，agent id 右对齐成一列，最后一行是该项目自己的 `总`。指标行本来就有十项，横着再分列会没法读，所以是**按 agent 拆成多行**而不是加列。各 agent 行逐项相加正好等于 `总` 行（请求数、token、金额都精确相等）。
+- **会话与子代理行**以 `· <agent>` 结尾，用来区分不同 agent 的会话（id 也可能重名）。
+- 根部 `总` 块同样按 agent 分列；`session list` 的标题格也会带 `· <agent>`。
+- **只读到一个 agent 时上述标记全部不出现**：单 agent 的报告保持原样，不会在每一行重复同一个 id。
+
+按 agent 的完整数字也在 JSON 里：顶层 `agents[]`、每个项目的 `agents` / `agentTotals[]`。
 
 同一个 git 仓库出现多个项目时，树里还会多一层**仓库行**（`Memolink 仓库 · 2 个项目`），仓库行的数字是下面各项目之和；只有它一个节点时连根节点那行都省掉。项目行上的徽标说明它跟仓库的关系——`· git worktree · lynx-rewrite`、`· git submodule · inner`、`· git repo · Memolink`（git 的术语不翻译）；主工作区不加徽标，因为仓库行就写着它。详见 [Git 工作区](README.md#git-工作区worktree)。
 
@@ -155,11 +178,13 @@ Memolink (~/ws/apps/Memolink) 2026-08-16
 
 ## HTML 报告
 
-`--html <路径>` 把同一份已经算好的报告写成一个**单文件 HTML**：样式与条形图内联，没有脚本、没有外链，可以直接双击打开，也可以当附件发出去或归档——换台机器、断网都不缺东西。
+`--html [路径]` 把同一份已经算好的报告写成一个**单文件 HTML**：样式与条形图内联，没有脚本、没有外链，可以直接双击打开，也可以当附件发出去或归档——换台机器、断网都不缺东西。
 
 ```bash
-agent-usages usage --html /tmp/report.html            # 全部时间
+agent-usages usage --html /tmp/report.html            # 写到文件
 agent-usages usage --range month --html ~/report.html # 可以配合其他选项
+agent-usages usage --html - | head -c 200             # 写到 stdout
+agent-usages usage --html > report.html               # 不带值也是 stdout
 ```
 
 - 文件里是**同一个报告层算出的数字**：金额、token、请求数都取自文本报告用的那一份结果，格式化规则也一样（金额按需去尾、token 用 `K`/`M`/`B`），因此两种输出逐位相同；HTML 只做展示，不重新计价。
@@ -169,9 +194,13 @@ agent-usages usage --range month --html ~/report.html # 可以配合其他选项
 - 所有文本都做 HTML 转义：标题里的 `<`、`&`、emoji 原样显示，不会破坏页面。
 - 只有一个模型的节点不重复列模型行（与文本的折叠规则一致）；用了多个模型时以折叠的「各模型明细」给出。`--cost` / `--models` 在 HTML 里没有开关作用：计价区间总是以折叠块给出，多模型节点也总是能展开明细。
 - `--subagent` / `--subagents` 下，会话行下面多出 `自身` / `子代理` 两行，`自身 + 子代理 = 总` 在表里同样成立。
-- 写成功后只打印一行 `已写入 <路径>`，不再打印文本报告；同时给了 `--json` 时 JSON 仍写到标准输出，提示行改到标准错误，脚本的 stdout 保持可解析。
+- **不带路径（`--html`）或路径写成 `-`** 时文档直接写到标准输出，便于管道与重定向，此时不打印 `已写入` 提示、也不打印文本报告。
+- 写了文件时只打印一行 `已写入 <路径>`，不再打印文本报告；同时给了 `--json` 时 JSON 仍写到标准输出，提示行改到标准错误，脚本的 stdout 保持可解析。
+- `--html -` 与 `--json` 同时给出时 stdout 让给 JSON（脚本要的是可解析输出），HTML 跳过并在标准错误说明原因。
 - 写不进去（目录不存在、没有权限）时报 `无法写入 <路径>: 原因` 并以退出码 1 结束；范围内没有用量时文件照写、退出码仍是 2。
 
 ## JSON
 
 `--json` 与文本同源：顶层就是那一份扁平结构（库层面支持一次渲染多段，此时是 `sections: [{ label, … }]`）。项目与会话都带 `own` / `spawned` / `nodeTotal` 三段，金额仍是十进制字符串；`pricingBands` 里每一项都带 `model`、`models`、`periodId`、`tier`、`tokens`、`cost` 和 `components`（每项的 `rate`、`tokens`、`amount`）。字段清单见 [README](../README.md)。
+
+与合并层有关的字段：顶层 `agents[]`（每个 agent 的会话数、子代理数、请求数、token、金额，`Σ = totals`）、`projects[].kind`（`repo` / `directory`）、`projects[].workspaces`（该项目覆盖的全部路径）、`projects[].agents` 与 `projects[].agentTotals[]`（`Σ = 该项目`）、`sessions[].agent` 与 `sessionReports[].agent`（会话来自哪个 agent，id 保持原样）。

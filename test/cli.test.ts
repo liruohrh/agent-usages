@@ -681,7 +681,9 @@ describe('help', () => {
 
   it('documents the HTML report option', async () => {
     const { stdout } = await cli(['usage', '--help']);
-    expect(stdout).toContain('--html <path>');
+    // `--html` takes an optional value now: a path writes a file, no value (or
+    // `-`) sends the document to stdout.
+    expect(stdout).toContain('--html [path]');
     expect(stdout).toContain('自包含');
   });
 });

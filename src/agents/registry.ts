@@ -9,6 +9,8 @@
 import { UserError, renderDiagnostic } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
 import type { AgentAdapter } from './contract.ts';
+
+export type { AgentAdapter } from './contract.ts';
 import { dshAgent } from './dsh/loader.ts';
 import { piAgent } from './pi/loader.ts';
 import { claudeAgent } from './claude/loader.ts';
@@ -64,12 +66,7 @@ export async function resolveAgent(
 ): Promise<AgentAdapter> {
   if (requested !== undefined) return requireAgent(requested);
 
-  const candidates: AgentAdapter[] = [];
-  for (const adapter of AGENT_ADAPTERS) {
-    const source = home ?? adapter.defaultSource(env);
-    if (source === null) continue;
-    if (await adapter.hasData(source)) candidates.push(adapter);
-  }
+  const candidates = await detectAgents(home, env);
   const [only] = candidates;
   if (candidates.length === 1 && only !== undefined) return only;
   if (candidates.length > 1) {
@@ -80,4 +77,32 @@ export async function resolveAgent(
   throw new Error(
     renderDiagnostic('noUsageData', { home: home ?? t().errors.defaultLocation, known }),
   );
+}
+
+/**
+ * Every agent whose data is present.
+ *
+ * This is what `--agent all` reads: a report about the machine, not about one
+ * tool. Probing is per adapter and never fatal — an agent that is not installed
+ * contributes nothing and is not an error — and it goes through the adapter's
+ * own `hasData`, so a new agent needs no second discovery implementation here.
+ *
+ * @param home - an explicit data root, when given; otherwise each adapter's own
+ *   default location is probed.
+ * @param env - environment for default roots.
+ * @returns the adapters that found data, in registry order.
+ */
+export async function detectAgents(home?: string, env: NodeJS.ProcessEnv = process.env): Promise<AgentAdapter[]> {
+  const found: AgentAdapter[] = [];
+  for (const adapter of AGENT_ADAPTERS) {
+    const source = home ?? adapter.defaultSource(env);
+    if (source === null) continue;
+    try {
+      if (await adapter.hasData(source)) found.push(adapter);
+    } catch {
+      // An unreadable directory or a broken symlink means "no data here", not
+      // "this report cannot run".
+    }
+  }
+  return found;
 }

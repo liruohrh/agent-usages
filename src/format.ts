@@ -16,6 +16,7 @@ import { displayRate } from './pricing/index.ts';
 import { tokenBreakdown } from './core/buckets.ts';
 import type { CostTotals, RepoInfo, TokenTotals } from './core/types.ts';
 import type {
+  AgentTotals,
   BandSummary,
   ModelBreakdown,
   ProjectReport,
@@ -375,6 +376,15 @@ export interface FormatOptions {
   agentLabel?: string | undefined;
   /** Print each node's 总 / 自身 / 子代理 split. */
   scope?: boolean | undefined;
+  /**
+   * Mark every row with the agent it came from.
+   *
+   * A merged report holds several agents, and there both the session rows and
+   * the project headings have to say which one they mean. A single-agent report
+   * is left exactly as it was: repeating one id on every line adds a column of
+   * noise and no information.
+   */
+  markAgents?: boolean | undefined;
   /** List every subagent under its session's 子代理 line. */
   expandSubagents?: boolean | undefined;
   /** Append the pricing bands: what each rate billed, and what it charged. */
@@ -450,6 +460,38 @@ function scopeLines(
   return [line(scope.total, node.total), line(scope.own, node.own), line(scope.spawned, node.spawned)];
 }
 
+/**
+ * One metric line per agent, then the node's own total.
+ *
+ * A node that several agents fed cannot say which agent spent what on one
+ * metric line, and putting every agent side by side would make a line nobody can
+ * read — the metric vocabulary is already ten items wide. So the agents are
+ * stacked instead: one full line each, their ids right-aligned to a shared
+ * column, and the node's total underneath. The total is the node's own figure,
+ * which the per-agent rows sum to exactly.
+ *
+ * @param totals - the node's per-agent rows, in display order.
+ * @param aggregate - the node's total, printed last.
+ * @param level - indentation depth.
+ * @param symbol - currency symbol to print.
+ * @returns the lines to print.
+ */
+function agentMetricLines(
+  totals: readonly AgentTotals[],
+  aggregate: ScopeTotals,
+  level: number,
+  symbol: string,
+): string[] {
+  const total = t().scope.total;
+  const width = Math.max(displayWidth(total), ...totals.map((row) => displayWidth(row.agent)));
+  const line = (name: string, tokens: TokenTotals, cost: CostTotals, requests: number): string =>
+    `${indent(level)}${pad(name, width, 'right')}  ${metricsLine(tokens, moneyBreakdown(cost, tokens), requests, symbol)}`;
+  return [
+    ...totals.map((row) => line(row.agent, row.tokens, row.cost, row.requests)),
+    line(total, aggregate.tokens, aggregate.cost, aggregate.requests),
+  ];
+}
+
 /** One session and, recursively, everything it spawned. */
 function sessionLines(
   session: SessionReport,
@@ -467,7 +509,10 @@ function sessionLines(
   const end = nodeDate(session.lastUsage, 'end');
   // The date is only worth repeating when it differs from the row above.
   const suffix = end === undefined || end === parentDate ? '' : ` ${end}`;
-  const lines = [`${indent(level)}${clip(session.title ?? t().tree.untitled, TITLE_WIDTH)}${archived}${badge}${suffix}`];
+  // In a merged report the id alone does not say which agent the session came
+  // from, so the row ends with the agent it belongs to.
+  const mark = options.markAgents === true ? ` · ${session.agent}` : '';
+  const lines = [`${indent(level)}${clip(session.title ?? t().tree.untitled, TITLE_WIDTH)}${archived}${badge}${suffix}${mark}`];
   const total = moneyBreakdown(session.total.cost, session.total.tokens);
   // The split is worth printing only when there is something to split off; a
   // session with no subagents says everything in one line.
@@ -534,18 +579,40 @@ function projectLines(project: ProjectReport, symbol: string, options: FormatOpt
     else bucket.push(row);
   }
   const projectStart = project.firstUsage === null ? undefined : dayText(project.firstUsage);
-  const start = projectStart === undefined ? project.name : `${project.name} ${projectStart}`;
+  // A merged project carries more than a name: which agents worked there, and
+  // how many sessions (and subagent sessions) the row stands for. A
+  // single-agent report needs none of it.
+  const annotations: string[] =
+    options.markAgents === true
+      ? [
+          project.agents.join('·'),
+          t().merge.sessions(count(project.sessions)),
+          t().merge.subagents(count(project.subagentSessions)),
+        ]
+      : [];
+  // A single-agent report keeps the plain `name date` heading it always had;
+  // annotations are what introduce the ` · ` separators.
+  const start =
+    annotations.length === 0
+      ? projectStart === undefined
+        ? project.name
+        : `${project.name} ${projectStart}`
+      : [project.name, projectStart, ...annotations]
+          .filter((part): part is string => part !== undefined && part.length > 0)
+          .join(' · ');
   const lines = [`${start}${projectBadge(project)}`];
   // A project whose whole tree is one session repeats that session's numbers, so
   // its own line is dropped.
   const shown = moneyBreakdown(project.total.cost, project.total.tokens);
   const split = project.spawned.requests > 0 || rows.some((row) => row.isSubagent);
   if (rows.length !== 1) {
-    lines.push(
-      options.scope === true && split
-        ? [...scopeLines(project, 1, symbol)].join('\n')
-        : `${indent(1)}${metricsLine(project.total.tokens, shown, project.total.requests, symbol)}`,
-    );
+    if (options.scope === true && split) {
+      lines.push([...scopeLines(project, 1, symbol)].join('\n'));
+    } else if (options.markAgents === true && project.agentTotals.length > 1) {
+      lines.push(...agentMetricLines(project.agentTotals, project.total, 1, symbol));
+    } else {
+      lines.push(`${indent(1)}${metricsLine(project.total.tokens, shown, project.total.requests, symbol)}`);
+    }
     if (options.models === true) lines.push(...modelLines(project.models, 1, symbol));
   }
   for (const root of roots) {
@@ -652,6 +719,9 @@ function repoLines(
 /** Render one window: its heading, the root total, and the project tree. */
 function renderSection(section: ReportSection, symbol: string, options: FormatOptions): string[] {
   const { result } = section;
+  // A window that merged several agents marks its rows; one that read a single
+  // agent keeps the unmarked rendering it always had.
+  const marked: FormatOptions = result.agents.length > 1 ? { ...options, markAgents: true } : options;
   const span =
     result.firstUsage === null || result.lastUsage === null ? undefined : spanText(result.firstUsage, result.lastUsage);
   const lines = [span === undefined ? section.label : `${section.label} · ${span}`];
@@ -665,14 +735,26 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
     lines.push(
       options.scope === true && result.scopeBreakdown !== undefined
         ? [...scopeLines({ own: result.scopeBreakdown.own, spawned: result.scopeBreakdown.subagents, total: result.scopeBreakdown.total }, 1, symbol)].join('\n')
-        : `${indent(1)}${metricsLine(result.tokens, rootMoney, result.requests, symbol)}`,
+        : marked.markAgents === true && result.agents.length > 1
+          ? agentMetricLines(
+              result.agents,
+              {
+                sessions: result.agents.reduce((total, row) => total + row.sessions, 0),
+                requests: result.requests,
+                tokens: result.tokens,
+                cost: result.cost,
+              },
+              1,
+              symbol,
+            ).join('\n')
+          : `${indent(1)}${metricsLine(result.tokens, rootMoney, result.requests, symbol)}`,
     );
     if (options.models === true) lines.push(...modelLines(result.models, 1, symbol));
   }
   for (const node of nodes) {
     lines.push(
       '',
-      ...(node.kind === 'repo' ? repoLines(node, symbol, options) : projectLines(node.project, symbol, options)),
+      ...(node.kind === 'repo' ? repoLines(node, symbol, marked) : projectLines(node.project, symbol, marked)),
     );
   }
   if (options.cost === true) {
@@ -734,12 +816,18 @@ export function formatUsageReport(
   if (first === undefined) return '';
   const { source, rate: rateLine } = provenanceOf(first.result, options.pricingLabel);
   const labels = t();
+  // A report that merged agents names all of them, because "which agent is
+  // this?" is exactly the question the merge exists to answer; a single-agent
+  // report keeps the id-beside-label spelling it always had.
+  const agent =
+    first.result.agents.length > 1
+      ? first.result.agents.map((totals) => totals.agent).join('·')
+      : options.agentLabel === undefined
+        ? first.result.agent
+        : labels.header.agentName(first.result.agent, options.agentLabel);
   const header = [
     labels.app.usage,
-    headerLine(
-      labels.header.title,
-      options.agentLabel === undefined ? first.result.agent : labels.header.agentName(first.result.agent, options.agentLabel),
-    ),
+    headerLine(labels.header.title, agent),
     headerLine(labels.header.dataDir, first.result.source),
     sections.length === 1
       ? headerLine(labels.header.range, first.range.label)
@@ -760,15 +848,24 @@ export function formatUsageReport(
 export function formatSessionList(result: SessionListResult, agentLabel?: string): string {
   const labels = t();
   const sections: string[] = [];
+  const agent =
+    result.agents.length > 1
+      ? result.agents.join('·')
+      : agentLabel === undefined
+        ? result.agent
+        : labels.header.agentName(result.agent, agentLabel);
   sections.push(
     [
       labels.app.sessions,
-      labeled(labels.header.title, agentLabel === undefined ? result.agent : labels.header.agentName(result.agent, agentLabel)),
+      labeled(labels.header.title, agent),
       labeled(labels.header.dataDir, result.source),
       labeled(labels.list.projects, count(result.projects.length)),
       labeled(labels.list.sessions, count(result.totalSessions)),
     ].join('\n'),
   );
+  // In a merged inventory a session id no longer says which agent it came from,
+  // so the title cell carries the agent.
+  const mark = result.agents.length > 1;
   for (const project of result.projects) {
     sections.push(
       [
@@ -788,7 +885,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
         [labels.list.sessionId, labels.list.title, labels.list.firstUsage, labels.list.lastUsage, labels.list.subagents, labels.list.requests],
         project.sessions.map((session) => [
           `${session.nested ? '  ↳ ' : ''}${session.id}`,
-          `${session.nested ? '  ' : ''}${session.title ?? labels.tree.untitled}${session.archived ? labels.tree.archived : ''}`,
+          `${session.nested ? '  ' : ''}${session.title ?? labels.tree.untitled}${session.archived ? labels.tree.archived : ''}${mark ? ` · ${session.agent}` : ''}`,
           dayLabel(session.firstUsage),
           dayLabel(session.lastUsage),
           session.subagentCount > 0 && !session.isSubagent ? count(session.subagentCount) : '—',
@@ -822,6 +919,7 @@ export function formatSessionList(result: SessionListResult, agentLabel?: string
 function resultToJson(result: UsageResult): Record<string, unknown> {
   return {
     agent: result.agent,
+    agents: result.agents,
     source: result.source,
     pricingProvider: result.pricingProvider,
     dimension: result.dimension,
@@ -888,6 +986,10 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
       id: project.id,
       name: project.name,
       path: project.path,
+      kind: project.kind,
+      workspaces: project.workspaces,
+      agents: project.agents,
+      agentTotals: project.agentTotals,
       sessions: project.sessions,
       activeSessions: project.activeSessions,
       subagentSessions: project.subagentSessions,
@@ -909,6 +1011,7 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
         : {
             sessionReports: project.sessionReports.map((session) => ({
               id: session.id,
+              agent: session.agent,
               title: session.title,
               projectId: session.projectId,
               projectName: session.projectName,
@@ -953,6 +1056,7 @@ export function usageToJson(sections: readonly ReportSection[]): unknown {
   if (sections.length === 1) return resultToJson(first.result);
   return {
     agent: first.result.agent,
+    agents: first.result.agents,
     source: first.result.source,
     pricingProvider: first.result.pricingProvider,
     currency: first.result.currency,
@@ -981,6 +1085,7 @@ function scopeToJson(scope: import('./report.ts').ScopeTotals): Record<string, u
 export function sessionListToJson(result: SessionListResult): unknown {
   return {
     agent: result.agent,
+    agents: result.agents,
     source: result.source,
     totalProjects: result.projects.length,
     totalSessions: result.totalSessions,
@@ -997,6 +1102,7 @@ export function sessionListToJson(result: SessionListResult): unknown {
       lastUsageIso: iso(project.lastUsage),
       sessions: project.sessions.map((session) => ({
         id: session.id,
+        agent: session.agent,
         title: session.title,
         projectId: session.projectId,
         projectName: session.projectName,

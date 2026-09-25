@@ -82,6 +82,16 @@ export interface UsageRecord {
 export interface SessionRecord {
   /** Session identifier. */
   id: string;
+  /**
+   * Agent this session belongs to, e.g. `dsh`.
+   *
+   * Ids are only unique *within* an agent, so the pair `agent` + {@link id} is
+   * what identifies a session once several agents' datasets are merged. The id
+   * itself is deliberately left alone: it is the agent's own identifier, and
+   * rewriting it (to `dsh:abc`, say) would break every selector a user pastes
+   * from that agent's UI.
+   */
+  agent: string;
   /** Human-readable title, when the agent stores one. */
   title: string | null;
   /** Working directory the session ran in, when known. */
@@ -143,14 +153,42 @@ export interface ProjectRecord {
   path: string;
   /** Sessions belonging to this project, in the adapter's order. */
   sessions: SessionRecord[];
+  /**
+   * Every agent that ran a session in this project, sorted.
+   *
+   * One project can now be fed by several agents, so "which agent is this?"
+   * stops being answerable at the dataset level and has to be carried here.
+   */
+  agents: string[];
+  /**
+   * Every workspace path this project covers, deduplicated and sorted.
+   *
+   * A merged project is usually a git repository, and a repository is several
+   * directories: its main working tree, each `git worktree` cut from it, and any
+   * subdirectory opened on its own. They are one project but not one path, so
+   * the path list is what a reader needs to recognise where the usage came from.
+   */
+  workspaces: string[];
   /** The git repository this directory belongs to, when it is inside one. */
   repo?: RepoInfo | undefined;
 }
 
 /** Everything an agent adapter recovered from its on-disk state. */
 export interface UsageDataset {
-  /** Agent id the dataset came from, e.g. `dsh`. */
+  /**
+   * Agent the dataset came from, e.g. `dsh`.
+   *
+   * A merged dataset covers several agents; it joins their ids (`dsh+claude`)
+   * and lists them individually in {@link agents}. The per-session
+   * {@link SessionRecord.agent} is the authoritative answer.
+   */
   agent: string;
+  /**
+   * Every agent the dataset holds, in the order the agents were read.
+   *
+   * A single adapter's dataset names one agent; the merge layer unions them.
+   */
+  agents: string[];
   /** Root the data was read from (a home directory, a cache directory, …). */
   source: string;
   /** Which model each session's records were attributed to, for diagnostics. */

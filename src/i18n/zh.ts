@@ -38,6 +38,13 @@ export const zh = {
     own: '自身',
     spawned: '子代理',
   },
+  /** Annotations a merged (multi-agent) report adds. */
+  merge: {
+    /** `3 会话` on a project heading. */
+    sessions: (count: string) => `${count} 会话`,
+    /** `1 子代理` on a project heading. */
+    subagents: (count: string) => `${count} 子代理`,
+  },
   /** Node titles and badges in the tree. */
   tree: {
     untitled: '(无标题)',
@@ -165,7 +172,7 @@ export const zh = {
   /** Command descriptions and option help. */
   help: {
     program: '统计 coding agent 的 token 消耗与费用',
-    agent: 'agent 类型（默认自动探测；见 `agents`）',
+    agent: 'agent（默认 all：统计所有已安装的 agent；可用逗号或重复指定，如 `dsh,codex`）',
     home: 'agent 的数据目录（默认用该 agent 的环境变量或标准位置）',
     provider: '计价来源（默认按 agent 选择；见 `agents`）',
     json: '以 JSON 输出',
@@ -182,7 +189,7 @@ export const zh = {
     currency: '显示货币（默认按系统语言选，中文人民币、英文美元）',
     currencyRate: '1 单位计价货币折算为目标货币的汇率（可单独使用，此时不显示货币）',
     rateMode: 'latest（默认，全程一个汇率）或 historical（按每条记录当天的汇率）',
-    html: '把报告写成一个自包含的 HTML 文件（内联样式与条形图、无脚本），写到指定路径',
+    html: '把报告写成一个自包含的 HTML 文件（内联样式与条形图、无脚本）；`--html <路径>` 写文件，`--html` 或 `--html -` 写到 stdout',
     sessionCommand: '会话相关操作',
     sessionList: '列出所有项目与会话（项目按首个会话时间降序，会话按时间降序）',
     sessionListSubagents: '将子代理单独列出（默认并入其父会话）',
@@ -248,6 +255,8 @@ export const zh = {
     written: (path: string) => `已写入 ${path}`,
     /** `无法写入 <path>: <reason>`. */
     writeFailed: (path: string, reason: string) => `无法写入 ${path}: ${reason}`,
+    /** 同时给了 `--json` 与写到 stdout 的 `--html`。 */
+    stdoutTakenByJson: '同时给了 --json 与 --html -，stdout 让给 JSON，HTML 已跳过',
   },
 
   /** Every diagnostic, keyed by code, so a caller can throw one and translate it later. */
@@ -308,6 +317,9 @@ export const zh = {
     configUnknownLanguage: (p: { known: string; value: string }) => `应为 ${p.known} 之一，收到 ${p.value}`,
     configUnknownRateMode: (p: { value: string }) => `应为 latest 或 historical，收到 ${p.value}`,
     configRateSourceId: (p: { value: string }) => `应为汇率源 id，收到 ${p.value}`,
+    configProjectName: (p: { value: string }) => `应为非空的项目名，收到 ${p.value}`,
+    configProjectPaths: (p: { value: string }) => `应为非空的路径数组，收到 ${p.value}`,
+    configProjectPath: (p: { value: string }) => `应为非空的路径字符串，收到 ${p.value}`,
     configIgnored: (p: { path: string; reason: string }) => `忽略用户配置 ${p.path}：${p.reason}`,
     cachedPricesUnusable: (p: { reason: string }) => `已缓存的价目表不可用，改用随包版本：${p.reason}`,
     cachedRatesUnusable: (p: { reason: string }) => `已缓存的汇率表不可用，改用随包版本：${p.reason}`,

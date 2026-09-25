@@ -31,6 +31,10 @@ export const en: Messages = {
     own: 'direct',
     spawned: 'subagents',
   },
+  merge: {
+    sessions: (count: string) => `${count} sessions`,
+    subagents: (count: string) => `${count} subagents`,
+  },
   tree: {
     untitled: '(untitled)',
     subagents: (count: string) => ` (${count} subagents)`,
@@ -128,7 +132,7 @@ export const en: Messages = {
   },
   help: {
     program: 'Token usage and cost for coding agents',
-    agent: 'agent kind (auto-detected by default; see `agents`)',
+    agent: 'agent (defaults to all: every installed agent; comma-separate or repeat, e.g. `dsh,codex`)',
     home: "the agent's data directory (defaults to its environment variable or standard location)",
     provider: 'pricing provider (chosen from the agent by default; see `agents`)',
     json: 'print JSON',
@@ -145,7 +149,7 @@ export const en: Messages = {
     currency: 'currency to display (defaults to the system language: yuan for Chinese, dollars otherwise)',
     currencyRate: 'rate from 1 unit of the priced currency (usable alone; then no currency is named)',
     rateMode: 'latest (default, one rate throughout) or historical (each record’s own date)',
-    html: 'write the report to a path as one self-contained HTML file (inlined styles and chart, no scripts)',
+    html: 'write the report to an HTML file (inlined styles and chart, no scripts); `--html <path>` writes a file, `--html` or `--html -` writes to stdout',
     sessionCommand: 'session operations',
     sessionList: 'list every project and session (projects by first use, newest first; sessions newest first)',
     sessionListSubagents: 'list subagents on their own rows (folded into their parent by default)',
@@ -193,6 +197,7 @@ export const en: Messages = {
     meta: (sessions: string, first: string, last: string) => `${sessions} sessions · first ${first} · last ${last}`,
     written: (path: string) => `wrote ${path}`,
     writeFailed: (path: string, reason: string) => `could not write ${path}: ${reason}`,
+    stdoutTakenByJson: 'both --json and --html - were given; stdout keeps the JSON and the HTML was skipped',
   },
 
   errors: {
@@ -253,6 +258,9 @@ export const en: Messages = {
     configUnknownLanguage: (p: { known: string; value: string }) => `expected one of ${p.known}, got ${p.value}`,
     configUnknownRateMode: (p: { value: string }) => `expected latest or historical, got ${p.value}`,
     configRateSourceId: (p: { value: string }) => `expected a rate source id, got ${p.value}`,
+    configProjectName: (p: { value: string }) => `expected a non-empty project name, got ${p.value}`,
+    configProjectPaths: (p: { value: string }) => `expected a non-empty array of paths, got ${p.value}`,
+    configProjectPath: (p: { value: string }) => `expected a non-empty path string, got ${p.value}`,
     configIgnored: (p: { path: string; reason: string }) => `ignoring user config ${p.path}: ${p.reason}`,
     cachedPricesUnusable: (p: { reason: string }) => `the cached price list is unusable; falling back to the shipped one: ${p.reason}`,
     cachedRatesUnusable: (p: { reason: string }) => `the cached rate table is unusable; falling back to the shipped one: ${p.reason}`,

@@ -10,6 +10,7 @@
 
 import { UserError, renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import type { Language } from '../i18n/index.ts';
+import type { ProjectGroup } from '../core/merge.ts';
 import type { PricingProvider } from '../pricing/contract.ts';
 import type { RateTable } from '../pricing/currency.ts';
 import { mergeProviders, readUserConfig, type RateMode, type UpdateSettings } from './user.ts';
@@ -33,6 +34,8 @@ export interface ResolvedConfig {
   rateMode: RateMode | undefined;
   /** Rate source the user prefers, if any. */
   rateSource: string | undefined;
+  /** Projects the user declared, for the merge layer. */
+  projects: ProjectGroup[];
   /** Which automatic updates are allowed. */
   updates: UpdateSettings;
   /** Anything worth showing about how the configuration was put together. */
@@ -136,6 +139,7 @@ export async function resolveConfig(options: ResolveOptions = {}): Promise<Resol
     currency: user.config.currency,
     rateMode: user.config.rateMode,
     rateSource: user.config.rateSource,
+    projects: user.config.projects,
     updates: user.config.updates,
     warnings,
   };

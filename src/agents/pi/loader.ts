@@ -29,6 +29,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
+import { workspacePathsOf } from '../../core/paths.ts';
 import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRecord } from '../../core/types.ts';
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
@@ -303,6 +304,7 @@ function buildSession(walked: WalkedSession): SessionRecord {
   if (session.agentType !== null) extra['agentType'] = session.agentType;
   return {
     id: session.id,
+    agent: 'pi',
     // A subagent's `session_info` name is `subagent-delegate-<runId>-1`; the task
     // it was given says far more, so it wins when there is one.
     title: depth > 0 ? (session.task ?? session.title ?? session.firstUser) : (session.title ?? session.firstUser),
@@ -379,6 +381,8 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       name: path.length > 0 ? basename(path) : projectKey,
       path,
       sessions: members,
+      agents: ['pi'],
+      workspaces: workspacePathsOf(members, path),
     });
   }
   await Promise.all(
@@ -392,6 +396,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
 
   return {
     agent: 'pi',
+    agents: ['pi'],
     source,
     projects,
     sessions,

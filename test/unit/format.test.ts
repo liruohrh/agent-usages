@@ -54,6 +54,10 @@ function projectRow(overrides: Partial<ProjectReport> & { id: string }): Project
   return {
     name: overrides.id,
     path: `/tmp/${overrides.id}`,
+    kind: 'directory',
+    workspaces: [],
+    agents: [],
+    agentTotals: [],
     sessions: 1,
     activeSessions: 1,
     subagentSessions: 0,
@@ -75,6 +79,7 @@ function projectRow(overrides: Partial<ProjectReport> & { id: string }): Project
 function report(overrides: Partial<UsageResult> = {}): UsageResult {
   return {
     agent: 'test',
+    agents: [],
     source: '/tmp/test',
     dimension: 'all',
     range: { from: null, to: null, label: '全部时间' },
@@ -121,6 +126,7 @@ function sessionRow(overrides: Partial<SessionReport> & { id: string }): Session
   const requests = overrides.requests ?? 0;
   const total = overrides.cost?.total ?? '0.0000';
   return {
+    agent: 'test',
     title: null,
     cwd: null,
     projectName: 'demo',
@@ -782,6 +788,7 @@ describe('usageToJson', () => {
 describe('sessionListToJson', () => {
   const list: SessionListResult = {
     agent: 'test',
+    agents: ['test'],
     source: '/tmp/test',
     totalSessions: 1,
     warnings: [],
@@ -796,6 +803,7 @@ describe('sessionListToJson', () => {
         sessions: [
           {
             id: 'session-1',
+            agent: 'test',
             title: '演示',
             projectId: 'demo',
             projectName: 'demo',

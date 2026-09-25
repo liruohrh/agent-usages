@@ -4,10 +4,12 @@
 
 | 维度 | 作用 | 当前支持 |
 | --- | --- | --- |
-| **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness） |
+| **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness）、`pi`、`claude`（Claude Code）、`codex`（Codex） |
 | **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek） |
 
 两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱。因此新增任何一方都只是「一个模块 + 一条注册项」，核心层（聚合、报表、CLI）不需要改动。
+
+多个 agent 的产物由**合并层**（`src/core/merge.ts`）合成一份数据集后再进入聚合与报表，见下文。
 
 ## 中立模型
 
@@ -15,12 +17,32 @@
 
 ```ts
 UsageRecord  { id, time, model, modelLabel, tokens, seq?, turn?, step? }
-SessionRecord{ id, title, cwd, createdAt, records, parentId, depth, isSubagent, childIds, parentKnown }
-ProjectRecord{ id, name, path, sessions }
-UsageDataset { agent, source, projects, sessions, stats, warnings }
+SessionRecord{ id, agent, title, cwd, createdAt, records, parentId, depth, isSubagent, childIds, parentKnown }
+ProjectRecord{ id, name, path, sessions, agents, workspaces, repo? }
+UsageDataset { agent, agents, source, projects, sessions, stats, warnings }
 ```
 
 关键约定：**四个 token 桶互不重叠**（`input + cacheRead + cacheWrite` 才是完整 prompt），`reasoning` 已包含在 `output` 内、不另行计费。适配器**不接触任何货币概念**，因此换价格表永远不会影响它。
+
+`SessionRecord.agent` 是**会话身份的一半**：id 只在单个 agent 内唯一，跨 agent 的键是 `agent + id`。适配器填上自己的 id，合并层与报表层的所有索引都按这一对来，`id` 本身绝不被改写。
+
+## 合并层（`src/core/merge.ts`）
+
+一次运行可以读到多个 agent 的数据集，合并层把它们变成**一份** `UsageDataset`：
+
+| 问题 | 判据 |
+| --- | --- |
+| 两个目录是不是同一个工作区 | `normalizePath`（`src/core/paths.ts`）：realpath（取不到就 `resolve`）+ 正斜杠 + 去尾斜杠 + 折大小写 |
+| 两个工作区是不是同一个项目 | 同属一个 git 仓库（`repoOf`，主工作区与它的 worktree 因此合成一个项目），或被用户配置的 `projects` 声明为一组 |
+| 两个会话是不是同一个会话 | `agent + id` 完全相同 |
+
+补充约定：
+
+- 只有一个数据集、且没有任何 `projects` 配置时**原样返回**：适配器已经分好的项目不必重算，用户看到的项目名（DSH 的 workspace 标题等）也不会被改掉。
+- 合并只搬运会话，**不重新计价**：项目、agent、全局三层的数字都是同一批「每会话小结」的相加，所以 `Σ 各 agent = 项目总计 = 全局总计` 由构造保证（`test/unit/agent-totals.test.ts` 逐项断言）。
+- 只有**被派生出来的**子代理算作后代。fork / continuation 虽然写了 `parentId`，但它是自己独立开始的会话，不折叠进来源会话，否则它的 token 会被计两次。
+- 配置自动并入的两条证据（路径从属、同仓库）与优先级见 [配置](config.md#项目声明projects)。
+- 合并结果里每个项目带 `agents`（出现过的 agent）与 `workspaces`（覆盖的全部路径），会话与子代理保持各自 agent 的裸 id。
 
 ## 新增一个 agent
 
@@ -88,7 +110,7 @@ agent-usages usage --provider deepseek
 
 ```bash
 pnpm install
-pnpm test        # vitest，441 个用例
+pnpm test        # vitest，477 个用例
 pnpm typecheck   # tsc --noEmit
 ```
 
@@ -99,6 +121,8 @@ pnpm typecheck   # tsc --noEmit
 | `test/pricing/engine.test.ts` | **与厂商无关**的机制：区间选取与回退、峰谷时段边界与星期规则、按组件计费、跨时区判定 |
 | `test/pricing/deepseek.test.ts` | DeepSeek 的具体数字：各区间单价、2026-08-23 周末豁免、2026-04-26 缓存命中降价、9-10 精确切换点 |
 | `test/unit/report.test.ts` | 聚合：维度、筛选（含按标题搜索的语义）、子代理合并/拆分、总量与各行的精确对账 |
+| `test/unit/merge.test.ts` | 合并层：同路径跨 agent 归一个项目、主工作区 + worktree 归一个仓库、无 cwd 的会话单独成项、配置声明与自动并入两条证据 |
+| `test/unit/agent-totals.test.ts` | 按 agent 分列：`Σ agentTotals = 总量` 逐项成立、会话行带 agent、fork 不被折叠进来源会话 |
 | `test/unit/format.test.ts` | 呈现层：项目/会话树的缩进与折叠、指标行、附加表开关、JSON 字段 |
 | `test/unit/html.test.ts` | HTML 报告：文档结构、无脚本无外链、转义、SVG 条形图归一化、多窗口与折叠块 |
 | `test/unit/money.test.ts`、`test/unit/timerange.test.ts` | 精确十进制、时间范围解析（含时区与日期边界） |
@@ -106,6 +130,7 @@ pnpm typecheck   # tsc --noEmit
 | `test/agents/pi.test.ts` | pi 适配器：消息级用量、标题取最后一个 `session_info`、子 agent 目录识别 |
 | `test/agents/dsh.test.ts` | DSH 适配器：逐请求用量提取、项目归组、委派树重建、多帧 zstd 日志读取、无 storages 时的合成项目、归档标记、仓库归属 |
 | `test/cli.test.ts` | 端到端：真正拉起进程，校验 JSON 结构、退出码、`--agent`/`--provider` 选择 |
+| `test/cli-agents.test.ts` | 端到端（多 agent）：DSH + Claude Code 双份数据、`--agent all`/逗号/重复、`--html` 到 stdout、配置项目并入与非法配置提示 |
 
 `test/support/` 提供合成数据集与**合成价格表**（`stub-pricing.ts`），因此机制类测试不依赖任何真实厂商或 agent 的文件格式。
 
@@ -119,10 +144,12 @@ src/
 │   ├── types.ts           UsageRecord / SessionRecord / ProjectRecord / UsageDataset / CostTotals
 │   ├── money.ts           十进制精确算术
 │   ├── git.ts             项目目录 → git 仓库（主工作区 / worktree / 子模块），只读 `.git`，不调用 git
+│   ├── paths.ts           工作区路径身份：realpath + 规范化比较键（适配器与合并层共用）
+│   ├── merge.ts           多 agent 数据集 → 一份：按工作区/仓库/配置归项目、按 agent+id 认会话
 │   └── buckets.ts         token 桶工具
 ├── agents/                维度一：从哪里读用量
 │   ├── contract.ts        AgentAdapter 接口
-│   ├── registry.ts        注册表与自动探测
+│   ├── registry.ts        注册表、`detectAgents`（--agent all 的探测）与单个 agent 的选择
 │   ├── dsh/               DSH 适配器
 │   │   ├── loader.ts        会话日志 / 项目注册表 / 投影缓存 → 中立模型
 │   │   └── sessionlog.ts    会话日志（多帧 zstd）→ 委派树与逐请求用量
@@ -136,11 +163,11 @@ src/
 ├── config/                仓库里的配置（价格表、汇率表）+ 用户覆盖 + 每日更新的缓存
 │   ├── pricing.ts         解析/校验 config/pricing.json（也是 check-config 的引擎）
 │   ├── rates.ts           解析/校验 config/rates.json（含在线源清单）
-│   ├── user.ts            ~/.config/agent-usages/config.json，按时间合并到默认表之上
+│   ├── user.ts            ~/.config/agent-usages/config.json：价格覆盖 + `projects` 项目声明，按时间合并到默认表之上
 │   ├── update.ts          ETag 条件请求、每天最多一次、多源重试、失败即回退
 │   └── resolve.ts         三层数据合成一次运行实际使用的配置
 ├── accounting.ts          逐条计费、按「模型×区间×峰谷」精确累加并取整、聚合只是相加
-├── report.ts              筛选、每个会话计价一次、向上全部相加、会话清单
+├── report.ts              筛选、每个会话计价一次、向上全部相加（含按 agent 分列）、会话清单
 ├── timerange.ts           时间范围解析
 ├── format.ts              纯排版：token 树、计价区间、JSON 序列化（不读价格表）
 ├── html.ts                纯排版：单文件 HTML 报告（内联样式与 SVG，无脚本）

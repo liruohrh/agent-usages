@@ -33,6 +33,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
+import { workspacePathsOf } from '../../core/paths.ts';
 import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRecord } from '../../core/types.ts';
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
@@ -298,6 +299,7 @@ function buildSession(scanned: ScannedSession, named: string | null): SessionRec
   }
   return {
     id: scanned.id,
+    agent: 'codex',
     title: named ?? scanned.title,
     cwd: scanned.cwd,
     createdAt: scanned.createdAt,
@@ -394,6 +396,8 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       name: path.length > 0 ? basename(path) : '<unknown>',
       path,
       sessions: members,
+      agents: ['codex'],
+      workspaces: workspacePathsOf(members, path),
     });
   }
   await Promise.all(
@@ -407,6 +411,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
 
   return {
     agent: 'codex',
+    agents: ['codex'],
     source,
     projects,
     sessions,

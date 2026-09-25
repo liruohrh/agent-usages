@@ -35,6 +35,7 @@ import type {
   UsageRecord,
 } from '../../core/types.ts';
 import { repoOf } from '../../core/git.ts';
+import { normalizePath, workspacePathsOf } from '../../core/paths.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
 import { readSessionLogIndex, locateSessionLogs, type SessionLogInfo } from './sessionlog.ts';
 
@@ -172,13 +173,16 @@ async function readWorkspaceRegistry(home: string, warnings: Warning[]): Promise
 
 /**
  * Normalise a filesystem path for comparison: separators unified, case folded,
- * trailing separators dropped.
+ * trailing separators dropped, symlinks resolved when the path still exists.
+ *
+ * An alias of the shared {@link normalizePath}: the adapter's workspace index
+ * and the merge layer must key paths identically, or one path would become two
+ * projects.
+ *
  * @param path - a filesystem path.
  * @returns a stable comparison key.
  */
-export function pathKey(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-}
+export const pathKey = normalizePath;
 
 /** Derive a project key for sessions the workspace registry does not list. */
 function syntheticProjectKey(cwd: string | undefined): string {
@@ -335,6 +339,8 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       name: declared?.title ?? (path.length > 0 ? basenameOf(path) : projectKey),
       path,
       sessions: members,
+      agents: ['dsh'],
+      workspaces: workspacePathsOf(members, path),
     });
   }
   // One repository shows up as several projects when its worktrees are opened
@@ -355,7 +361,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     sessions: sessions.length,
     records: sessions.reduce((total, session) => total + session.records.length, 0),
   };
-  return { agent: 'dsh', source, projects, sessions, stats, warnings };
+  return { agent: 'dsh', agents: ['dsh'], source, projects, sessions, stats, warnings };
 }
 
 /** Assemble one session record from its parts. */
@@ -379,6 +385,7 @@ function buildSession(
   const parentId = isSubagent ? resolveParentId(meta.log, meta.byId) : null;
   return {
     id,
+    agent: 'dsh',
     title: meta.title,
     cwd: meta.cwd,
     createdAt: meta.createdAt,

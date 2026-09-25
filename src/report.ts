@@ -163,10 +163,41 @@ export interface BandSummary {
   components: BandComponent[];
 }
 
+/**
+ * One agent's share of a node.
+ *
+ * When several agents are merged into one report, "which agent spent this" is a
+ * dimension of its own: the same project, the same session list, split by the
+ * tool that produced it. Every node sums its rows exactly, so a project's
+ * per-agent figures add up to the project's own line and the grand total is the
+ * sum of the agents.
+ */
+export interface AgentTotals {
+  /** Agent id, e.g. `dsh`. */
+  agent: string;
+  /** Sessions this agent contributed. */
+  sessions: number;
+  /** Of those, the subagent sessions. */
+  subagentSessions: number;
+  /** Requests billed by this agent. */
+  requests: number;
+  /** Token totals. */
+  tokens: TokenTotals;
+  /** Cost totals, summed from the same session summaries as the node above. */
+  cost: CostTotals;
+}
+
 /** One session's aggregate. */
 export interface SessionReport {
   /** Session id. */
   id: string;
+  /**
+   * Agent this session belongs to, e.g. `dsh`.
+   *
+   * Ids are unique within an agent, not across agents, so the row names its
+   * agent wherever a merged report could show two sessions with one id.
+   */
+  agent: string;
   /** Session title, when known. */
   title: string | null;
   /** Working directory, when known. */
@@ -231,6 +262,20 @@ export interface ProjectReport {
   name: string;
   /** Project path. */
   path: string;
+  /**
+   * How the project was grouped: a git repository, or a single directory.
+   *
+   * A merged project is usually a repository (its main working tree and every
+   * worktree cut from it); `directory` is a path no repository could be found
+   * for, or a configured project spanning several of them.
+   */
+  kind: 'repo' | 'directory';
+  /** Every workspace path this project covers, deduplicated and sorted. */
+  workspaces: string[];
+  /** Every agent that ran a session here, sorted. */
+  agents: string[];
+  /** The same figures as above, one row per agent. Sums to this project's row. */
+  agentTotals: AgentTotals[];
   /** Sessions represented by this row's number. */
   sessions: number;
   /** Sessions that billed at least one request in range. */
@@ -332,6 +377,14 @@ export interface ScopeBreakdown {
 export interface UsageResult {
   /** Agent the data came from. */
   agent: string;
+  /**
+   * Every agent the result covers, with its totals, sorted by id.
+   *
+   * The rows sum exactly to {@link UsageResult.cost}, {@link UsageResult.tokens}
+   * and {@link UsageResult.requests}: the same session summaries, grouped by
+   * agent instead of by project.
+   */
+  agents: AgentTotals[];
   /** Data root that was read. */
   source: string;
   /** Which aggregation produced this report. */
@@ -445,11 +498,34 @@ function sessionExactKeys(session: SessionRecord): string[] {
   return title.length > 0 ? [...keys, title] : keys;
 }
 
-/** Expand a set of session ids with every session they transitively spawned. */
+/**
+ * Identity of a session, unique across agents.
+ *
+ * Ids are unique within an agent, not across agents: two tools can each have a
+ * session called `abc`, and once their datasets are merged a bare id is no
+ * longer a key. Everything that indexes sessions inside one report uses this
+ * pair, so a merge can never make one agent's session answer for another's.
+ */
+function sessionKey(session: SessionRecord): string {
+  return sessionIdentity(session.agent, session.id);
+}
+
+/** {@link sessionKey} from the two parts, for a parent id not yet resolved. */
+function sessionIdentity(agent: string, id: string): string {
+  return `${agent}\u0000${id}`;
+}
+
+/**
+ * Expand a set of session ids with every session they transitively spawned.
+ *
+ * Only a spawned session — a *subagent* — is a descendant. A fork or a
+ * continuation names a parent but was started in its own right: it is a session
+ * of its own, and folding it into the session it came from would bill it twice.
+ */
 export function expandWithDescendants(dataset: UsageDataset, ids: ReadonlySet<string>): Set<string> {
   const byParent = new Map<string, string[]>();
   for (const session of dataset.sessions) {
-    if (session.parentId === null) continue;
+    if (!session.isSubagent || session.parentId === null) continue;
     const bucket = byParent.get(session.parentId);
     if (bucket === undefined) byParent.set(session.parentId, [session.id]);
     else bucket.push(session.id);
@@ -472,6 +548,44 @@ export function collectDescendantIds(dataset: UsageDataset, sessionId: string): 
   const expanded = expandWithDescendants(dataset, new Set([sessionId]));
   expanded.delete(sessionId);
   return expanded;
+}
+
+/**
+ * Every subagent under a session, within one scope.
+ *
+ * The scope matters: a report prices and folds sessions project by project, so
+ * the traversal walks the sessions actually in that project rather than the
+ * whole dataset — a parent whose child ended up filed under another directory
+ * cannot pull it back. Identity is the agent-qualified {@link sessionKey}, since
+ * a merged dataset holds several agents whose ids are only unique one agent at a
+ * time.
+ *
+ * @param entries - the sessions in scope, each already narrowed to the range.
+ * @param root - the session to walk down from.
+ * @returns the subagents beneath it, depth-first, the session itself excluded.
+ */
+function subagentDescendants(entries: readonly ScopedSession[], root: ScopedSession): ScopedSession[] {
+  const children = new Map<string, ScopedSession[]>();
+  for (const entry of entries) {
+    if (!entry.session.isSubagent || entry.session.parentId === null) continue;
+    const key = sessionIdentity(entry.session.agent, entry.session.parentId);
+    const bucket = children.get(key);
+    if (bucket === undefined) children.set(key, [entry]);
+    else bucket.push(entry);
+  }
+  const found: ScopedSession[] = [];
+  const seen = new Set([sessionKey(root.session)]);
+  const queue: ScopedSession[] = [root];
+  while (queue.length > 0) {
+    const current = queue.pop() as ScopedSession;
+    for (const child of children.get(sessionKey(current.session)) ?? []) {
+      if (seen.has(sessionKey(child.session))) continue;
+      seen.add(sessionKey(child.session));
+      found.push(child);
+      queue.push(child);
+    }
+  }
+  return found;
 }
 
 /** Resolve session selectors to concrete ids, rejecting ambiguity. */
@@ -758,6 +872,7 @@ function sessionReport(input: SessionRowInput): SessionReport {
     input;
   const row: SessionReport = {
     id: session.id,
+    agent: session.agent,
     title: session.title,
     cwd: session.cwd,
     projectName: project.name,
@@ -855,6 +970,43 @@ function scopeOf(summary: CostSummary, sessions: number, tokens: TokenTotals): S
     tokens,
     cost: summary.totals,
   };
+}
+
+/**
+ * Split a set of in-scope sessions by the agent that produced them.
+ *
+ * The sessions are partitioned, never duplicated, and each row's money is the
+ * sum of the same per-session summaries the node above uses — so the rows add up
+ * to the node exactly, at full precision, in both the folded and the split
+ * reporting mode.
+ *
+ * @param entries - the sessions in scope for the node.
+ * @param summariesFor - the node's own summary-of-summaries function.
+ * @returns one row per agent, sorted by agent id.
+ */
+function agentTotalsOf(
+  entries: readonly ScopedSession[],
+  summariesFor: (entries: readonly ScopedSession[]) => CostSummary,
+): AgentTotals[] {
+  const byAgent = new Map<string, ScopedSession[]>();
+  for (const entry of entries) {
+    const bucket = byAgent.get(entry.session.agent);
+    if (bucket === undefined) byAgent.set(entry.session.agent, [entry]);
+    else bucket.push(entry);
+  }
+  return [...byAgent.entries()]
+    .map(([agent, members]) => {
+      const summary = summariesFor(members);
+      return {
+        agent,
+        sessions: members.length,
+        subagentSessions: members.filter((entry) => entry.session.isSubagent).length,
+        requests: summary.priced + summary.unpriced,
+        tokens: sumOf(members.flatMap((entry) => entry.records)),
+        cost: summary.totals,
+      };
+    })
+    .sort((left, right) => left.agent.localeCompare(right.agent));
 }
 
 /** Aggregate a set of in-scope sessions into one scope row. */
@@ -965,28 +1117,26 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   // is the sum of these summaries, so a row can never disagree with the rows
   // beneath it: there is only one place where money is computed at all.
   const summaryOf = new Map<string, CostSummary>();
-  for (const entry of inScope) summaryOf.set(entry.session.id, costOf(entry.records, engine));
+  for (const entry of inScope) summaryOf.set(sessionKey(entry.session), costOf(entry.records, engine));
   const summariesFor = (entries: readonly ScopedSession[]): CostSummary =>
-    addSummaries(entries.map((entry) => summaryOf.get(entry.session.id) ?? costOf([], engine)));
+    addSummaries(entries.map((entry) => summaryOf.get(sessionKey(entry.session)) ?? costOf([], engine)));
 
   // Which sessions get a row of their own, and what each row covers.
   const scopedByProject = new Map<string, ScopedSession[]>();
   const scoped: ScopedSession[] = [];
   for (const project of selectedProjects) {
     const own = inScopeByProject.get(project.id) ?? [];
-    const ownById = new Map(own.map((row) => [row.session.id, row]));
+    const ownById = new Map(own.map((row) => [sessionKey(row.session), row]));
     const rows: ScopedSession[] = [];
     for (const row of own) {
       if (!splitRows) {
         // Folded: only the top of each subtree gets a row, and it carries the
         // whole subtree.
-        const parentInScope = row.session.parentId !== null && ownById.has(row.session.parentId);
+        const parentInScope =
+          row.session.parentId !== null && ownById.has(sessionIdentity(row.session.agent, row.session.parentId));
         if (row.session.isSubagent && parentInScope) continue;
         const records = [...row.records];
-        for (const id of collectDescendantIds(dataset, row.session.id)) {
-          const child = ownById.get(id);
-          if (child !== undefined) records.push(...child.records);
-        }
+        for (const child of subagentDescendants(own, row)) records.push(...child.records);
         records.sort((left, right) => (left.time === right.time ? (left.seq ?? 0) - (right.seq ?? 0) : left.time - right.time));
         rows.push({ session: row.session, records });
         continue;
@@ -1003,7 +1153,7 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   for (const project of selectedProjects) {
     const ownRows = scopedByProject.get(project.id) ?? [];
     const projectScope = inScopeByProject.get(project.id) ?? [];
-    const rowById = new Map(projectScope.map((entry) => [entry.session.id, entry]));
+    const rowById = new Map(projectScope.map((entry) => [sessionKey(entry.session), entry]));
     const summary = summariesFor(projectScope);
     const activeRows = ownRows.filter((row) => row.records.length > 0);
     const projectRecords = ownRows.flatMap((row) => row.records);
@@ -1013,6 +1163,10 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
       id: project.id,
       name: project.name,
       path: project.path,
+      kind: project.repo === undefined ? 'directory' : 'repo',
+      workspaces: [...project.workspaces],
+      agents: [...new Set(projectScope.map((entry) => entry.session.agent))].sort(),
+      agentTotals: agentTotalsOf(projectScope, summariesFor),
       ...(project.repo === undefined ? {} : { repo: project.repo }),
       sessions: splitRows ? projectScope.length : ownRows.length,
       activeSessions: splitRows
@@ -1037,12 +1191,15 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
         const warning = adapterWarning(session, records);
         // A row's own records are never its folded ones: the split has to stay
         // exact in both modes so `自身 + 子代理` always explains the node.
-        const ownSummary = summaryOf.get(session.id) ?? costOf([], engine);
-        const ownRecords = rowById.get(session.id)?.records ?? records;
-        const descendantIds = collectDescendantIds(dataset, session.id);
-        const spawnedRecords = [...descendantIds].flatMap((id) => rowById.get(id)?.records ?? []);
+        const entry = rowById.get(sessionKey(session));
+        const ownSummary = summaryOf.get(sessionKey(session)) ?? costOf([], engine);
+        const ownRecords = entry?.records ?? records;
+        // Only spawned sessions count as the row's 子代理: a fork keeps its own
+        // row, so folding it in here would bill it twice.
+        const descendants = entry === undefined ? [] : subagentDescendants(projectScope, entry);
+        const spawnedRecords = descendants.flatMap((child) => child.records);
         const spawned = addSummaries(
-          [...descendantIds].map((id) => summaryOf.get(id) ?? costOf([], engine)),
+          descendants.map((child) => summaryOf.get(sessionKey(child.session)) ?? costOf([], engine)),
         );
         // Everything the row reports — its cost, its bands, its model rows —
         // describes the whole subtree, so each of them agrees with the 总 line the
@@ -1058,11 +1215,11 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
             ownSummary,
             ownRecords,
             spawnedRecords,
-            spawned: { summary: spawned, sessions: descendantIds.size },
+            spawned: { summary: spawned, sessions: descendants.length },
             summary: addSummaries([ownSummary, spawned]),
             project,
             engine,
-            subagentCount: splitRows ? 0 : descendantIds.size,
+            subagentCount: splitRows ? 0 : descendants.length,
             warning,
           }),
         );
@@ -1108,6 +1265,7 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
 
   const result: UsageResult = {
     agent: dataset.agent,
+    agents: agentTotalsOf(inScope, summariesFor),
     source: dataset.source,
     dimension: query.dimension,
     range: query.range,
@@ -1172,6 +1330,8 @@ function isBuckets(value: unknown): value is TokenTotals {
 export interface SessionListEntry {
   /** Session id. */
   id: string;
+  /** Agent this session belongs to, e.g. `dsh`. */
+  agent: string;
   /** Session title. */
   title: string | null;
   /** Owning project id. */
@@ -1234,6 +1394,8 @@ export interface SessionListProject {
 export interface SessionListResult {
   /** Agent the data came from. */
   agent: string;
+  /** Every agent the inventory covers, sorted. */
+  agents: string[];
   /** Data root that was read. */
   source: string;
   /** Projects, newest activity first. */
@@ -1254,6 +1416,17 @@ export interface SessionListFilters {
   repos?: readonly string[] | undefined;
   /** List subagents separately (`true`) or fold them into their parent (`false`, default). */
   includeSubagents?: boolean | undefined;
+}
+
+/**
+ * Scope-unique key for a list row.
+ *
+ * Ids are only unique within an agent, and a merged inventory holds several, so
+ * parent links are followed through the pair — the same identity the report
+ * layer uses.
+ */
+function listKey(entry: SessionListEntry): string {
+  return sessionIdentity(entry.agent, entry.id);
 }
 
 /** Sort key for a session row: first billed request, else creation time. */
@@ -1307,14 +1480,15 @@ export function listSessions(dataset: UsageDataset, filters: SessionListFilters 
     const all = new Map<string, SessionListEntry>();
     for (const session of project.sessions) {
       if (selected !== undefined && !selected.has(session.id)) continue;
-      all.set(session.id, toListEntry(session, project, dataset));
+      const entry = toListEntry(session, project, dataset);
+      all.set(listKey(entry), entry);
     }
     if (all.size === 0) continue;
 
     // A subagent whose parent is also in scope is nested under it; one whose
     // parent is absent (named directly, or filtered out) stands on its own.
     const hasParentInScope = (entry: SessionListEntry): boolean =>
-      entry.parentId !== null && all.has(entry.parentId);
+      entry.isSubagent && entry.parentId !== null && all.has(sessionIdentity(entry.agent, entry.parentId));
 
     // A "root" is a session with no parent in scope: a top-level session, or a
     // subagent whose parent was named away.
@@ -1330,13 +1504,13 @@ export function listSessions(dataset: UsageDataset, filters: SessionListFilters 
     const listed = includeSubagents ? allEntries : roots.map((entry) => foldSubtree(entry, all));
     const ordered: SessionListEntry[] = [];
     for (const root of roots.sort(byInstantDescending)) {
-      ordered.push(includeSubagents ? root : (listed.find((entry) => entry.id === root.id) ?? root));
+      ordered.push(includeSubagents ? root : (listed.find((entry) => listKey(entry) === listKey(root)) ?? root));
       // Split mode gives every descendant its own row, nested under the root it
       // was reached through. Folded mode gives the root alone a row, because
       // that row already carries the subtree; a descendant whose intermediate
       // ancestor is out of scope is a root itself and is emitted above.
       if (!includeSubagents) continue;
-      for (const descendant of descendantsOfList(all, root.id).sort(byInstantDescending)) {
+      for (const descendant of descendantsOfList(all, root).sort(byInstantDescending)) {
         ordered.push({ ...descendant, nested: true });
       }
     }
@@ -1357,7 +1531,15 @@ export function listSessions(dataset: UsageDataset, filters: SessionListFilters 
   }
 
   projects.sort((left, right) => projectSortInstant(right) - projectSortInstant(left) || left.name.localeCompare(right.name));
-  return { agent: dataset.agent, source: dataset.source, projects, totalSessions, warnings };
+  const listed = projects.flatMap((project) => project.sessions);
+  return {
+    agent: dataset.agent,
+    agents: [...new Set(listed.map((session) => session.agent))].sort(),
+    source: dataset.source,
+    projects,
+    totalSessions,
+    warnings,
+  };
 }
 
 /** Build one list row from a session. */
@@ -1368,6 +1550,7 @@ function toListEntry(session: SessionRecord, project: ProjectRecord, dataset: Us
   }, 0);
   return {
     id: session.id,
+    agent: session.agent,
     title: session.title,
     projectId: project.id,
     projectName: project.name,
@@ -1393,17 +1576,27 @@ function toListEntry(session: SessionRecord, project: ProjectRecord, dataset: Us
  * @param id - the ancestor's id.
  * @returns the descendants, excluding the ancestor itself.
  */
-function descendantsOfList(all: ReadonlyMap<string, SessionListEntry>, id: string): SessionListEntry[] {
+function descendantsOfList(all: ReadonlyMap<string, SessionListEntry>, root: SessionListEntry): SessionListEntry[] {
   const found: SessionListEntry[] = [];
-  const queue = [id];
-  const seen = new Set([id]);
+  // Only a spawned session is a descendant; a fork names a parent but keeps its
+  // own row, so folding it under that parent would count it twice.
+  const children = new Map<string, SessionListEntry[]>();
+  for (const entry of all.values()) {
+    if (!entry.isSubagent || entry.parentId === null) continue;
+    const key = sessionIdentity(entry.agent, entry.parentId);
+    const bucket = children.get(key);
+    if (bucket === undefined) children.set(key, [entry]);
+    else bucket.push(entry);
+  }
+  const queue = [root];
+  const seen = new Set([listKey(root)]);
   while (queue.length > 0) {
-    const current = queue.pop() as string;
-    for (const entry of all.values()) {
-      if (entry.parentId !== current || seen.has(entry.id)) continue;
-      seen.add(entry.id);
+    const current = queue.pop() as SessionListEntry;
+    for (const entry of children.get(listKey(current)) ?? []) {
+      if (seen.has(listKey(entry))) continue;
+      seen.add(listKey(entry));
       found.push(entry);
-      queue.push(entry.id);
+      queue.push(entry);
     }
   }
   return found;
@@ -1411,7 +1604,7 @@ function descendantsOfList(all: ReadonlyMap<string, SessionListEntry>, id: strin
 
 /** Fold a session's whole subtree into its row: requests, tokens, and time span. */
 function foldSubtree(root: SessionListEntry, all: ReadonlyMap<string, SessionListEntry>): SessionListEntry {
-  const descendants = descendantsOfList(all, root.id);
+  const descendants = descendantsOfList(all, root);
   if (descendants.length === 0) return root;
   const tokens = { ...root.tokens };
   let requests = root.requests;

@@ -131,6 +131,43 @@ describe('readUserConfig', () => {
     const { warnings } = readUserConfig({ ...process.env, XDG_CONFIG_HOME: dir });
     expect(warnings[0]?.message).toMatch(/不是合法 JSON/);
   });
+
+  it('reads configured projects, expanding ~ and making paths absolute', () => {
+    const env = withConfig({
+      version: 1,
+      projects: [{ name: 'Memolink', paths: ['~/ws/apps/Memolink', '/abs/other'] }],
+    });
+    const { config, warnings } = readUserConfig(env);
+    expect(warnings).toEqual([]);
+    expect(config.projects).toEqual([
+      { name: 'Memolink', paths: [join(env['HOME'] as string, 'ws/apps/Memolink'), '/abs/other'] },
+    ]);
+  });
+
+  it('rejects a project without a name, and reports which entry it was', () => {
+    const { config, warnings } = readUserConfig(
+      withConfig({ version: 1, projects: [{ name: 'ok', paths: ['/tmp/a'] }, { paths: ['/tmp/b'] }] }),
+    );
+    expect(config.projects).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/projects\[1\]\.name/);
+    expect(warnings[0]?.message).toMatch(/项目名/);
+  });
+
+  it('rejects a project whose paths are missing, empty, or not strings', () => {
+    for (const entry of [{ name: 'x' }, { name: 'x', paths: [] }, { name: 'x', paths: ['/tmp/a', 42] }]) {
+      const { config, warnings } = readUserConfig(withConfig({ version: 1, projects: [entry] }));
+      expect(config.projects).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]?.message).toMatch(/projects\[0\]\.paths/);
+    }
+  });
+
+  it('rejects a projects section that is not an array at all', () => {
+    const { warnings } = readUserConfig(withConfig({ version: 1, projects: { name: 'x' } }));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/projects: 应为数组/);
+  });
 });
 
 describe('mergePeriods', () => {

@@ -28,6 +28,7 @@ export function buckets(overrides: Partial<TokenBuckets> = {}): TokenBuckets {
 /** A session with the given records. */
 export function session(overrides: Partial<SessionRecord> & { id: string }): SessionRecord {
   return {
+    agent: 'test',
     title: null,
     cwd: null,
     createdAt: null,
@@ -44,7 +45,19 @@ export function session(overrides: Partial<SessionRecord> & { id: string }): Ses
 
 /** A project with the given sessions. */
 export function project(overrides: Partial<ProjectRecord> & { id: string }): ProjectRecord {
-  return { name: overrides.id, path: `/tmp/${overrides.id}`, sessions: [], ...overrides };
+  const sessions = overrides.sessions ?? [];
+  return {
+    name: overrides.id,
+    path: `/tmp/${overrides.id}`,
+    sessions,
+    // The same rule the adapters follow: a project names the agents and
+    // workspaces its sessions came from.
+    agents: [...new Set(sessions.map((entry) => entry.agent))].sort(),
+    workspaces: [
+      ...new Set(sessions.map((entry) => entry.cwd).filter((cwd): cwd is string => cwd !== null && cwd.length > 0)),
+    ].sort(),
+    ...overrides,
+  };
 }
 
 /** A dataset with the given projects, deriving the flat session list from them. */
@@ -52,6 +65,7 @@ export function dataset(projects: ProjectRecord[], overrides: Partial<UsageDatas
   const sessions = projects.flatMap((entry) => entry.sessions);
   return {
     agent: 'test',
+    agents: ['test'],
     source: '/tmp/test',
     projects,
     sessions,

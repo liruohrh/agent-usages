@@ -16,7 +16,7 @@
 
 import { Command, InvalidArgumentError } from 'commander';
 
-import { AGENT_ADAPTERS, resolveAgent, type AgentAdapter } from './agents/index.ts';
+import { AGENT_ADAPTERS, detectAgents, requireAgent, type AgentAdapter } from './agents/index.ts';
 import {
   PRICING_PROVIDERS,
   createPricingEngine,
@@ -28,6 +28,7 @@ import { listSessions, runQuery, type SessionListFilters, type UsageDimension, t
 import { resolveRange } from './timerange.ts';
 import { resolveLanguage, setLanguage, t } from './i18n/index.ts';
 import { renderDiagnostic, type Warning } from './i18n/errors.ts';
+import { mergeDatasets } from './core/merge.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -59,7 +60,8 @@ const EXIT_NO_DATA = 2;
 
 /** Options shared by every command. */
 interface GlobalOptions {
-  agent?: string;
+  /** Agents to read: every occurrence of `--agent`, each already split on commas. */
+  agent?: string[];
   home?: string;
   provider?: string;
   json?: boolean;
@@ -81,13 +83,16 @@ interface UsageOptions extends GlobalOptions {
   currencyRate?: string;
   rateMode?: string;
   noEnrich?: boolean;
-  html?: string;
+  /** `--html <path>` writes a file; `--html` or `--html -` writes to stdout. */
+  html?: string | boolean;
 }
 
 /** A dataset plus everything needed to price and describe it. */
 interface Loaded {
+  /** Every agent's data, merged into one dataset. */
   dataset: UsageDataset;
-  adapter: AgentAdapter;
+  /** The adapters that were read, in selection order. */
+  adapters: AgentAdapter[];
   engine: PricingEngine;
   /** Currency to print amounts in, and where that choice came from. */
   display: DisplayResolution;
@@ -137,18 +142,63 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
   return { ...options, ...merged };
 }
 
-/** Resolve the agent, read its data, and build a pricing engine for it. */
+/**
+ * The adapters a run should read.
+ *
+ * No `--agent` means every agent: the report answers "what did this machine
+ * spend", and an agent that is not installed contributes nothing rather than
+ * failing the run. Naming agents narrows it, and an explicitly named agent that
+ * has no data is still an error — the user asked for that agent specifically.
+ *
+ * @param requested - every `--agent` value given, already comma-split.
+ * @param home - an explicit data root, when given.
+ * @returns the adapters to load, in selection order.
+ * @throws {UserError} when an explicitly named agent is not one this build knows.
+ */
+async function selectAgents(requested: readonly string[] | undefined, home: string | undefined): Promise<AgentAdapter[]> {
+  const wanted = (requested ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
+  const everything = wanted.length === 0 || wanted.some((id) => id.toLowerCase() === 'all');
+  if (everything) return detectAgents(home);
+  const chosen: AgentAdapter[] = [];
+  for (const id of wanted) {
+    const adapter = requireAgent(id);
+    // `--agent dsh --agent dsh` reads one agent once, not twice.
+    if (!chosen.includes(adapter)) chosen.push(adapter);
+  }
+  return chosen;
+}
+
+/** How the report header names the agents a run read. */
+function agentLabelOf(adapters: readonly AgentAdapter[]): string {
+  return adapters.map((adapter) => adapter.label).join(' · ');
+}
+
+/** Resolve the agents, read their data, merge it, and build a pricing engine. */
 async function loadOrExit(
   options: GlobalOptions & Pick<UsageOptions, 'currency' | 'currencyRate' | 'rateMode'>,
   config: ResolvedConfig,
 ): Promise<Loaded | undefined> {
   try {
-    const adapter = await resolveAgent(options.agent, options.home);
-    const dataset = await adapter.load({
-      ...(options.home === undefined ? {} : { home: options.home }),
-      enrich: true,
-    });
-    const provider = resolvePricingProvider(options.provider, adapter.id, config.providers);
+    const adapters = await selectAgents(options.agent, options.home);
+    if (adapters.length === 0) {
+      const known = AGENT_ADAPTERS.map((adapter) => adapter.id).join('、');
+      throw new Error(
+        renderDiagnostic('noUsageData', { home: options.home ?? t().errors.defaultLocation, known }),
+      );
+    }
+    const datasets = await Promise.all(
+      adapters.map((adapter) =>
+        adapter.load({
+          ...(options.home === undefined ? {} : { home: options.home }),
+          enrich: true,
+        }),
+      ),
+    );
+    // Every agent's projects become one project per place: the same directory
+    // read by two agents is one row, a repository's worktrees are one row, and
+    // the configuration can group what the filesystem cannot.
+    const dataset = await mergeDatasets(datasets, config.projects.length === 0 ? {} : { projects: config.projects });
+    const provider = resolvePricingProvider(options.provider, dataset.agent, config.providers);
     // The vendor's rates are rewritten into the display currency here, once, so
     // every amount and every unit price downstream is already in it.
     const published = providerCurrencies(provider);
@@ -204,7 +254,7 @@ async function loadOrExit(
     );
     return {
       dataset,
-      adapter,
+      adapters,
       engine,
       display,
       symbol: display.currency?.symbol ?? '',
@@ -236,6 +286,16 @@ interface ReportHeadings {
   scope: boolean;
 }
 
+/** Render the HTML document both the file and the stdout paths emit. */
+function htmlReport(sections: readonly ReportSection[], headings: ReportHeadings): string {
+  return renderHtmlReport(sections, {
+    agentLabel: headings.agentLabel,
+    pricingLabel: headings.pricingLabel,
+    symbol: headings.symbol,
+    scope: headings.scope,
+  });
+}
+
 /**
  * Write the HTML report and say where it went.
  *
@@ -250,12 +310,7 @@ async function writeHtmlReport(
   json: boolean,
   requests: number,
 ): Promise<void> {
-  const document = renderHtmlReport(sections, {
-    agentLabel: headings.agentLabel,
-    pricingLabel: headings.pricingLabel,
-    symbol: headings.symbol,
-    scope: headings.scope,
-  });
+  const document = htmlReport(sections, headings);
   try {
     await writeFile(path, document, 'utf8');
   } catch (error) {
@@ -331,25 +386,34 @@ async function runUsage(options: UsageOptions): Promise<void> {
   // the one line that says where it went. `--json` keeps its stream, because a
   // script asked for a machine-readable answer rather than a rendering.
   if (options.html !== undefined) {
-    await writeHtmlReport(
-      options.html,
-      sections,
-      {
-        symbol,
-        agentLabel: loaded.adapter.label,
-        pricingLabel: engine.provider.label,
-        scope: subagentMode !== 'total',
-      },
-      options.json === true,
-      requests,
-    );
-    return;
+    const headings: ReportHeadings = {
+      symbol,
+      agentLabel: agentLabelOf(loaded.adapters),
+      pricingLabel: engine.provider.label,
+      scope: subagentMode !== 'total',
+    };
+    // `--html` with no value, or `--html -`, is the pipeline spelling: the
+    // document goes to stdout so it can be piped or redirected.
+    const toStdout = options.html === true || options.html === '-';
+    if (toStdout && options.json !== true) {
+      process.stdout.write(htmlReport(sections, headings));
+      process.exitCode = requests === 0 ? EXIT_NO_DATA : EXIT_OK;
+      return;
+    }
+    if (toStdout) {
+      // Both asked for stdout, and a script that passed `--json` must keep
+      // receiving JSON: the rendering is skipped and the user is told why.
+      process.stderr.write(`agent-usages: ${t().html.stdoutTakenByJson}\n`);
+    } else {
+      await writeHtmlReport(String(options.html), sections, headings, options.json === true, requests);
+      return;
+    }
   }
 
   emit(
     usageToJson(sections),
     formatUsageReport(sections, symbol, {
-      agentLabel: loaded.adapter.label,
+      agentLabel: agentLabelOf(loaded.adapters),
       pricingLabel: engine.provider.label,
       scope: subagentMode !== 'total',
       expandSubagents: subagentMode === 'detail',
@@ -384,7 +448,7 @@ async function runSessionList(options: SessionListOptions): Promise<void> {
   const result = listSessions(loaded.dataset, filters);
   emit(
     sessionListToJson(result),
-    formatSessionList(result, loaded.adapter.label),
+    formatSessionList(result, agentLabelOf(loaded.adapters)),
     options.json === true,
     result.totalSessions,
   );
@@ -607,10 +671,20 @@ function runAgents(options: GlobalOptions): void {
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
+/**
+ * Accumulate a repeatable option, splitting commas.
+ *
+ * `--agent dsh,codex` and `--agent dsh --agent codex` mean the same thing; both
+ * spellings exist because one is convenient to type and the other to generate.
+ */
+function collectList(value: string, previous: string[] | undefined): string[] {
+  return [...(previous ?? []), ...value.split(',')];
+}
+
 /** Register the options every command shares. */
 function commonOptions(command: Command): Command {
   return command
-    .option('--agent <id>', t().help.agent)
+    .option('--agent <id>', t().help.agent, collectList)
     .option('--home <dir>', t().help.home)
     .option('--provider <id>', t().help.provider)
     .option('--json', t().help.json)
@@ -637,7 +711,7 @@ export function buildProgram(): Command {
       .option('--subagents', t().help.subagents)
       .option('--cost', t().help.cost)
       .option('--models', t().help.models)
-      .option('--html <path>', t().help.html)
+      .option('--html [path]', t().help.html)
       .option('-p, --project-filter <selector>', t().help.projectFilter, collect)
       .option('-s, --session-filter <selector>', t().help.sessionFilter, collect)
       .option('-r, --repo-filter <selector>', t().help.repoFilter, collect)
