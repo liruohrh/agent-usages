@@ -100,6 +100,10 @@ export interface DashboardTotals {
   tokenBreakdown: TokenBreakdown;
   /** Cost totals. */
   cost: CostTotals;
+  /** The scope's own work, summed the way `ProjectSummary.own` is. */
+  own: ScopeFigures;
+  /** What those same roots spawned, folded. */
+  spawned: ScopeFigures;
 }
 
 /** One session (or subagent) as the tree and the tables show it. */
@@ -191,6 +195,10 @@ export interface WorkspaceNode {
   cost: CostTotals;
   /** The same figures per agent. */
   agentTotals: AgentTotals[];
+  /** The workspace's own work, the way the CLI's `自身` line reads it. */
+  own: ScopeFigures;
+  /** What those same roots spawned, folded. */
+  spawned: ScopeFigures;
   /** Every session of this workspace, newest first. */
   sessionReports: SessionNode[];
 }
@@ -229,6 +237,10 @@ export interface ProjectSummary {
   cost: CostTotals;
   /** Per-agent figures. Σ over agents === this project's own totals. */
   agentTotals: AgentTotals[];
+  /** The project's own work, the way the CLI's `自身` line reads it. */
+  own: ScopeFigures;
+  /** What those same roots spawned, folded. */
+  spawned: ScopeFigures;
   /** Per-workspace breakdown, the tree's middle level. */
   workspaceNodes: WorkspaceNode[];
   /** Every session, subagents included, newest first. */

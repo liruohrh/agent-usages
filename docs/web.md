@@ -2,8 +2,19 @@
 
 终端里看四个 agent 的用量已经不够用了：项目一多，`usage` 的表格就要横向滚动，
 会话与子代理只能靠缩进辨认，时间趋势更是完全看不见。这一层把同一份数据放进浏览器：
-左边是**项目 → 工作区 → 会话 → 子代理**的树，右边是选中范围的**按 agent 分列 + 总计**、
-时间序列、token 五桶占比、模型与计价区间明细。
+左边是**项目 → 工作区 → 会话 → 子代理**的树，右边是选中范围的**指标行**、
+按 agent 分列的**五桶表**、时间序列、token 五桶占比、**会话明细**、模型与计价区间明细。
+
+细节与 CLI 是同一套，不是摘要版：
+
+- 每个层级（全局 / 项目 / 工作区 / 会话）都给 **`总 / 自身 / 子代理`** 三段，就是
+  `usage --subagent` 的那三行；
+- 每段都是 CLI 的**完整指标行**：`I/M`、`I/W`（有才显示）、`I/C`（带命中率）、`I/T`、
+  `O`、`R`（有才显示，带占比）、`O/T`、`T`、`Q`，每项都跟着它自己产生的金额；
+- 项目页的**会话明细表**列出每个会话的 agent、首次/最后用量、Q、T、金额与占比，
+  可切换「合并子代理 / 含子代理」（对应 CLI 的默认与 `--subagents`）；
+- 树里的行保持紧凑（340px 宽放不下整行），**悬停**给出该行的完整指标行，**选中的行**
+  直接在树下展开 `总 / 自身 / 子代理`。
 
 它不是静态 HTML 报告（那个是 `usage --html`，用来离线分享），而是一个**本地服务**：
 API 返回 JSON，前端是 Vite 构建的单页应用。
@@ -11,7 +22,8 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 - 只读：不写任何 agent 的数据目录，唯一的写操作是显式的 `--write-snapshot`。
 - 默认只绑 `127.0.0.1`，不加载任何 CDN 资源。
 - 数据来自 CLI 已经信任的同一批模块（适配器、`src/core/merge.ts` 合并层、`src/report.ts`
-  的 `runQuery`），所以 Web 上的数字与 `agent-usages usage` 是同一套口径。
+  的 `runQuery`），所以 Web 上的数字与 `agent-usages usage` 是同一套口径；`自身 + 子代理 = 总`
+  这类恒等式由服务端算好，浏览器只排版、不重算钱。
 
 ---
 
@@ -102,10 +114,10 @@ web/                       # 前端 workspace 包（package.json name = "web"）
     components/
       Filters.tsx          #   顶部：时间范围 / agent 多选 / 项目搜索 / 重扫 / 主题
       Tree.tsx             #   左栏：项目 → 工作区 → 会话 → 子代理
-      Overview.tsx         #   右栏：概览、按 agent 分列、占比图、时序、明细
-      SessionDetail.tsx    #   会话详情 + 委派树
-      Tables.tsx           #   按 agent / 模型 / 计价区间 / token 五桶四张表
-      Bits.tsx             #   徽标、卡片、统计块、提示条
+      Overview.tsx         #   右栏：概览、指标（总/自身/子代理）、按 agent 分列、占比图、时序、明细
+      SessionDetail.tsx    #   会话详情 + 同一套指标 + 委派树
+      Tables.tsx           #   按 agent / 会话 / 模型 / 计价区间 / token 五桶五张表
+      Bits.tsx             #   徽标、卡片、统计块、提示条、MetricLine/MetricSplit（与 CLI 同一行的指标）
   scripts/smoke.mjs        # 冒烟测试（起服务 → 打接口 → 断言 → 关闭）
   scripts/e2e-server.mjs   # 给 Playwright 起的服务（优先离线快照，没有就实时扫）
   e2e/dashboard.spec.ts    # 浏览器里的端到端测试：切项目/切会话/布局与溢出
@@ -184,6 +196,8 @@ CLI 的 `bin` / `files` / `version` 未改动。
   "tokens": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "reasoning": 0 },
   "cost": { "total": "20.1234", "…": "…" } }
 
+// own / spawned：CLI `usage --subagent` 的「自身 / 子代理」。每个层级
+// （totals、projects[]、workspaceNodes[]、会话行）都有，且 自身 + 子代理 = 该层总计
 // totals：所有 agent 的合计 + 五个桶各自的数量/占比/金额
 { "sessions": 41, "subagentSessions": 12, "projects": 3, "workspaces": 4,
   "requests": 1234, "unpriced": 0,
@@ -285,9 +299,9 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 pnpm install                                        # 2 个 workspace 包
 pnpm --filter web build                             # tsc --noEmit && vite build
 pnpm web:snapshot                                   # 生成离线 fixture（不入库，先跑一次）
-pnpm web:smoke                                      # 离线快照，44 项断言
-node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 89 项
-pnpm web:e2e                                        # 真浏览器：6 条，起服务 + 切项目/会话 + 量布局
+pnpm web:smoke                                      # 离线快照，47 项断言
+node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 95 项
+pnpm web:e2e                                        # 真浏览器：10 条，起服务 + 切项目/会话 + 口径与布局
 CI=true pnpm typecheck                              # 根 tsconfig 覆盖 src/serve/**
 CI=true pnpm test                                   # 488 个用例
 ```
@@ -329,6 +343,7 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 | 长标题 `line-clamp-2` + `title` | 表格 `table-fixed`，会话标题/路径再长也不撑宽列；CLI 的 HTML 报告用同一套修法（`table-layout:fixed` + `colgroup` + `title` 全文） |
 | 明细表纵向排列 | 模型明细 6 列、计价区间明细 7 列，并排时半宽放不下只能横滚；纵向各占整宽后 1440px 下不再需要滚动（Playwright 每条都量） |
 | 一行一个 (agent, 项目, 模型) / (agent, 项目, 模型, 区间, 档位) | 表格的行身份就是 React 的 key：按会话出数会给出重复 key，切范围时旧行不会被卸载（真实缺陷）。服务端在 `mergeModelRows` / `mergeBandRows` 里把同一身份的行相加，一行一条后再交给前端 |
+| 指标行与 CLI 逐字对齐 | Web 的每一层都给 `自身 / 子代理` 与 `I/M I/W I/C I/T O R O/T T Q 金额`，顺序与 `src/format.ts` 相同；数来自服务端 `own`/`spawned` 字段，前端只排版不重算 |
 | Playwright | 只有真浏览器能发现"key 不唯一 → 切项目留旧行"和"并排太窄"这类问题；断言直接与页面自己拿到的 API 数据比对 |
 
 ---

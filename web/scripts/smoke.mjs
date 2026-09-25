@@ -219,6 +219,34 @@ async function exercise(base, { live }) {
     short.map((project) => `${project.id}: ${requestSum(project.models)} vs ${project.requests}`).join('; '),
   );
 
+  // The CLI's `总 / 自身 / 子代理` split: every scope carries it, and 自身 + 子代理
+  // has to be exactly the scope's own total — same requests, same tokens, same
+  // money — or the two reports disagree on the same data.
+  const split = (row) => ({
+    requests: (row?.own?.requests ?? 0) + (row?.spawned?.requests ?? 0),
+    cost: addAmounts([row?.own?.cost?.total ?? '0', row?.spawned?.cost?.total ?? '0']),
+    tokens: BUCKETS.map((key) => (row?.own?.tokens?.[key] ?? 0) + (row?.spawned?.tokens?.[key] ?? 0)),
+  });
+  const splitMatches = (row) => {
+    const sum = split(row);
+    return (
+      sum.requests === row?.requests &&
+      sum.cost === addAmounts([row?.cost?.total ?? '0']) &&
+      BUCKETS.every((key, index) => sum.tokens[index] === row?.tokens?.[key])
+    );
+  };
+  check('summary.totals 带 自身/子代理 且 Σ = 总计', splitMatches(summary.body?.totals));
+  const shortSplit = (dashboard.body?.projects ?? []).filter((project) => !splitMatches(project));
+  check(
+    '每个项目 自身 + 子代理 = 项目总计',
+    shortSplit.length === 0,
+    shortSplit.map((project) => project.id).join('; '),
+  );
+  check(
+    '单项目接口也带 自身/子代理 且 Σ = 总计',
+    splitMatches(one.body?.project) && (one.body?.project?.own?.requests ?? 0) > 0,
+  );
+
   const shell = await fetch(base);
   const html = await shell.text();
   check('GET / → 200 HTML', shell.status === 200 && (shell.headers.get('content-type') ?? '').includes('text/html'), `HTTP ${shell.status}`);

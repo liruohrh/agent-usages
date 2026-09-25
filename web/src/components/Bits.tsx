@@ -9,7 +9,8 @@
 
 import type { ReactNode } from 'react';
 
-import { agentColor, agentLabel, formatCost, formatTokens } from '../format';
+import { agentColor, agentLabel, formatCost, formatTokens, metricItems } from '../format';
+import type { CostTotals, TokenBuckets } from '../types';
 
 /** A coloured agent chip. */
 export function AgentBadge({ id, small = false }: { id: string; small?: boolean }): React.ReactElement {
@@ -137,17 +138,99 @@ export function MoneyTokens({
   tokens,
   symbol,
   requests,
+  hint,
 }: {
   cost: string;
   tokens: number;
   symbol: string;
   requests?: number;
+  /** Full metric line, shown on hover — the compact row cannot hold it. */
+  hint?: string;
 }): React.ReactElement {
   return (
-    <span className="tnum shrink-0 text-right text-[11px] text-muted">
+    <span className="tnum shrink-0 text-right text-[11px] text-muted" title={hint}>
       <span className="text-fg">{formatCost(cost, symbol)}</span>
       <span className="text-faint"> · {formatTokens(tokens, true)} tok</span>
       {requests !== undefined && <span className="text-faint"> · {formatTokens(requests)} req</span>}
     </span>
+  );
+}
+
+/**
+ * The CLI's metric line, in the browser.
+ *
+ * The terminal prints one line per node — `I/M 1.2M ¥0.53 · I/C … · T … · Q … ·
+ * ¥…` — and this is the same line, in the same order, so a figure read here and
+ * a figure read there cannot disagree. `I/W` and `R` show up only when they were
+ * reported; the trailing total is the one on the row's own headline.
+ */
+export function MetricLine({
+  tokens,
+  cost,
+  requests,
+  symbol,
+  className = '',
+}: {
+  tokens: TokenBuckets;
+  cost: CostTotals;
+  requests: number;
+  symbol: string;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <div className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] ${className}`}>
+      {metricItems(tokens, cost, requests, symbol).map((entry, index) => (
+        <span key={`${entry.key}:${String(index)}`} className="whitespace-nowrap">
+          {entry.key.length > 0 && <span className="text-faint">{entry.key} </span>}
+          {entry.key.length > 0 && <span className="tnum text-fg">{formatTokens(entry.count, true)}</span>}
+          {entry.ratio.length > 0 && <span className="tnum text-faint">{entry.ratio}</span>}
+          {entry.money.length > 0 && (
+            <span className={`tnum ml-1 ${entry.key.length === 0 ? 'font-medium text-accent' : 'text-muted'}`}>
+              {entry.money}
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The `总 / 自身 / 子代理` block, exactly what `usage --subagent` prints.
+ *
+ * @param props - the scope's figures.
+ */
+export function MetricSplit({
+  total,
+  own,
+  spawned,
+  symbol,
+}: {
+  total: { tokens: TokenBuckets; cost: CostTotals; requests: number };
+  own: { tokens: TokenBuckets; cost: CostTotals; requests: number };
+  spawned: { tokens: TokenBuckets; cost: CostTotals; requests: number };
+  symbol: string;
+}): React.ReactElement {
+  return (
+    <div className="space-y-1">
+      {(
+        [
+          { label: '总', figures: total, tone: 'text-fg' },
+          { label: '自身', figures: own, tone: 'text-muted' },
+          { label: '子代理', figures: spawned, tone: 'text-muted' },
+        ] as const
+      ).map((row) => (
+        <div key={row.label} className="flex min-w-0 items-baseline gap-2">
+          <span className={`w-10 shrink-0 text-[11px] ${row.tone}`}>{row.label}</span>
+          <MetricLine
+            tokens={row.figures.tokens}
+            cost={row.figures.cost}
+            requests={row.figures.requests}
+            symbol={symbol}
+            className="min-w-0 flex-1"
+          />
+        </div>
+      ))}
+    </div>
   );
 }

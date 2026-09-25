@@ -16,10 +16,26 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 /** The part of the dashboard payload the assertions use. */
+interface ApiFigures {
+  requests: number;
+  cost: { total: string };
+}
+
 interface ApiDashboard {
   models: ApiRow[];
   bands: ApiRow[];
-  projects: { id: string; name: string; models: ApiRow[]; bands: ApiRow[] }[];
+  totals: ApiFigures & { own: ApiFigures; spawned: ApiFigures };
+  projects: {
+    id: string;
+    name: string;
+    models: ApiRow[];
+    bands: ApiRow[];
+    requests: number;
+    cost: { total: string };
+    own: ApiFigures;
+    spawned: ApiFigures;
+    sessionReports: { uid: string; isSubagent: boolean; parentId: string | null; title: string | null }[];
+  }[];
 }
 
 interface ApiRow {
@@ -41,6 +57,11 @@ async function apiDashboard(page: Page): Promise<ApiDashboard> {
 /** The card whose heading is `title`. */
 function cardOf(page: Page, title: string): Locator {
   return page.locator('section').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+}
+
+/** The card whose heading starts with `prefix` — the cards that count their rows. */
+function cardStartingWith(page: Page, prefix: string): Locator {
+  return page.locator('section').filter({ has: page.getByRole('heading', { name: new RegExp(`^${prefix}`) }) });
 }
 
 /** One card's data rows, as trimmed cell texts; the "nothing here" row is dropped. */
@@ -160,6 +181,100 @@ test.describe('scope switching', () => {
     expect((await rowsOf(page, '模型明细')).length).toBe(
       (await apiDashboard(page)).projects.find((entry) => entry.name === project.name)?.models.length,
     );
+  });
+});
+
+test.describe('the CLI’s detail, in the browser', () => {
+  test('every scope prints 总 / 自身 / 子代理, and the two add up', async ({ page }) => {
+    await page.goto('/');
+    const dashboard = await apiDashboard(page);
+    const block = cardOf(page, '指标（总 / 自身 / 子代理）');
+    await expect(block).toBeVisible();
+    await expect(block.locator('div.space-y-1 > div').first()).toBeVisible();
+
+    // Three labelled rows, in the CLI's order.
+    const labels = await block.locator('div.space-y-1 > div').evaluateAll((rows) =>
+      rows.map((row) => (row.querySelector('span')?.textContent ?? '').trim()),
+    );
+    expect(labels.slice(0, 3)).toEqual(['总', '自身', '子代理']);
+
+    // Read the request line back out of the DOM, per row.
+    const requests = await block.locator('div.space-y-1 > div').evaluateAll((rows) =>
+      rows.slice(0, 3).map((row) => {
+        const text = row.textContent ?? '';
+        const match = /Q\s*([\d,]+)/.exec(text);
+        return match === null ? -1 : Number(match[1].replace(/[^\d]/g, ''));
+      }),
+    );
+    expect(requests[0], '自身 + 子代理 = 总 (DOM)').toBe(requests[1] + requests[2]);
+    expect(requests[0], '总 agrees with the API').toBe(dashboard.totals.requests);
+    expect(requests[1]).toBe(dashboard.totals.own.requests);
+    expect(requests[2]).toBe(dashboard.totals.spawned.requests);
+
+    // Every token figure carries its money: the line has as many ¥ as figures.
+    const line = (await block.locator('div.space-y-1 > div').first().innerText()).replace(/\s+/g, ' ');
+    for (const key of ['I/M', 'I/C', 'I/T', 'O', 'O/T', 'T', 'Q']) expect(line).toContain(`${key} `);
+  });
+
+  test('a project page lists its sessions as a table, not a handful of links', async ({ page }) => {
+    await page.goto('/');
+    const project = (await apiDashboard(page)).projects[0];
+    test.skip(project === undefined, 'needs at least one project');
+    if (project === undefined) return;
+    await selectProject(page, project.name);
+
+    const ids = new Set(project.sessionReports.map((session) => session.id));
+    const roots = project.sessionReports.filter(
+      (session) => !(session.isSubagent && session.parentId !== null && ids.has(session.parentId)),
+    );
+    const table = cardStartingWith(page, '会话明细');
+    await expect(table).toBeVisible();
+    await expect(table.locator('tbody tr')).toHaveCount(roots.length);
+    // Columns the CLI's session rows carry.
+    const head = await table.locator('thead th').allInnerTexts();
+    for (const column of ['会话', 'agent', '首次', '最后', 'Q', 'T', '费用']) {
+      expect(head.map((cell) => cell.trim())).toContain(column);
+    }
+    // The flat view adds the subagents on top of the roots.
+    await table.getByRole('button', { name: '合并子代理' }).click();
+    await expect(table.locator('tbody tr')).toHaveCount(project.sessionReports.length);
+  });
+
+  test('the agent table carries the CLI columns and switches what they show', async ({ page }) => {
+    await page.goto('/');
+    const table = cardOf(page, '按 agent 分列');
+    // The card only appears once the dashboard has landed; wait for its head.
+    await expect(table.locator('thead th').first()).toBeVisible();
+    const head = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.trim());
+    for (const column of ['agent', 'Q', 'I/M', 'I/C', 'I/T', 'O', 'O/T', 'T', '费用']) {
+      expect(head, `column ${column}`).toContain(column);
+    }
+
+    const firstBucket = table.locator('tbody tr').first().locator('td').nth(3);
+    const asTokens = await firstBucket.innerText();
+    await table.getByRole('button', { name: '金额' }).click();
+    const asMoney = await firstBucket.innerText();
+    expect(asMoney).not.toBe(asTokens);
+    expect(asMoney).toContain('¥');
+    await table.getByRole('button', { name: '占比' }).click();
+    expect(await firstBucket.innerText()).toContain('%');
+  });
+
+  test('the tree shows the split for the row being read', async ({ page }) => {
+    await page.goto('/');
+    const project = (await apiDashboard(page)).projects[0];
+    test.skip(project === undefined, 'needs at least one project');
+    if (project === undefined) return;
+    await selectProject(page, project.name);
+
+    // The selected project's row carries its own 总 / 自身 / 子代理 block in the
+    // sidebar; hovering any other row shows the same line as a tooltip.
+    const aside = page.locator('aside');
+    await expect(aside.getByText('自身', { exact: true })).toBeVisible();
+    await expect(aside.getByText('子代理', { exact: true })).toBeVisible();
+    const hint = await aside.locator('[title*="I/M"]').first().getAttribute('title');
+    expect(hint ?? '').toContain('I/T');
+    expect(hint ?? '').toContain('Q ');
   });
 });
 

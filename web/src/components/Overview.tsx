@@ -8,8 +8,6 @@
  */
 
 import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
-
 import type { Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
 import {
   formatCost,
@@ -17,8 +15,8 @@ import {
   formatShare,
   formatTokens,
 } from '../format';
-import { AgentBadge, Card, Chip, Notice, Stat } from './Bits';
-import { AgentTable, BandTable, ModelTable, TokenTable } from './Tables';
+import { AgentBadge, Card, Chip, MetricSplit, Notice, Stat } from './Bits';
+import { AgentTable, BandTable, ModelTable, SessionTable, TokenTable } from './Tables';
 import { agentShareOption, EChart, projectBarOption, timeseriesOption, tokenDonutOption, type SeriesMetric } from '../charts';
 
 /** The scope overview. */
@@ -128,6 +126,31 @@ export function Overview({
         />
       </div>
 
+      {/* The CLI prints 总 / 自身 / 子代理 for every node; this is that block. */}
+      <Card title="指标（总 / 自身 / 子代理）">
+        <MetricSplit
+          total={{
+            tokens,
+            cost: project === null ? dashboard.totals.cost : project.cost,
+            requests,
+          }}
+          own={{
+            tokens: (project === null ? dashboard.totals.own : project.own).tokens,
+            cost: (project === null ? dashboard.totals.own : project.own).cost,
+            requests: (project === null ? dashboard.totals.own : project.own).requests,
+          }}
+          spawned={{
+            tokens: (project === null ? dashboard.totals.spawned : project.spawned).tokens,
+            cost: (project === null ? dashboard.totals.spawned : project.spawned).cost,
+            requests: (project === null ? dashboard.totals.spawned : project.spawned).requests,
+          }}
+          symbol={symbol}
+        />
+        <p className="mt-2 text-[11px] text-faint">
+          与 CLI 的 <code>usage --subagent</code> 同一口径：自身 + 子代理 = 总；每项后面的金额是该项自己产生的钱。
+        </p>
+      </Card>
+
       {totals !== null && dashboard.warnings.length > 0 && (
         <Notice tone="warn" title={`${dashboard.warnings.length} 条提示`}>
           <ul className="list-disc space-y-0.5 pl-4">
@@ -220,32 +243,7 @@ export function Overview({
       </div>
 
       {project !== null && project.sessionReports.length > 0 && (
-        <Card
-          title="会话（有消耗的）"
-          actions={
-            <Link to="/" className="text-[11px] text-accent hover:underline">
-              回到全部项目
-            </Link>
-          }
-        >
-          <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
-            {project.sessionReports.slice(0, 12).map((session) => (
-              <Link
-                key={session.uid}
-                to={`/s/${encodeURIComponent(session.uid)}`}
-                className="flex items-start justify-between gap-2 rounded border border-line px-2 py-1 hover:bg-raised"
-              >
-                <span className="cell-title min-w-0 text-[12px]" title={session.title ?? session.id}>
-                  {session.title ?? `（无标题）${session.id.slice(0, 8)}`}
-                </span>
-                <span className="flex shrink-0 items-center gap-1">
-                  <AgentBadge id={session.agent} small />
-                  <span className="tnum text-[11px] text-muted">{formatCost(session.cost.total, symbol)}</span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </Card>
+        <SessionTable sessions={project.sessionReports} symbol={symbol} />
       )}
 
       {totals !== null && (

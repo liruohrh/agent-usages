@@ -395,8 +395,34 @@ export function tokenBreakdownOf(tokens: TokenBuckets, cost: CostTotals): TokenB
   return breakdown;
 }
 
-/** Sum per-agent figures into a scope total. */
-function totalsOf(agents: readonly AgentTotals[], counts: { projects: number; workspaces: number }): DashboardTotals {
+/**
+ * Sum a scope's `自身` / `子代理` pair over the projects under it.
+ *
+ * @param projects - the projects to add up.
+ * @returns the two figures, zeroed when there are none.
+ */
+function splitOfProjects(projects: readonly ProjectSummary[]): { own: ScopeFigures; spawned: ScopeFigures } {
+  let own = emptyScope();
+  let spawned = emptyScope();
+  for (const project of projects) {
+    own = addScopes(own, project.own);
+    spawned = addScopes(spawned, project.spawned);
+  }
+  return { own, spawned };
+}
+
+/**
+ * Sum per-agent figures into a scope total.
+ *
+ * `split` is the `自身` / `子代理` pair the CLI prints with `--subagent`: it cannot
+ * be derived from the per-agent rows, which are not kept per delegation level, so
+ * whoever knows the sessions passes it in.
+ */
+function totalsOf(
+  agents: readonly AgentTotals[],
+  counts: { projects: number; workspaces: number },
+  split: { own: ScopeFigures; spawned: ScopeFigures } = { own: emptyScope(), spawned: emptyScope() },
+): DashboardTotals {
   const tokens = sumTokensList(agents.map((agent) => agent.tokens));
   const cost = sumCosts(agents.map((agent) => agent.cost));
   return {
@@ -412,6 +438,8 @@ function totalsOf(agents: readonly AgentTotals[], counts: { projects: number; wo
     tokens,
     tokenBreakdown: tokenBreakdownOf(tokens, cost),
     cost,
+    own: split.own,
+    spawned: split.spawned,
   };
 }
 
@@ -440,6 +468,46 @@ function mergeAgentTotals(list: readonly AgentTotals[]): AgentTotals[] {
 /** Copy a scope's figures for a session row. */
 function scopeFigures(sessions: number, requests: number, tokens: TokenBuckets, cost: CostTotals): ScopeFigures {
   return { sessions, requests, tokens, cost };
+}
+
+/** Add two scopes, field by field. */
+function addScopes(left: ScopeFigures, right: ScopeFigures): ScopeFigures {
+  return {
+    sessions: left.sessions + right.sessions,
+    requests: left.requests + right.requests,
+    tokens: addTokens(left.tokens, right.tokens),
+    cost: addCostTotals(left.cost, right.cost),
+  };
+}
+
+/** Nothing at all, the identity of {@link addScopes}. */
+function emptyScope(): ScopeFigures {
+  return { sessions: 0, requests: 0, tokens: emptyTokens(), cost: zeroCostTotals() };
+}
+
+/**
+ * A scope's `自身` / `子代理` split, exactly what the CLI prints with `--subagent`.
+ *
+ * `自身` is the work each session did itself, summed over the sessions that
+ * *root* a delegation subtree; `子代理` is what those same roots spawned. A
+ * subagent whose parent is in this scope is skipped: its usage is already inside
+ * that parent's `自身` (the parent's records are folded with its children's), so
+ * counting it again would double the scope. A fork, and a subagent whose parent
+ * is elsewhere, each speak for themselves.
+ *
+ * @param sessions - every session of the scope, subagents included.
+ * @returns the two figures, with `Σ own + Σ spawned === Σ total`.
+ */
+function scopeSplitOf(sessions: readonly SessionNode[]): { own: ScopeFigures; spawned: ScopeFigures } {
+  const ids = new Set(sessions.map((session) => session.id));
+  let own = emptyScope();
+  let spawned = emptyScope();
+  for (const session of sessions) {
+    if (session.isSubagent && session.parentId !== null && ids.has(session.parentId)) continue;
+    own = addScopes(own, session.own);
+    spawned = addScopes(spawned, session.spawned);
+  }
+  return { own, spawned };
 }
 
 /** A default agent row, before the record pass fills in the flags it can see. */
@@ -869,10 +937,14 @@ function buildDashboard(input: BuildInput): Dashboard {
     },
   );
 
-  const totals = totalsOf(agentTotals, {
-    projects: projects.length,
-    workspaces: projects.reduce((total, project) => total + project.workspaces.length, 0),
-  });
+  const totals = totalsOf(
+    agentTotals,
+    {
+      projects: projects.length,
+      workspaces: projects.reduce((total, project) => total + project.workspaces.length, 0),
+    },
+    splitOfProjects(projects),
+  );
 
   const dashboard: Dashboard = {
     generatedAt: Date.now(),
@@ -1235,6 +1307,7 @@ function finishProject(draft: ProjectDraft): ProjectSummary {
     tokenBreakdown: tokenBreakdownOf(draft.tokens, draft.cost),
     cost: draft.cost,
     agentTotals: [...draft.agentTotals.values()].sort((left, right) => left.id.localeCompare(right.id)),
+    ...scopeSplitOf(sessions),
     workspaceNodes: workspaces,
     sessionReports: sessions,
     models: mergeModelRows(draft.models),
@@ -1257,6 +1330,7 @@ function finishWorkspace(draft: WorkspaceDraft): WorkspaceNode {
     tokens: draft.tokens,
     cost: draft.cost,
     agentTotals: [...draft.agentTotals.values()].sort((left, right) => left.id.localeCompare(right.id)),
+    ...scopeSplitOf(draft.sessions),
     sessionReports: [...draft.sessions].sort(
       (left, right) => (right.lastUsage ?? 0) - (left.lastUsage ?? 0) || left.uid.localeCompare(right.uid),
     ),
@@ -1398,16 +1472,19 @@ function mergeBandRows(rows: readonly BandRow[]): BandRow[] {
 function narrowProject(project: ProjectSummary, agents: ReadonlySet<string>): ProjectSummary | undefined {
   const agentTotals = project.agentTotals.filter((totals) => agents.has(totals.id));
   if (agentTotals.length === 0) return undefined;
+  const sessions = project.sessionReports.filter((session) => agents.has(session.agent));
   const figures = totalsOf(agentTotals, { projects: 1, workspaces: project.workspaces.length });
   const workspaceNodes = project.workspaceNodes
     .map((workspace) => {
       const kept = workspace.agentTotals.filter((totals) => agents.has(totals.id));
       const workspaceFigures = totalsOf(kept, { projects: 1, workspaces: 1 });
+      const keptSessions = workspace.sessionReports.filter((session) => agents.has(session.agent));
       return {
         ...workspace,
         agents: kept.map((totals) => totals.id),
         agentTotals: kept,
-        sessionReports: workspace.sessionReports.filter((session) => agents.has(session.agent)),
+        ...scopeSplitOf(keptSessions),
+        sessionReports: keptSessions,
         sessionCount: workspaceFigures.sessions,
         subagentCount: workspaceFigures.subagentSessions,
         activeSessions: workspaceFigures.activeSessions,
@@ -1428,8 +1505,9 @@ function narrowProject(project: ProjectSummary, agents: ReadonlySet<string>): Pr
     kind: project.kind,
     agents: agentTotals.map((totals) => totals.id),
     agentTotals,
+    ...scopeSplitOf(sessions),
     workspaceNodes,
-    sessionReports: project.sessionReports.filter((session) => agents.has(session.agent)),
+    sessionReports: sessions,
     models: project.models.filter((row) => agents.has(row.agent)),
     bands: project.bands.filter((row) => agents.has(row.agent)),
   };
@@ -1465,10 +1543,14 @@ export function filterDashboard(dashboard: Dashboard, query: DashboardQuery = {}
   const agentTotals = mergeAgentTotals(
     projects.flatMap((project) => project.agentTotals.filter((totals) => agents.size === 0 || agents.has(totals.id))),
   );
-  const totals = totalsOf(agentTotals, {
-    projects: projects.length,
-    workspaces: projects.reduce((total, project) => total + project.workspaces.length, 0),
-  });
+  const totals = totalsOf(
+    agentTotals,
+    {
+      projects: projects.length,
+      workspaces: projects.reduce((total, project) => total + project.workspaces.length, 0),
+    },
+    splitOfProjects(projects),
+  );
   const filtered: Dashboard = {
     ...dashboard,
     generatedAt: Date.now(),
@@ -1695,6 +1777,8 @@ function detailFromDatasets(
         kind: 'path',
         workspaces: [],
         agents: [agent],
+        own: emptyScope(),
+        spawned: emptyScope(),
         sessions: 0,
         subagentSessions: 0,
         activeSessions: 0,
@@ -1938,10 +2022,14 @@ export function normalizeSnapshot(parsed: unknown, path: string): Dashboard {
     rangeFrom: numberOrNull(root['rangeFrom']),
     rangeTo: numberOrNull(root['rangeTo']),
     agents: agentTotals,
-    totals: totalsOf(agentTotals, {
-      projects: projects.length,
-      workspaces: projects.reduce((total, project) => total + project.workspaces.length, 0),
-    }),
+    totals: totalsOf(
+      agentTotals,
+      {
+        projects: projects.length,
+        workspaces: projects.reduce((total, project) => total + project.workspaces.length, 0),
+      },
+      splitOfProjects(projects),
+    ),
     projects,
     repos: Array.isArray(root['repos']) ? (root['repos'] as unknown[]).map((item) => normalizeRepo(item)) : [],
     timeseries: { day: series(timeseriesRoot['day'], 'day'), hour: series(timeseriesRoot['hour'], 'hour') },
@@ -2028,6 +2116,7 @@ function normalizeProject(value: unknown): ProjectSummary {
         path,
         name: baseNameOf(path),
         agents,
+        ...scopeSplitOf(sessions),
         sessionCount,
         subagentCount: numberOr0(entry['subagentSessions']),
         activeSessions: numberOr0(entry['activeSessions']),
@@ -2035,7 +2124,7 @@ function normalizeProject(value: unknown): ProjectSummary {
         tokens,
         cost,
         agentTotals,
-        sessionReports: sessions,
+        sessionReports: [...sessions],
       }));
   return {
     id,
@@ -2054,6 +2143,9 @@ function normalizeProject(value: unknown): ProjectSummary {
     tokenBreakdown: tokenBreakdownOf(tokens, cost),
     cost,
     agentTotals,
+    // Older snapshots (and report JSON) have no split: derive it from the session
+    // rows they do carry, so the CLI's `自身` / `子代理` line is always available.
+    ...normalizeSplit(entry, sessions),
     workspaceNodes,
     sessionReports: sessions,
     // Snapshots are read as-is, but a snapshot written before the rows were
@@ -2069,12 +2161,50 @@ function normalizeProject(value: unknown): ProjectSummary {
   };
 }
 
+/**
+ * A snapshot row's `自身` / `子代理` pair.
+ *
+ * Snapshots written by `--write-snapshot` carry it; an older file or a report
+ * JSON does not, and then it is derived from the session rows that file does
+ * carry — the same rule {@link scopeSplitOf} applies when the data comes from a
+ * live scan.
+ *
+ * @param entry - the snapshot row.
+ * @param sessions - its session rows.
+ * @returns the pair.
+ */
+function normalizeSplit(
+  entry: Record<string, unknown>,
+  sessions: readonly SessionNode[],
+): { own: ScopeFigures; spawned: ScopeFigures } {
+  const own = normalizeScopeFigures(entry['own']);
+  const spawned = normalizeScopeFigures(entry['spawned']);
+  if (own !== undefined && spawned !== undefined) return { own, spawned };
+  return scopeSplitOf(sessions);
+}
+
+/** Read one `自身` / `子代理` block, or `undefined` when the row has none. */
+function normalizeScopeFigures(value: unknown): ScopeFigures | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const entry = value as Record<string, unknown>;
+  return {
+    sessions: numberOr0(entry['sessions']),
+    requests: numberOr0(entry['requests']),
+    tokens: asTokens(entry['tokens']),
+    cost: asCost(entry['cost']),
+  };
+}
+
 /** Fill in one workspace row from a snapshot. */
 function normalizeWorkspace(value: unknown, fallbackSessions: readonly SessionNode[]): WorkspaceNode {
   const entry = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
   const path = String(entry['path'] ?? '');
+  const sessions = Array.isArray(entry['sessionReports'])
+    ? (entry['sessionReports'] as unknown[]).map((item) => normalizeSessionNode(item, '', ''))
+    : fallbackSessions;
   return {
     path,
+    ...normalizeSplit(entry, sessions),
     name: String(entry['name'] ?? baseNameOf(path)),
     agents: Array.isArray(entry['agents']) ? (entry['agents'] as unknown[]).map((item) => String(item)) : [],
     repo: entry['repo'] === undefined ? undefined : normalizeRepoInfo(entry['repo']),
@@ -2087,9 +2217,7 @@ function normalizeWorkspace(value: unknown, fallbackSessions: readonly SessionNo
     agentTotals: Array.isArray(entry['agentTotals'])
       ? (entry['agentTotals'] as unknown[]).map((item) => normalizeAgentTotals(item))
       : [],
-    sessionReports: Array.isArray(entry['sessionReports'])
-      ? (entry['sessionReports'] as unknown[]).map((item) => normalizeSessionNode(item, '', ''))
-      : [...fallbackSessions],
+    sessionReports: [...sessions],
   };
 }
 

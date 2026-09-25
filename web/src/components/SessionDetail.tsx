@@ -10,7 +10,7 @@ import { Link } from 'react-router-dom';
 
 import type { SessionDetail as Detail, SessionTreeNode } from '../types';
 import { formatCost, formatInstant, formatTokens, shortenPath } from '../format';
-import { AgentBadge, Card, Chip, Notice, Stat } from './Bits';
+import { AgentBadge, Card, Chip, MetricSplit, Notice } from './Bits';
 import { BandTable, ModelTable } from './Tables';
 
 /** The session detail panel. */
@@ -87,20 +87,25 @@ export function SessionDetailPanel({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <Stat label="自身" value={formatCost(session.own.cost.total, symbol)} hint={`${formatTokens(session.own.requests)} 次请求`} />
-        <Stat
-          label={`子代理（${session.spawned.sessions}）`}
-          value={formatCost(session.spawned.cost.total, symbol)}
-          hint={`${formatTokens(session.spawned.requests)} 次请求`}
+      {/* The CLI prints this block for a session too: 总 / 自身 / 子代理, with the
+          money each bucket produced — the line a reader can compare, column by
+          column, with `agent-usages usage`. */}
+      <Card title="指标（总 / 自身 / 子代理）">
+        <MetricSplit
+          total={{ tokens: session.total.tokens, cost: session.total.cost, requests: session.total.requests }}
+          own={{ tokens: session.own.tokens, cost: session.own.cost, requests: session.own.requests }}
+          spawned={{ tokens: session.spawned.tokens, cost: session.spawned.cost, requests: session.spawned.requests }}
+          symbol={symbol}
         />
-        <Stat label="总计" value={formatCost(session.total.cost.total, symbol)} tone="accent" hint={`${formatTokens(session.total.requests)} 次请求`} />
-        <Stat
-          label="tokens"
-          value={formatTokens(session.own.tokens.input + session.own.tokens.output + session.own.tokens.cacheRead + session.own.tokens.cacheWrite, true)}
-          hint={`思考 ${formatTokens(session.own.tokens.reasoning, true)}`}
-        />
-      </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-faint">
+          <span>首次 {formatInstant(session.firstUsage)}</span>
+          <span>· 最后 {formatInstant(session.lastUsage)}</span>
+          <span>· 创建 {formatInstant(session.createdAt)}</span>
+          <span>· 深度 {session.depth}</span>
+          <span>· 子代理 {session.subagentCount}</span>
+          {session.archived && <Chip tone="muted">已归档</Chip>}
+        </div>
+      </Card>
 
       {detail.tree.children.length > 0 && (
         <Card title={`委派树（${detail.tree.children.length} 个直接子代理）`}>

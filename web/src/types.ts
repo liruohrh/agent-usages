@@ -64,6 +64,10 @@ export interface DashboardTotals {
   tokens: TokenBuckets;
   tokenBreakdown: TokenBreakdown;
   cost: CostTotals;
+  /** The scope's own work (the CLI's `自身` line). */
+  own: ScopeFigures;
+  /** What those same roots spawned, folded (the CLI's `子代理` line). */
+  spawned: ScopeFigures;
 }
 
 export interface ScopeFigures {
@@ -110,6 +114,10 @@ export interface WorkspaceNode {
   tokens: TokenBuckets;
   cost: CostTotals;
   agentTotals: AgentTotals[];
+  /** The workspace's own work (the CLI's `自身` line). */
+  own: ScopeFigures;
+  /** What those same roots spawned, folded (the CLI's `子代理` line). */
+  spawned: ScopeFigures;
   sessionReports: SessionNode[];
 }
 
@@ -165,6 +173,10 @@ export interface ProjectSummary {
   tokenBreakdown: TokenBreakdown;
   cost: CostTotals;
   agentTotals: AgentTotals[];
+  /** The project's own work (the CLI's `自身` line). */
+  own: ScopeFigures;
+  /** What those same roots spawned, folded (the CLI's `子代理` line). */
+  spawned: ScopeFigures;
   workspaceNodes: WorkspaceNode[];
   sessionReports: SessionNode[];
   models: ModelRow[];

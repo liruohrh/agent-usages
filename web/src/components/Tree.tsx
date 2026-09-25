@@ -9,8 +9,13 @@
 import { useMemo, useState } from 'react';
 
 import type { Dashboard, ProjectSummary, SessionNode, WorkspaceNode } from '../types';
-import { formatCost, formatInstant, formatTokens, shortenPath } from '../format';
-import { AgentBadge, Chip, MoneyTokens } from './Bits';
+import { formatCost, formatInstant, formatTokens, metricText, shortenPath } from '../format';
+import { AgentBadge, Chip, MetricSplit, MoneyTokens } from './Bits';
+
+/** The four billed buckets, which is what the compact tree row counts as "tok". */
+function billed(tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }): number {
+  return tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
+}
 
 /** Which rows are open, keyed by a stable id per level. */
 type OpenState = Record<string, boolean>;
@@ -153,10 +158,28 @@ function ProjectRow({
           </div>
           <div className="mt-0.5 flex items-center justify-between gap-2">
             <span className="tnum text-[11px] text-faint">最近 {formatInstant(project.lastUsage)}</span>
-            <MoneyTokens cost={project.cost.total} tokens={project.tokens.cacheRead + project.tokens.input + project.tokens.output + project.tokens.cacheWrite} symbol={symbol} requests={project.requests} />
+            <MoneyTokens
+              cost={project.cost.total}
+              tokens={billed(project.tokens)}
+              symbol={symbol}
+              requests={project.requests}
+              hint={metricText(project.tokens, project.cost, project.requests, symbol)}
+            />
           </div>
         </button>
       </div>
+      {selected && (
+        // The full line does not fit a 340px column, so it appears for the row
+        // the reader is actually looking at, and on hover for the others.
+        <div className="ml-3 border-l border-line pl-2">
+          <MetricSplit
+            total={{ tokens: project.tokens, cost: project.cost, requests: project.requests }}
+            own={{ tokens: project.own.tokens, cost: project.own.cost, requests: project.own.requests }}
+            spawned={{ tokens: project.spawned.tokens, cost: project.spawned.cost, requests: project.spawned.requests }}
+            symbol={symbol}
+          />
+        </div>
+      )}
       {expanded && (
         <div className="ml-3 border-l border-line pl-1">
           {project.workspaceNodes.map((workspace) => (
@@ -222,7 +245,13 @@ function WorkspaceRow({
             <span className="tnum text-[11px] text-faint">
               会话 {workspace.sessionCount}／子代理 {workspace.subagentCount}
             </span>
-            <MoneyTokens cost={workspace.cost.total} tokens={workspace.tokens.input + workspace.tokens.output + workspace.tokens.cacheRead + workspace.tokens.cacheWrite} symbol={symbol} />
+            <MoneyTokens
+              cost={workspace.cost.total}
+              tokens={billed(workspace.tokens)}
+              symbol={symbol}
+              requests={workspace.requests}
+              hint={metricText(workspace.tokens, workspace.cost, workspace.requests, symbol)}
+            />
           </div>
         </div>
       </div>
@@ -293,10 +322,26 @@ function SessionRow({
             {session.archived && <Chip tone="muted">已归档</Chip>}
             {children.length > 0 && <Chip tone="muted">子代理 {children.length}</Chip>}
             <span className="tnum text-[11px] text-faint">{formatInstant(session.lastUsage)}</span>
-            <MoneyTokens cost={session.cost.total} tokens={session.tokens.input + session.tokens.output + session.tokens.cacheRead + session.tokens.cacheWrite} symbol={symbol} requests={session.requests} />
+            <MoneyTokens
+              cost={session.cost.total}
+              tokens={billed(session.tokens)}
+              symbol={symbol}
+              requests={session.requests}
+              hint={metricText(session.total.tokens, session.total.cost, session.total.requests, symbol)}
+            />
           </div>
         </button>
       </div>
+      {selected && session.spawned.requests > 0 && (
+        <div className="ml-6 border-l border-line pl-2">
+          <MetricSplit
+            total={{ tokens: session.total.tokens, cost: session.total.cost, requests: session.total.requests }}
+            own={{ tokens: session.own.tokens, cost: session.own.cost, requests: session.own.requests }}
+            spawned={{ tokens: session.spawned.tokens, cost: session.spawned.cost, requests: session.spawned.requests }}
+            symbol={symbol}
+          />
+        </div>
+      )}
       {expanded && children.length > 0 && (
         <div className="ml-3 border-l border-line pl-1">
           {children.map((child) => (
