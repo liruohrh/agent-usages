@@ -221,7 +221,6 @@ export const en: Messages = {
     band: 'Band',
     window: 'In effect',
     session: 'Session',
-    amount: 'Amount',
     unitPrice: 'Unit price',
     tips: 'Notes',
     meta: (sessions: string, first: string, last: string) => `${sessions} sessions · first ${first} · last ${last}`,

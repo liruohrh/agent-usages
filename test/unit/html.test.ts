@@ -205,6 +205,27 @@ describe('renderHtmlReport', () => {
     expect(html).toContain('>3<');
   });
 
+  it('names the figures the way the terminal does, and leaves the money unnamed', () => {
+    const html = render(
+      report({
+        requests: 3,
+        tokens: SMALL,
+        cost: cost('15.1668'),
+        projects: [pricedProject('demo', '15.1668')],
+      }),
+    );
+    // The screen and the terminal say the same thing: five buckets, `T`, `Q`.
+    for (const label of ['I/M', 'I/C', 'I/W', 'O', 'R', 'T', 'Q']) {
+      expect(html, `head ${label}`).toContain(`>${label}<`);
+    }
+    // No word for the money: every cell in that column is a `¥12.34`, so a
+    // heading would only repeat the symbol. The column itself stays (it is a
+    // `<th>` in the row, one per `<col>`).
+    expect(html).not.toContain('金额');
+    expect(html).not.toContain('Amount');
+    expect(html).toContain('<th class="num"></th>');
+  });
+
   it('gives every figure column a width, so a title cannot steal one', () => {
     const html = render(
       report({

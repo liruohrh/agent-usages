@@ -185,7 +185,7 @@ export function AgentTable({
                 </>
               )}
               <th className="px-2 py-1 text-right font-medium" title="Token 总计 = I/T + O/T">T</th>
-              <th className="px-2 py-1 text-right font-medium">费用</th>
+              <th className="px-2 py-1 text-right font-medium" title="每一项自己的钱" aria-label="费用" />
               {showShare && <th className="px-2 py-1 text-left font-medium">占比</th>}
             </tr>
           </thead>
@@ -441,6 +441,10 @@ export function SessionTable({
                   <button
                     type="button"
                     onClick={() => sortBy(column.key)}
+                    // A column whose cells carry their own `¥` has no heading to
+                    // show, so the arrow alone is the control and the name is
+                    // one hover away.
+                    aria-label={column.title ?? column.label}
                     className={`inline-flex items-center gap-1 hover:text-fg ${sort.key === column.key ? 'text-accent' : ''}`}
                   >
                     {column.label}
@@ -524,7 +528,7 @@ const COLUMNS: readonly SessionColumn[] = [
   { key: 'output', label: 'O', kind: 'num', title: '输出（含思考）' },
   { key: 'reasoning', label: 'R', kind: 'num', title: '其中思考' },
   { key: 'tokens', label: 'T', kind: 'num', always: true, title: 'token 总计（计费桶）' },
-  { key: 'cost', label: '费用', kind: 'num', always: true },
+  { key: 'cost', label: '', kind: 'num', always: true, title: '总费用（每格都是它自己的钱）' },
   { key: 'lastUsage', label: '最近', kind: 'num', title: '最后一次计费请求的时间' },
 ];
 
@@ -746,7 +750,7 @@ export function ModelTable({
               <th className="px-2 py-1 text-left font-medium">模型</th>
               <th className="px-2 py-1 text-right font-medium" title="请求数">Q</th>
               <th className="px-2 py-1 text-right font-medium" title="计费桶 token 合计 = I/T + O/T">T</th>
-              <th className="px-2 py-1 text-right font-medium" title="这个模型的总费用">费用</th>
+              <th className="px-2 py-1 text-right font-medium" title="这个模型的总费用" />
               <th className="px-2 py-1 text-right font-medium" title="占当前范围总费用的比例">占比</th>
             </tr>
           </thead>
@@ -840,7 +844,7 @@ export function BandTable({
               <th className="px-2 py-1 text-left font-medium">生效窗口</th>
               <th className="px-2 py-1 text-left font-medium">档位</th>
               <th className="px-2 py-1 text-right font-medium" title="请求数">Q</th>
-              <th className="px-2 py-1 text-right font-medium" title="这个区间的总费用">费用</th>
+              <th className="px-2 py-1 text-right font-medium" title="这个区间的总费用" />
             </tr>
           </thead>
           <tbody>
@@ -904,7 +908,7 @@ export function BandTable({
                               <th className="px-1 py-0.5 text-left font-medium">计费项</th>
                               <th className="px-1 py-0.5 text-right font-medium">单价</th>
                               <th className="px-1 py-0.5 text-right font-medium">tokens</th>
-                              <th className="px-1 py-0.5 text-right font-medium">费用</th>
+                              <th className="px-1 py-0.5 text-right font-medium" title="每一项自己的钱" />
                             </tr>
                           </thead>
                           <tbody>

@@ -279,8 +279,6 @@ export const zh = {
     window: '生效',
     /** Column heading of a session row. */
     session: '会话',
-    /** Column heading of an amount. */
-    amount: '金额',
     /** Column heading of a rate card. */
     unitPrice: '单价',
     /** Heading of the warning list. */
@@ -456,9 +454,9 @@ export const zh = {
     codexNoData: (p: { source: string }) =>
       `在 ${p.source} 下没有找到 Codex rollout；用 --home 指定 Codex 主目录（默认 ~/.codex），或用 CODEX_HOME 覆盖`,
     sideQuestionsCounted: (p: { count: string; tokens: string; turns: string; agent: string }) =>
-      `检测到 ${p.count} 处旁路交互（${p.agent}，共 ${p.turns} 轮）：合计 ${p.tokens} tokens；它们不写会话日志、只有总量没有缓存拆分，因此只提示、不计入金额`,
+      `检测到 ${p.count} 处旁路交互（${p.agent}，共 ${p.turns} 轮）：合计 ${p.tokens} tokens；它们不写会话日志、只有总量没有缓存拆分，因此只提示、不计价`,
     sideQuestionsUncounted: (p: { count: string; agent: string }) =>
-      `检测到 ${p.count} 处旁路交互（${p.agent}）：/btw 这类提问在临时会话里完成，不写进会话日志；其 token 只有总量、无缓存拆分，因此只提示、不计入金额`,
+      `检测到 ${p.count} 处旁路交互（${p.agent}）：/btw 这类提问在临时会话里完成，不写进会话日志；其 token 只有总量、无缓存拆分，因此只提示、不计价`,
     codexSessionNoun: '会话',
     codexNotes: (): readonly string[] => [
       '用量来自 Codex 自己写的 rollout：~/.codex/sessions/年/月/日/rollout-*.jsonl 的 token_count 事件。',

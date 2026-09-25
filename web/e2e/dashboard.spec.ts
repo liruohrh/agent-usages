@@ -209,7 +209,11 @@ test.describe('the overview', () => {
     const cards = page.locator('main div.grid > div.rounded-xl');
     await expect(cards).toHaveCount(4);
     const texts = (await cards.allInnerTexts()).join(' ');
-    for (const label of ['费用', 'Q', 'T', 'I/C 占比']) expect(texts).toContain(label);
+    for (const label of ['Q', 'T', 'I/C 占比']) expect(texts).toContain(label);
+    // The money card names itself: the amount carries the currency symbol, so no
+    // column heading and no card label spell it out.
+    expect(texts).not.toContain('费用');
+    expect(texts).not.toContain('金额');
     expect(texts).toContain(dashboard.totals.cost.total);
   });
 
@@ -391,13 +395,18 @@ test.describe('the usage tab', () => {
     const table = cardOf(page, '按 agent 分列');
     await expect(table.locator('thead th').first()).toBeVisible();
     const detailed = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.trim());
-    for (const column of ['agent', '会话（子）', 'Q', 'I/M', 'I/C', 'I/T', 'O', 'O/T', 'T', '费用', '占比']) {
+    for (const column of ['agent', '会话（子）', 'Q', 'I/M', 'I/C', 'I/T', 'O', 'O/T', 'T', '占比']) {
       expect(detailed, `column ${column}`).toContain(column);
     }
+    // The money column has no heading: its cells are `¥` amounts.
+    expect(detailed).not.toContain('费用');
+    const moneyHead = table.locator('thead th').nth(detailed.indexOf('T') + 1);
+    expect((await moneyHead.innerText()).trim()).toBe('');
+    expect(await moneyHead.getAttribute('title')).toBeTruthy();
 
     await table.getByRole('button', { name: '精简列' }).click();
     const summary = (await table.locator('thead th').allInnerTexts()).map((cell) => cell.trim());
-    expect(summary).toEqual(['agent', '会话（子）', 'Q', 'T', '费用', '占比']);
+    expect(summary).toEqual(['agent', '会话（子）', 'Q', 'T', '', '占比']);
     await table.getByRole('button', { name: '全部列' }).click();
 
     const firstBucket = table.locator('tbody tr').first().locator('td').nth(3);
@@ -470,7 +479,7 @@ test.describe('the session leaderboard', () => {
       .locator('[data-columns]')
       .first()
       .evaluate((row) => [...row.children].map((cell) => (cell.textContent ?? '').trim()));
-    expect(columns.slice(-3)).toEqual(['Q', 'T', '费用']);
+    expect(columns.slice(-3)).toEqual(['Q', 'T', '']);
 
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     await expect(rowAt(page, 0)).toContainText(dearest?.title ?? '');
@@ -636,9 +645,13 @@ test.describe('the session leaderboard', () => {
     const head = (await page.locator('main section thead th').allInnerTexts()).map((cell) =>
       cell.replace(/[↕▼▲]/g, '').trim(),
     );
-    for (const column of ['会话', '项目', 'agent', 'Q', 'I/M', 'I/C', 'O', 'T', '费用']) {
+    for (const column of ['会话', '项目', 'agent', 'Q', 'I/M', 'I/C', 'O', 'T']) {
       expect(head, `column ${column}`).toContain(column);
     }
+    // The money column keeps sorting, but it is named only on hover.
+    expect(head).not.toContain('费用');
+    const moneyHead = page.locator('main section thead th').filter({ has: page.getByRole('button', { name: '总费用（每格都是它自己的钱）' }) });
+    await expect(moneyHead).toHaveCount(1);
   });
 
   test('the overview ranks the dearest sessions and links to the list', async ({ page }) => {

@@ -79,8 +79,11 @@ export function subtract(left: string, right: string): string {
 
 /** One headline figure. */
 export interface Kpi {
-  /** What it is — the CLI's abbreviation, e.g. `Q`, `T`. */
-  label: string;
+  /**
+   * What it is — the CLI's abbreviation, e.g. `Q`, `T`. Left out for money: the
+   * amount already carries its currency symbol, so `费用` would only repeat it.
+   */
+  label?: string;
   /** The definition behind the abbreviation, for hover. */
   title?: string;
   /** The number itself, already formatted — this is the one big thing. */
@@ -97,12 +100,17 @@ export interface Kpi {
 export function KpiRow({ items }: { items: readonly Kpi[] }): React.ReactElement {
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {items.map((item) => (
+      {items.map((item, index) => (
         <div
-          key={item.label}
+          key={item.title ?? item.label ?? index}
           className="rounded-xl border border-line bg-panel px-4 py-3.5"
         >
-          <div className="text-[12px] font-medium tracking-wide text-muted" title={item.title ?? item.label}>
+          {/* The line is reserved even when the label is empty, so the four big
+              numbers stay on one baseline. */}
+          <div
+            className="min-h-[18px] text-[12px] font-medium tracking-wide text-muted"
+            title={item.title ?? item.label}
+          >
             {item.label}
           </div>
           <div
@@ -177,7 +185,7 @@ export function Composition({
             <th className="pb-1 text-left font-medium">计费桶</th>
             <th className="pb-1 text-right font-medium">tokens</th>
             <th className="pb-1 text-right font-medium" title="该项占本行 T 的比例">占 T</th>
-            <th className="pb-1 text-right font-medium">费用</th>
+            <th className="pb-1 text-right font-medium" title="每格都是它自己的钱" />
           </tr>
         </thead>
         <tbody>
@@ -250,7 +258,7 @@ export function ScopeSplitTable({
             <th className="pb-1 text-right font-medium" title="输出合计 = O + R">O/T</th>
             <th className="pb-1 text-right font-medium" title="缓存命中输入 ÷ 输入合计（I/C ÷ I/T）">I/C 占比</th>
             <th className="pb-1 text-right font-medium" title="计费桶 token 合计 = I/T + O/T">T</th>
-            <th className="pb-1 text-right font-medium" title="这个范围的总费用">费用</th>
+            <th className="pb-1 text-right font-medium" title="这个范围的总费用" />
           </tr>
         </thead>
         <tbody>

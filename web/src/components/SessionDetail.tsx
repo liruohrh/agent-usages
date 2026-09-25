@@ -91,7 +91,6 @@ export function SessionDetailPanel({
       <KpiRow
         items={[
           {
-            label: '费用',
             title: '这个会话（自身 + 子代理）的总费用',
             value: formatCost(session.total.cost.total, symbol),
             hint: `自身 ${formatCost(session.own.cost.total, symbol)} · 子代理 ${formatCost(session.spawned.cost.total, symbol)}`,

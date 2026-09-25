@@ -62,7 +62,7 @@ export function Overview({
       <KpiRow
         items={[
           {
-            label: '费用',
+            // No label: `¥135.0531` says what it is. The definition stays on hover.
             title: '当前范围的总费用',
             value: formatCost(cost.total, symbol),
             hint: `${dashboard.currency} · ${dashboard.pricingLabel}`,

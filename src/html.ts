@@ -134,17 +134,22 @@ function sumCells(tokens: TokenTotals, requests: number, amount: string, symbol:
 
 /**
  * The `<thead>` row every token table shares.
+ *
+ * The figures are named the way the terminal names them — `I/M`, `T`, `Q` — and
+ * the money column carries **no heading at all**: every cell in it is a `¥12.34`,
+ * which says what it is more directly than the word 金额 did (the CLI's own
+ * metric line ends the same way, with a bare amount).
+ *
  * @param first - heading of the leading name column.
- * @param trailing - extra `<th>` cells after `金额`, already escaped.
+ * @param trailing - extra `<th>` cells after the money column, already escaped.
  */
 function tokenHead(first: string, trailing: readonly string[] = []): string {
-  const labels = t();
   const head = [
     `<th>${escapeHtml(first)}</th>`,
     ...BUCKETS.map((label) => `<th class="num">${escapeHtml(label)}</th>`),
     '<th class="num">T</th>',
-    `<th class="num">${escapeHtml(labels.list.requests)}</th>`,
-    `<th class="num">${escapeHtml(labels.html.amount)}</th>`,
+    '<th class="num">Q</th>',
+    '<th class="num"></th>',
     ...trailing,
   ].join('');
   return `<thead><tr>${head}</tr></thead>`;
@@ -164,16 +169,20 @@ function tokenTable(first: string, rows: string, shape: TableShape = figureShape
   );
 }
 
-/** One node's headline figures: the five buckets, their total, requests, money. */
+/**
+ * One node's headline figures: the five buckets, their total, `Q`, and the money.
+ *
+ * The money is last and unlabelled — the amount itself carries the currency
+ * symbol, exactly like the end of a metric line in the terminal.
+ */
 function stats(tokens: TokenTotals, requests: number, amount: string, symbol: string): string {
-  const labels = t();
   const counts = tokenBreakdown(tokens);
   const values = bucketValues(counts);
   const items: readonly (readonly [string, string])[] = [
     ...BUCKETS.map((label, index) => [label, compact(values[index] ?? 0)] as const),
     ['T', compact(counts.total)],
-    [labels.list.requests, count(requests)],
-    [labels.html.amount, money(amount, symbol)],
+    ['Q', count(requests)],
+    ['', money(amount, symbol)],
   ];
   const cells = items
     .map(
@@ -362,8 +371,8 @@ function bandTable(bands: readonly BandSummary[], symbol: string, historical: bo
     `<th>${escapeHtml(labels.html.window)}</th>`,
     ...BUCKETS.map((label) => `<th class="num">${escapeHtml(label)}</th>`),
     '<th class="num">T</th>',
-    `<th class="num">${escapeHtml(labels.list.requests)}</th>`,
-    `<th class="num">${escapeHtml(labels.html.amount)}</th>`,
+    '<th class="num">Q</th>',
+    '<th class="num"></th>',
     `<th>${escapeHtml(labels.html.unitPrice)}（${escapeHtml(unit)}）</th>`,
   ].join('');
   // A band window runs to 100+ characters and a rate card lists every component,
@@ -472,7 +481,7 @@ h3 { margin: 0 0 6px; font-size: 15px; }
 .meta { margin: 0 0 6px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 6px 0 4px; }
 .stat { display: flex; flex-direction: column; min-width: 58px; }
-.stat-label { color: var(--muted); font-size: 11px; }
+.stat-label { color: var(--muted); font-size: 11px; min-height: 14px; }
 .stat-value { font-variant-numeric: tabular-nums; font-weight: 600; }
 .scroll { overflow-x: auto; }
 /* A title may be 200 characters or a path with nowhere to break; in auto layout

@@ -388,7 +388,7 @@ export function BucketDetail({
             <th className="pb-1 text-left font-medium">计费桶</th>
             <th className="pb-1 text-right font-medium">tokens</th>
             <th className="pb-1 text-right font-medium" title="该项占本行 T 的比例">占 T</th>
-            <th className="pb-1 text-right font-medium">费用</th>
+            <th className="pb-1 text-right font-medium" title="每一格都是它自己的钱" />
           </tr>
         </thead>
         <tbody>
@@ -561,9 +561,8 @@ export function RankedList({
               <span className="text-right text-faint" title="计费桶 token 合计 = I/T + O/T">
                 T
               </span>
-              <span className="text-right text-faint" title="总费用，后面的小字是占本列表合计的比例">
-                费用
-              </span>
+              {/* No heading over the money: every cell below starts with `¥`. */}
+              <span className="text-right text-faint" title="总费用，后面的小字是占本列表合计的比例" aria-label="费用" />
             </div>
             <p className="mt-1.5 text-[11px] leading-5 text-faint" title={BAR_RULE}>
               条 = 这一行自己的 token 构成（整条 100%，<span className="text-muted">不表示大小</span>——大小看右边的数字）；
@@ -688,7 +687,7 @@ interface MetricChip {
 /**
  * The buckets a row is made of, in the CLI's order, each with its own money.
  *
- * Only the five pieces of the pie appear here: the totals (`T`, `费用`) are
+ * Only the five pieces of the pie appear here: the totals (`T`, and the money) are
  * the figures pinned on the right, and cache money is the `I/C` line's money —
  * repeating them beside the chart would say the same number twice.
  */
