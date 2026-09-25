@@ -58,8 +58,8 @@ import { addCostTotals, costOf, zeroCostTotals } from '../accounting.ts';
 import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
 import type { CostTotals, TokenBuckets, UsageDataset, UsageRecord } from '../core/types.ts';
-import type { Warning } from '../i18n/errors.ts';
-import { t } from '../i18n/index.ts';
+import { renderDiagnostic, type Warning } from '../i18n/errors.ts';
+import { messagesFor, t, type Language } from '../i18n/index.ts';
 import { createPricingEngine, currencyOf, providerCurrencies, resolvePricingProvider, type PricingEngine } from '../pricing/index.ts';
 import {
   runQuery,
@@ -576,6 +576,45 @@ function flattenWarning(item: Warning): DashboardWarning {
   };
 }
 
+/**
+ * Re-render one warning's sentence in the process's language.
+ *
+ * A scan happens once and its warnings are cached with it, but the page can ask
+ * for another language per request: the sentence is written from the code and the
+ * parameters again. A code this build has no message for keeps the sentence it
+ * came with — a warning in the wrong language still beats no warning.
+ * @param item - the warning, as stored.
+ * @returns the warning with its message in the active language.
+ */
+export function localizeWarning(item: DashboardWarning): DashboardWarning {
+  const messages = t().errors as unknown as Record<string, string | ((params: never) => string)>;
+  const entry = messages[item.code];
+  if (entry === undefined) return item;
+  const rendered = typeof entry === 'function' ? entry((item.params ?? {}) as never) : entry;
+  return rendered === item.message ? item : { ...item, message: rendered };
+}
+
+/**
+ * The payload's prose in the active language: the warnings and the range label.
+ *
+ * Everything else in a dashboard is a number, an id or a vendor's own wording, so
+ * this is the whole surface a language switch has to touch.
+ * @param payload - any answer carrying those two fields.
+ * @param rangeSpec - the `range` query the answer was built for.
+ * @returns a copy with its sentences re-rendered.
+ */
+export function localizeDashboard<T extends { warnings: readonly DashboardWarning[]; rangeLabel: string }>(
+  payload: T,
+  rangeSpec: string | undefined,
+): T {
+  const spec = (rangeSpec ?? '').trim();
+  return {
+    ...payload,
+    rangeLabel: resolveRange(spec.length === 0 ? {} : { spec }).label,
+    warnings: payload.warnings.map(localizeWarning),
+  };
+}
+
 /** Build a warning this layer owns (the adapters keep their own codes). */
 function warning(code: string, message: string, params?: Record<string, unknown>): DashboardWarning {
   return { code, message, ...(params === undefined ? {} : { params }) };
@@ -710,19 +749,22 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
       const source = options.home ?? adapter.defaultSource(env);
       if (source === null || source.trim().length === 0) {
         warnings.push(
-          warning('serveAgentNoRoot', `${adapter.label}：找不到默认数据目录，已跳过（可用 --home 指定）。`, {
-            agent: adapter.id,
-          }),
+          warning(
+            'serveAgentNoRoot',
+            renderDiagnostic('serveAgentNoRoot', { agent: adapter.label }),
+            { agent: adapter.label },
+          ),
         );
         continue;
       }
       try {
         if (!(await adapter.hasData(source))) {
           warnings.push(
-            warning('serveAgentNoData', `${adapter.label}：${source} 下没有可读数据，已跳过。`, {
-              agent: adapter.id,
-              source,
-            }),
+            warning(
+              'serveAgentNoData',
+              renderDiagnostic('serveAgentNoData', { agent: adapter.label, source }),
+              { agent: adapter.label, source },
+            ),
           );
           continue;
         }
@@ -742,10 +784,14 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
         }
       } catch (error) {
         warnings.push(
-          warning('serveAgentLoadFailed', `${adapter.label}：读取失败（${(error as Error).message}），已跳过。`, {
-            agent: adapter.id,
-            source,
-          }),
+          warning(
+            'serveAgentLoadFailed',
+            renderDiagnostic('serveAgentLoadFailed', {
+              agent: adapter.label,
+              reason: (error as Error).message,
+            }),
+            { agent: adapter.label, reason: (error as Error).message },
+          ),
         );
       }
     }
@@ -1920,10 +1966,9 @@ async function openSnapshotStore(path: string, options: ScanOptions): Promise<Da
         ms: 0,
         agents: store.loadedAgents,
         warnings: [
-          warning(
-            'snapshotReadOnly',
-            `快照模式（--snapshot ${options.snapshot ?? path}）不重扫；去掉该参数即改为实时扫描。`,
-          ),
+          warning('snapshotReadOnly', renderDiagnostic('snapshotReadOnly', { path: options.snapshot ?? path }), {
+            path: options.snapshot ?? path,
+          }),
         ],
         error: 'snapshot',
       };
@@ -1961,10 +2006,7 @@ export function normalizeSnapshot(parsed: unknown, path: string): Dashboard {
   const hasSeries = typeof root['timeseries'] === 'object' && root['timeseries'] !== null;
   if (!hasSeries) {
     warnings.push(
-      warning(
-        'snapshotNoTimeseries',
-        `快照 ${path} 只有汇总数字（没有逐请求时间戳），时间序列为空；要时序请用 agent-usages serve --write-snapshot 生成的快照。`,
-      ),
+      warning('snapshotNoTimeseries', renderDiagnostic('snapshotNoTimeseries', { path }), { path }),
     );
   }
 

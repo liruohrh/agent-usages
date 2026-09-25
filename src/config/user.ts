@@ -15,7 +15,7 @@ import type { ProjectGroup } from '../core/merge.ts';
 import type { PricePeriod } from '../pricing/contract.ts';
 import { ConfigError, parsePricingConfig, type ProviderConfig } from './pricing.ts';
 import { userConfigPath } from './paths.ts';
-import { readJson } from './store.ts';
+import { readJson, writeJson } from './store.ts';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -137,6 +137,38 @@ function projectGroups(value: unknown, env: NodeJS.ProcessEnv): ProjectGroup[] {
       }),
     };
   });
+}
+
+/**
+ * Write one or more settings back into the user's configuration file.
+ *
+ * The page's language switch is the same setting the CLI reads, so it has to land
+ * in the file rather than in a browser preference — that is the whole point of
+ * having one configuration. Everything the file already says is preserved: the
+ * patch is merged over the parsed object, so price overrides and project groups
+ * survive a language change. A file that cannot be parsed is *not* overwritten:
+ * failing with a reason keeps a typo from silently deleting the user's prices.
+ * @param patch - the keys to set.
+ * @param env - environment to resolve the config directory from.
+ * @returns the path written to.
+ * @throws {UserError} when the file exists but cannot be read as an object, or cannot be written.
+ */
+export function updateUserConfig(patch: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): { path: string } {
+  const path = userConfigPath(env);
+  const read = readJson<unknown>(path);
+  if (read.failure !== undefined) {
+    throw new UserError('settingsWriteFailed', { path, reason: read.failure.reason });
+  }
+  const base = read.value === undefined ? {} : asRecord(read.value);
+  if (base === undefined) {
+    throw new UserError('settingsWriteFailed', { path, reason: 'not a JSON object' });
+  }
+  try {
+    writeJson(path, { ...base, ...patch });
+  } catch (error) {
+    throw new UserError('settingsWriteFailed', { path, reason: (error as Error).message });
+  }
+  return { path };
 }
 
 /** Read a language name, rejecting anything this build cannot speak. */

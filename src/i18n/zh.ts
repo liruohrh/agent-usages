@@ -419,6 +419,21 @@ export const zh = {
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh 需要非负秒数，收到 ${p.value}`,
     serveOptionUnsupported: (p: { option: string }) =>
       `serve 不接受 ${p.option}：仪表盘的计价来源按 agent 自动选择，输出固定是网页与 JSON API；去掉这个参数再试`,
+    /* ---- dashboard warnings: they travel to the page, so they carry a code ---- */
+    serveAgentNoRoot: (p: { agent: string }) =>
+      `${p.agent}：找不到默认数据目录，已跳过（可用 --home 指定）。`,
+    serveAgentNoData: (p: { agent: string; source: string }) => `${p.agent}：${p.source} 下没有可读数据，已跳过。`,
+    serveAgentLoadFailed: (p: { agent: string; reason: string }) => `${p.agent}：读取失败（${p.reason}），已跳过。`,
+    snapshotReadOnly: (p: { path: string }) =>
+      `快照模式（--snapshot ${p.path}）不重扫；去掉该参数即改为实时扫描。`,
+    snapshotNoTimeseries: (p: { path: string }) =>
+      `快照 ${p.path} 只有汇总数字（没有逐请求时间戳），时间序列为空；要时序请用 agent-usages serve --write-snapshot 生成的快照。`,
+    /* ---- settings: the page writes the one value it can change ---- */
+    settingsUnknownLanguage: (p: { known: string; value: string }) =>
+      `语言只能是 ${p.known}，收到 ${p.value}`,
+    settingsWriteFailed: (p: { path: string; reason: string }) => `写不进配置文件 ${p.path}：${p.reason}`,
+    settingsForeignOrigin: (p: { origin: string }) =>
+      `只接受本页面发来的设置请求（Origin 是 ${p.origin}）`,
     /* ---- billed components ---- */
     basisInput: '缓存未命中输入',
     basisOutput: '输出',

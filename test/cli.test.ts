@@ -900,6 +900,107 @@ describe('serve', () => {
     },
     30_000,
   );
+
+  it(
+    'answers in the language the request asks for, and remembers the one it is told',
+    async () => {
+      // The switch in the page writes the same file the CLI reads, so the test
+      // keeps that file in a directory of its own — never the developer's own.
+      const configHome = mkdtempSync(join(tmpdir(), 'agent-usages-serve-config-'));
+      const env = { XDG_CONFIG_HOME: configHome };
+      const child = startServe(['--snapshot', await fixtureSnapshot(), '--port', '0'], env);
+      try {
+        const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
+        const configFile = join(configHome, 'agent-usages', 'config.json');
+
+        const settings = (await (await fetch(`${url}/api/settings`)).json()) as {
+          language: string;
+          configured: string | null;
+          path: string;
+          languages: string[];
+        };
+        // Nothing in the file yet: the machine's locale decides (`LANG=zh_CN`).
+        expect(settings.language).toBe('zh');
+        expect(settings.configured).toBeNull();
+        expect(settings.languages).toEqual(['zh', 'en']);
+        expect(settings.path).toBe(configFile);
+
+        // The payload's prose follows `?lang=`, the numbers do not.
+        const zh = (await (await fetch(`${url}/api/dashboard`)).json()) as { rangeLabel: string };
+        const en = (await (await fetch(`${url}/api/dashboard?lang=en`)).json()) as { rangeLabel: string };
+        expect(zh.rangeLabel).not.toBe(en.rangeLabel);
+        expect(en.rangeLabel).toContain('all');
+        expect(zh.rangeLabel).toContain('全部');
+
+        // A language this build does not speak is refused, with the code.
+        const bad = await fetch(`${url}/api/settings`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ language: 'fr' }),
+        });
+        expect(bad.status).toBe(400);
+        expect(((await bad.json()) as { error: { code: string } }).error.code).toBe('settingsUnknownLanguage');
+
+        // A page other than this one cannot reach the write.
+        const foreign = await fetch(`${url}/api/settings`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', origin: 'http://evil.example' },
+          body: JSON.stringify({ language: 'en' }),
+        });
+        expect(foreign.status).toBe(403);
+
+        const saved = await fetch(`${url}/api/settings`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ language: 'en' }),
+        });
+        expect(saved.status).toBe(200);
+        expect((await saved.json()) as { configured: string }).toMatchObject({ configured: 'en', language: 'en' });
+        expect(JSON.parse(await readFile(configFile, 'utf8'))).toEqual({ language: 'en' });
+
+        // Which means the CLI itself speaks English on its next run.
+        const help = await cli(['--help'], env);
+        expect(help.stdout).toContain('Token usage and cost for coding agents');
+      } finally {
+        await stop(child);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'keeps the language out of the way of the rest of the configuration file',
+    async () => {
+      const configHome = mkdtempSync(join(tmpdir(), 'agent-usages-serve-config-'));
+      const configDir = join(configHome, 'agent-usages');
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(
+        join(configDir, 'config.json'),
+        `${JSON.stringify({ language: 'zh', projects: [{ name: 'demo', paths: ['/tmp/demo'] }] }, null, 2)}\n`,
+        'utf8',
+      );
+      const child = startServe(['--snapshot', await fixtureSnapshot(), '--port', '0'], { XDG_CONFIG_HOME: configHome });
+      try {
+        const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
+        // The file's own value is what a request gets when it asks for nothing.
+        const en = (await (await fetch(`${url}/api/dashboard?lang=en`)).json()) as { rangeLabel: string };
+        expect(en.rangeLabel).toContain('all');
+
+        const saved = await fetch(`${url}/api/settings`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ language: 'en' }),
+        });
+        expect(saved.status).toBe(200);
+        const after = JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8')) as Record<string, unknown>;
+        expect(after['language']).toBe('en');
+        expect(after['projects']).toEqual([{ name: 'demo', paths: ['/tmp/demo'] }]);
+      } finally {
+        await stop(child);
+      }
+    },
+    30_000,
+  );
 });
 
 describe('configuration commands', () => {

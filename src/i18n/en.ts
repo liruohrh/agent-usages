@@ -355,6 +355,20 @@ export const en: Messages = {
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh wants a non-negative number of seconds, got ${p.value}`,
     serveOptionUnsupported: (p: { option: string }) =>
       `serve does not take ${p.option}: the dashboard picks its pricing provider per agent and always answers as a web page plus a JSON API; drop the flag and try again`,
+    /* ---- dashboard warnings: they travel to the page, so they carry a code ---- */
+    serveAgentNoRoot: (p: { agent: string }) =>
+      `${p.agent}: no default data directory found, skipped (point --home at one to include it).`,
+    serveAgentNoData: (p: { agent: string; source: string }) => `${p.agent}: nothing readable under ${p.source}, skipped.`,
+    serveAgentLoadFailed: (p: { agent: string; reason: string }) => `${p.agent}: could not be read (${p.reason}), skipped.`,
+    snapshotReadOnly: (p: { path: string }) =>
+      `snapshot mode (--snapshot ${p.path}) never rescans; drop the flag to scan live.`,
+    snapshotNoTimeseries: (p: { path: string }) =>
+      `snapshot ${p.path} has totals only (no per-request timestamps), so the time series is empty; use a snapshot written by agent-usages serve --write-snapshot for one.`,
+    /* ---- settings: the page writes the one value it can change ---- */
+    settingsUnknownLanguage: (p: { known: string; value: string }) =>
+      `language must be one of ${p.known}, got ${p.value}`,
+    settingsWriteFailed: (p: { path: string; reason: string }) => `cannot write ${p.path}: ${p.reason}`,
+    settingsForeignOrigin: (p: { origin: string }) => `settings may only be changed from this page (Origin is ${p.origin})`,
     basisInput: 'cache-miss input',
     basisOutput: 'output',
     basisCacheRead: 'cache-hit input',

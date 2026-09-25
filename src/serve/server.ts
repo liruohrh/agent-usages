@@ -1,17 +1,26 @@
 /**
- * The HTTP layer: a small, strictly read-only Express app over
- * {@link DashboardStore}.
+ * The HTTP layer: a small Express app over {@link DashboardStore}.
  *
  * Every `/api/*` route answers JSON in the shapes `types.ts` declares. The
  * non-API routes serve the built dashboard (`web/dist`) or, with `--dev`, proxy
  * to the Vite dev server, so `agent-usages serve` and `pnpm --filter web dev` can
  * be used together with hot reload.
  *
- * Two deliberate limits:
+ * Three deliberate limits:
  *
- * - it binds `127.0.0.1` unless told otherwise, and
+ * - it binds `127.0.0.1` unless told otherwise;
  * - it never writes to an agent's data directory; the only file it may write is a
- *   snapshot, and only when explicitly asked for one.
+ *   snapshot, and only when explicitly asked for one;
+ * - the one other write it can make is the language in the tool's *own*
+ *   configuration file (`PUT /api/settings`), because the switch in the page is
+ *   meant to be the same setting the CLI reads. That route is the only one that
+ *   accepts a body, it demands `application/json` (so a form or a cross-site
+ *   `fetch` cannot reach it without a preflight this server never allows) and it
+ *   ignores any request whose `Origin` is not the server itself.
+ *
+ * The page can also ask for a language per request (`?lang=en`): the payload's
+ * sentences — the range label, the warnings — are rendered in it, while the
+ * numbers stay what they are.
  */
 
 import { existsSync } from 'node:fs';
@@ -22,9 +31,14 @@ import { dirname, join, resolve } from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
-import { openStore, type DashboardQuery, type DashboardStore } from './data.ts';
-import { t } from '../i18n/index.ts';
+import { localizeDashboard, openStore, type DashboardQuery, type DashboardStore } from './data.ts';
+import { LANGUAGES, language, messagesFor, parseLanguage, setLanguage, t, type Language } from '../i18n/index.ts';
+import { renderDiagnostic } from '../i18n/errors.ts';
+import { readUserConfig, updateUserConfig } from '../config/user.ts';
+import { userConfigPath } from '../config/paths.ts';
+import { UserError } from '../i18n/errors.ts';
 import type {
+  SettingsPayload,
   Dashboard,
   DashboardMeta,
   ProjectSummary,
@@ -114,6 +128,49 @@ function stringOf(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+/** The language the configuration file asks for, or `undefined` when it has no opinion. */
+function configuredLanguage(env: NodeJS.ProcessEnv = process.env): Language | undefined {
+  return readUserConfig(env).config.language;
+}
+
+/** The language one request asks for: `?lang=`, else the configured one. */
+function requestLanguage(request: Request): Language {
+  return parseLanguage(request.query['lang']) ?? configuredLanguage() ?? language();
+}
+
+/** Whether an `Origin` header names this very server. */
+function sameOrigin(request: Request, origin: string): boolean {
+  try {
+    const host = new URL(origin).host;
+    return host === request.get('host');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Answer in one language without leaving the process in it.
+ *
+ * The payload's prose is written when it is built, and the scan that builds it is
+ * cached across requests — so a request in another language re-renders those
+ * sentences from their codes. The process-wide switch is set and restored inside
+ * one synchronous block, so no other response can observe it.
+ * @param request - the request, which may carry `?lang=`.
+ * @param render - builds the answer.
+ * @returns whatever `render` returned.
+ */
+function withRequestLanguage<T>(request: Request, render: () => T): T {
+  const wanted = requestLanguage(request);
+  if (wanted === language()) return render();
+  const previous = language();
+  setLanguage(wanted);
+  try {
+    return render();
+  } finally {
+    setLanguage(previous);
+  }
+}
+
 /** Turn a request's query string into the filters the store understands. */
 function queryOf(request: Request): DashboardQuery & { bucket?: 'day' | 'hour' } {
   const bucket = stringOf(request.query['bucket']);
@@ -166,6 +223,16 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
       }
     };
 
+  /**
+   * The dashboard for one request: its filters applied, its sentences in the
+   * language the request asked for.
+   */
+  const dashboardOf = (request: Request): { dashboard: Dashboard; query: DashboardQuery & { bucket?: 'day' | 'hour' } } =>
+    withRequestLanguage(request, () => {
+      const query = queryOf(request);
+      return { dashboard: localizeDashboard(store.dashboard(query), query.range), query };
+    });
+
   app.get('/api/health', route((request, response) => {
     json(response, {
       ok: true,
@@ -177,7 +244,7 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
   }));
 
   app.get('/api/summary', route((request, response) => {
-    const dashboard = store.dashboard(queryOf(request));
+    const { dashboard } = dashboardOf(request);
     json(response, {
       ...metaOf(dashboard),
       agents: dashboard.agents,
@@ -193,12 +260,12 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
   }));
 
   app.get('/api/agents', route((request, response) => {
-    const dashboard = store.dashboard(queryOf(request));
+    const { dashboard } = dashboardOf(request);
     json(response, { ...metaOf(dashboard), agents: dashboard.agents, totals: dashboard.totals, warnings: dashboard.warnings });
   }));
 
   app.get('/api/projects', route((request, response) => {
-    const dashboard = store.dashboard(queryOf(request));
+    const { dashboard } = dashboardOf(request);
     json(response, {
       ...metaOf(dashboard),
       totals: dashboard.totals,
@@ -210,7 +277,7 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
   }));
 
   app.get('/api/projects/:id', route((request, response) => {
-    const dashboard = store.dashboard(queryOf(request));
+    const { dashboard } = dashboardOf(request);
     const wanted = String(request.params['id'] ?? '');
     const project =
       dashboard.projects.find((candidate) => candidate.id === wanted) ??
@@ -224,7 +291,7 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
   }));
 
   app.get('/api/sessions', route((request, response) => {
-    const dashboard = store.dashboard(queryOf(request));
+    const { dashboard } = dashboardOf(request);
     const subagents = request.query['subagents'];
     const sessions = flattenSessions(dashboard, { subagents: subagents === '0' || subagents === 'false' ? false : undefined });
     const projectIds = listOf(request.query['project']);
@@ -244,23 +311,92 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
     const id = String(request.params['id'] ?? '');
     const qualifier = stringOf(request.query['agent']);
     const wanted = qualifier !== undefined && !id.includes(':') ? `${qualifier}:${id}` : id;
+    const { dashboard } = dashboardOf(request);
     const detail = store.sessionDetail(wanted, queryOf(request));
     if (detail === undefined) {
-      json(response, { error: { code: 'sessionNotFound', message: `没有这个会话：${id}` } }, 404);
+      json(response, { error: { code: 'sessionNotFound', message: t().errors.sessionNotFound({ selector: id }) } }, 404);
       return;
     }
-    json(response, { ...metaOf(store.dashboard(queryOf(request))), detail });
+    json(response, { ...metaOf(dashboard), detail });
   }));
 
   app.get('/api/timeseries', route((request, response) => {
-    const query = queryOf(request);
+    const { dashboard, query } = dashboardOf(request);
     const bucket = query.bucket ?? 'day';
-    const points: TimeseriesBucket[] = store.timeseries({ ...query, bucket });
-    json(response, { ...metaOf(store.dashboard(query)), bucket, count: points.length, points });
+    withRequestLanguage(request, () => {
+      const points: TimeseriesBucket[] = store.timeseries({ ...query, bucket });
+      json(response, { ...metaOf(dashboard), bucket, count: points.length, points });
+    });
   }));
 
   app.get('/api/dashboard', route((request, response) => {
-    json(response, store.dashboard(queryOf(request)));
+    json(response, dashboardOf(request).dashboard);
+  }));
+
+  /** What the language switch needs to know: what is set, and where it is written. */
+  const settings = (): SettingsPayload => {
+    const loaded = readUserConfig();
+    return {
+      language: language(),
+      configured: loaded.config.language ?? null,
+      path: userConfigPath(),
+      languages: [...LANGUAGES],
+    };
+  };
+
+  app.get('/api/settings', route((request, response) => {
+    json(response, withRequestLanguage(request, settings));
+  }));
+
+  app.put('/api/settings', route((request, response) => {
+    // Only a same-origin `application/json` request can reach this: a cross-site
+    // `fetch` with a JSON body needs a preflight, and this app answers none.
+    const origin = request.get('origin');
+    if (origin !== undefined && origin.length > 0 && !sameOrigin(request, origin)) {
+      withRequestLanguage(request, () =>
+        json(response, { error: { code: 'settingsForeignOrigin', message: t().errors.settingsForeignOrigin({ origin }) } }, 403),
+      );
+      return;
+    }
+    const wanted = parseLanguage((request.body as { language?: unknown } | undefined)?.language);
+    if (wanted === undefined) {
+      const value = JSON.stringify((request.body as { language?: unknown } | undefined)?.language);
+      withRequestLanguage(request, () =>
+        json(
+          response,
+          {
+            error: {
+              code: 'settingsUnknownLanguage',
+              message: t().errors.settingsUnknownLanguage({ known: LANGUAGES.join(' / '), value }),
+            },
+          },
+          400,
+        ),
+      );
+      return;
+    }
+    try {
+      updateUserConfig({ language: wanted });
+    } catch (error) {
+      withRequestLanguage(request, () =>
+        json(
+          response,
+          {
+            error: {
+              code: 'settingsWriteFailed',
+              message:
+                error instanceof UserError
+                  ? error.message
+                  : renderDiagnostic('settingsWriteFailed', { path: userConfigPath(), reason: (error as Error).message }),
+            },
+          },
+          500,
+        ),
+      );
+      return;
+    }
+    setLanguage(wanted);
+    json(response, settings());
   }));
 
   app.post('/api/refresh', route((request, response) => {

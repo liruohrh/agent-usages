@@ -68,6 +68,29 @@ export function language(): Language {
 }
 
 /**
+ * Read a language from an untrusted string.
+ * @param value - what a config file, query string or header said.
+ * @returns the language, or `undefined` when it is not one this build speaks.
+ */
+export function parseLanguage(value: unknown): Language | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().toLowerCase();
+  return (LANGUAGES as readonly string[]).includes(trimmed) ? (trimmed as Language) : undefined;
+}
+
+/**
+ * The catalogue for one language, whatever the process is speaking.
+ *
+ * `t()` answers "what does this process say"; a server rendering a different
+ * answer per request needs the other one without switching the process over.
+ * @param language - the language to speak.
+ * @returns its messages.
+ */
+export function messagesFor(language: Language): Messages {
+  return CATALOGUES[language];
+}
+
+/**
  * The current catalogue.
  *
  * A function rather than a constant so tests can switch languages between cases

@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import { parsePricingConfig, providerFromConfig, shippedProviders } from '../../src/config/pricing.ts';
 import { readFileSync } from 'node:fs';
-import { mergePeriods, mergeProviders, readUserConfig } from '../../src/config/user.ts';
+import { mergePeriods, mergeProviders, readUserConfig, updateUserConfig } from '../../src/config/user.ts';
 import type { BillingBasis, PricePeriod, RateComponent } from '../../src/pricing/contract.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { record } from '../support/dataset.ts';
@@ -275,5 +275,42 @@ describe('mergeProviders', () => {
     expect(at('2026-09-05T00:00:00+08:00')).toBe('0.01');
     // Outside the user's window the vendor's published price still applies.
     expect(at('2026-09-20T00:00:00+08:00')).toBe('0.02');
+  });
+});
+
+describe('updateUserConfig', () => {
+  it('sets the one key and leaves every other setting alone', () => {
+    const env = withConfig({ projects: [{ name: 'demo', paths: ['/tmp/demo'] }], rateMode: 'historical' });
+    const written = updateUserConfig({ language: 'en' }, env);
+    expect(written.path.endsWith(join('agent-usages', 'config.json'))).toBe(true);
+
+    const after = JSON.parse(readFileSync(written.path, 'utf8')) as Record<string, unknown>;
+    expect(after['language']).toBe('en');
+    // A language switch must never cost the user their project groups.
+    expect(after['projects']).toEqual([{ name: 'demo', paths: ['/tmp/demo'] }]);
+    expect(after['rateMode']).toBe('historical');
+    expect(readUserConfig(env).config.language).toBe('en');
+  });
+
+  it('creates the file and its directory when there is none', () => {
+    const env = withConfig(undefined);
+    const written = updateUserConfig({ language: 'zh' }, env);
+    expect(JSON.parse(readFileSync(written.path, 'utf8'))).toEqual({ language: 'zh' });
+  });
+
+  it('refuses to overwrite a file it cannot parse', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-usages-user-'));
+    const configDir = join(dir, 'agent-usages');
+    mkdirSync(configDir, { recursive: true });
+    const path = join(configDir, 'config.json');
+    writeFileSync(path, '{ this is not json', 'utf8');
+    expect(() => updateUserConfig({ language: 'en' }, { ...process.env, XDG_CONFIG_HOME: dir })).toThrow(/不是合法 JSON/);
+    // The broken file is still there, exactly as the user typed it.
+    expect(readFileSync(path, 'utf8')).toBe('{ this is not json');
+  });
+
+  it('refuses a file whose root is not an object', () => {
+    const env = withConfig([1, 2, 3]);
+    expect(() => updateUserConfig({ language: 'en' }, env)).toThrow(/not a JSON object/);
   });
 });

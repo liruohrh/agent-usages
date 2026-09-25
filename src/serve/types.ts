@@ -14,6 +14,7 @@
  * floats, so a total is the sum of the rows above it down to the last digit.
  */
 
+import type { Language } from '../i18n/index.ts';
 import type { CostTotals, TokenBuckets } from '../core/types.ts';
 
 export type { CostTotals, TokenBuckets };
@@ -417,6 +418,24 @@ export interface Dashboard extends DashboardMeta {
 
 /** The `agents` array the contract puts at the top level, minus per-project scopes. */
 export type AgentSummary = AgentTotals;
+
+/**
+ * A `GET`/`PUT /api/settings` answer: the language, and where it is remembered.
+ *
+ * The page's switch is the same setting the CLI reads, so it says both what is in
+ * effect now and what the file itself says — `configured` is `null` when the
+ * language comes from the machine's locale rather than from the user.
+ */
+export interface SettingsPayload {
+  /** The language in effect for this answer. */
+  language: Language;
+  /** The language written in the configuration file, if any. */
+  configured: Language | null;
+  /** The file a `PUT` writes to. */
+  path: string;
+  /** Every language this build speaks, for the switch. */
+  languages: Language[];
+}
 
 /** A `GET /api/sessions/:id` answer: one session and everything under it. */
 export interface SessionDetail {
