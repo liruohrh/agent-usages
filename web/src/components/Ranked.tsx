@@ -10,8 +10,9 @@
  * number on the right. Clicking a row opens every bucket with its own money.
  */
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 
 import type { AgentTotals, CostTotals, ProjectSummary, TokenBuckets, WorkspaceNode } from '../types';
 import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } from '../format';
@@ -115,13 +116,130 @@ const ENTRY_COLORS = ['#58a6ff', '#a78bfa', '#34d399', '#f59e0b', '#f472b6', '#2
 /** How many entries a chart names before folding the rest into a total. */
 const CHART_ROWS = 6;
 
+/** One bar row of a metric chart. */
+interface ValuedEntry {
+  entry: RankedEntry;
+  value: number;
+}
+
+/** The bar rows of one metric: shared by the small card and the full dialog. */
+function MetricRows({
+  valued,
+  total,
+  colors,
+  format,
+  size = 'small',
+}: {
+  valued: readonly ValuedEntry[];
+  total: number;
+  colors: ReadonlyMap<string, string>;
+  format: (value: number) => string;
+  size?: 'small' | 'large';
+}): React.ReactElement {
+  const nameWidth = size === 'large' ? 'w-32 sm:w-48 lg:w-64' : 'w-36';
+  const text = size === 'large' ? 'text-[12px]' : 'text-[11px]';
+  return (
+    <ul className={`${size === 'large' ? 'mt-3 space-y-2' : 'mt-2 space-y-1.5'}`}>
+      {valued.length === 0 && <li className={`${text} text-faint`}>这个指标全是 0。</li>}
+      {valued.map((item) => {
+        const share = total === 0 ? 0 : item.value / total;
+        // A non-zero slice that rounds to `0%` reads as "nothing"; say so instead.
+        const percent = share > 0 && share < 0.0005 ? '<0.1%' : formatShare(share);
+        return (
+          <li
+            key={item.entry.key}
+            className="flex items-center gap-2"
+            title={`${item.entry.title}：${format(item.value)}（占该指标的 ${percent}）`}
+          >
+            <span className={`${nameWidth} shrink-0 truncate ${text} text-muted`}>{item.entry.title}</span>
+            <span className={`${size === 'large' ? 'h-3.5' : 'h-2.5'} min-w-0 flex-1 overflow-hidden rounded-full bg-raised`}>
+              <span
+                className="block h-full rounded-full"
+                style={{ width: `${share * 100}%`, backgroundColor: colors.get(item.entry.key) ?? '#8b949e' }}
+              />
+            </span>
+            <span className={`tnum w-20 shrink-0 text-right ${text} text-fg`}>{format(item.value)}</span>
+            <span className={`tnum w-12 shrink-0 text-right ${text} text-faint`}>{percent}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The full-size chart, over everything: a dialog, because the card is too small. */
+function MetricDialog({
+  metric,
+  valued,
+  total,
+  colors,
+  format,
+  onClose,
+}: {
+  metric: SortMetric;
+  valued: readonly ValuedEntry[];
+  total: number;
+  colors: ReadonlyMap<string, string>;
+  format: (value: number) => string;
+  onClose: () => void;
+}): React.ReactElement {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    // The list behind is long; freezing it keeps the wheel inside the dialog.
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 sm:p-8"
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${metric.label} 全部条目`}
+        data-metric-dialog={metric.key}
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl border border-line bg-panel shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold text-fg">{metric.label} · 全部 {valued.length} 项</h2>
+            <p className="text-[11px] text-faint">{metric.hint}｜合计 {format(total)}（条长 = 占这个指标总量的比例）</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded border border-line px-2.5 py-1 text-[12px] text-muted hover:text-fg"
+          >
+            关闭
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
+          <MetricRows valued={valued} total={total} colors={colors} format={format} size="large" />
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /**
  * One metric, split across the list — the "who owns this total" view.
  *
  * A horizontal bar per entry, longest first, whose length is that entry's **share
  * of the metric's total**: a full bar means "all of it" in every chart, so the
- * charts stay comparable with each other. The row bars answer "what is this entry
- * made of"; these answer "where does this figure come from".
+ * charts stay comparable with each other. The card names the biggest few; the
+ * rest are one click away in a dialog that lists **every** entry.
  */
 function MetricChart({
   metric,
@@ -134,6 +252,7 @@ function MetricChart({
   colors: ReadonlyMap<string, string>;
   symbol: string;
 }): React.ReactElement {
+  const [open, setOpen] = useState(false);
   const valued = entries
     .map((entry) => ({ entry, value: metric.value(entry) }))
     .filter((item) => item.value > 0)
@@ -142,6 +261,8 @@ function MetricChart({
   const asMoney = metric.key === 'cost';
   const format = (value: number): string => (asMoney ? formatCost(String(value), symbol) : formatTokens(value, true));
   const shown = valued.slice(0, CHART_ROWS);
+  const folded = valued.length - shown.length;
+  const rest = total - shown.reduce((sum, item) => sum + item.value, 0);
 
   return (
     <div className="rounded-lg border border-line p-3" data-chart={metric.key}>
@@ -151,33 +272,28 @@ function MetricChart({
           {format(total)}
         </span>
       </div>
-      <ul className="mt-2 space-y-1.5">
-        {shown.length === 0 && <li className="text-[11px] text-faint">这个指标全是 0。</li>}
-        {shown.map((item) => {
-          const share = total === 0 ? 0 : item.value / total;
-          return (
-            <li
-              key={item.entry.key}
-              className="flex items-center gap-2"
-              title={`${item.entry.title}：${format(item.value)}（占该指标的 ${formatShare(share)}）`}
-            >
-              <span className="w-36 shrink-0 truncate text-[11px] text-muted">{item.entry.title}</span>
-              <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-raised">
-                <span
-                  className="block h-full rounded-full"
-                  style={{ width: `${share * 100}%`, backgroundColor: colors.get(item.entry.key) ?? '#8b949e' }}
-                />
-              </span>
-              <span className="tnum w-16 shrink-0 text-right text-[11px] text-fg">{format(item.value)}</span>
-              <span className="tnum w-10 shrink-0 text-right text-[11px] text-faint">{formatShare(share)}</span>
-            </li>
-          );
-        })}
-      </ul>
-      {valued.length > shown.length && (
-        <p className="mt-1.5 text-[11px] text-faint">
-          其余 {valued.length - shown.length} 项合计 {format(total - shown.reduce((sum, item) => sum + item.value, 0))}
-        </p>
+      <MetricRows valued={shown} total={total} colors={colors} format={format} />
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="text-[11px] text-faint">
+          {folded > 0 ? `其余 ${folded} 项合计 ${format(rest)}` : `共 ${valued.length} 项，已全部列出`}
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
+        >
+          展示更多（全部 {valued.length} 项）
+        </button>
+      </div>
+      {open && (
+        <MetricDialog
+          metric={metric}
+          valued={valued}
+          total={total}
+          colors={colors}
+          format={format}
+          onClose={() => setOpen(false)}
+        />
       )}
     </div>
   );
@@ -202,8 +318,8 @@ function MetricCharts({
     <div className="mb-3 rounded-lg border border-line bg-panel/60 p-3">
       <p className="mb-3 text-[11px] leading-5 text-faint">
         每个指标一张横向柱状图：把这个指标在列表所有条目上的值加起来，看「这个总数是谁贡献的」。条长 =
-        该条目占这个指标总量的比例（每张图都是「占满 = 全部」），右边是数值与占比；只列前 {CHART_ROWS} 项，
-        其余在下面给合计。想知道单个条目自己的构成，看每行的条。
+        该条目占这个指标总量的比例（每张图都是「占满 = 全部」），右边是数值与占比。卡片里只列前 {CHART_ROWS} 项，
+        点「展示更多」可以看到这个指标下的全部条目。想知道单个条目自己的构成，看每行的条。
       </p>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {metrics.map((metric) => (
@@ -213,7 +329,6 @@ function MetricCharts({
     </div>
   );
 }
-
 
 /**
  * A figure the list can be ordered by.

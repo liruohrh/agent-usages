@@ -526,6 +526,47 @@ test.describe('the session leaderboard', () => {
     expect(await page.locator('[data-chart]').count()).toBe(0);
   });
 
+  test('opens one metric over every entry behind 展示更多', async ({ page }) => {
+    await page.goto('/?view=sessions');
+    const sessions = rootSessions(await apiDashboard(page)).filter((session) => session.requests > 0);
+    test.skip(sessions.length === 0, 'no session with requests');
+    await page.locator('main section header').getByRole('button', { name: '图表分析' }).click();
+
+    // The card itself stays short.
+    const card = page.locator('[data-chart="requests"]');
+    const cardRows = await card.locator('li').allInnerTexts();
+    expect(cardRows.length).toBe(Math.min(6, sessions.length));
+
+    await card.getByRole('button', { name: /展示更多/ }).click();
+    const dialog = page.locator('[data-metric-dialog="requests"]');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(`全部 ${sessions.length} 项`);
+
+    // Every entry, biggest first, no "其余 N 项合计" left behind.
+    const shares = await dialog
+      .locator('li')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => Number(/([\d.]+)%/.exec(node.getAttribute('title') ?? '')?.[1] ?? '0')),
+      );
+    expect(shares.length).toBe(sessions.length);
+    expect(shares).toEqual([...shares].sort((left, right) => right - left));
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBeGreaterThan(99);
+    expect(await dialog.innerText()).not.toContain('其余');
+
+    // It fits the viewport instead of hanging off it.
+    const box = await dialog.boundingBox();
+    expect(box?.y ?? 0).toBeGreaterThanOrEqual(0);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual((page.viewportSize()?.height ?? 0) + 1);
+
+    // Escape and the close button both dismiss it.
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await card.getByRole('button', { name: /展示更多/ }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: '关闭' }).click();
+    await expect(dialog).toHaveCount(0);
+  });
+
   test('each row draws its own composition, including reasoning', async ({ page }) => {
     await page.goto('/?view=sessions');
     const sessions = rootSessions(await apiDashboard(page));
