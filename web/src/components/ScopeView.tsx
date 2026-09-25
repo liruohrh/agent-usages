@@ -7,9 +7,11 @@
  * carries it (`?view=usage`), so a link can point at a section.
  *
  * 概览   费用、请求、token、缓存命中率，加上构成与时序
+ * 项目   项目（或一个项目里的工作区）排行榜：同一套条形 + 展开全部计费桶
+ * agent  被读到的 agent 排行榜，同样可排序、可展开
+ * 会话   会话排行榜（可切换含子代理，或切表格视图）
  * 用量   总 / 自身 / 子代理，按 agent 分列，token 五桶，完整指标
  * 模型与计价   模型明细与计价区间明细
- * 会话   每个会话一行（可切换含子代理）
  */
 
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -19,14 +21,17 @@ import { Overview } from './Overview';
 import { UsageTab } from './Usage';
 import { BandTable, ModelTable } from './Tables';
 import { SessionLeaderboard } from './Sessions';
+import { AgentBoard, ProjectBoard } from './Ranked';
 import type { SeriesMetric } from '../charts';
 
 /** The tabs, in reading order. */
 const TABS = [
   { key: 'overview', label: '概览' },
+  { key: 'projects', label: '项目' },
+  { key: 'agents', label: 'agent' },
+  { key: 'sessions', label: '会话' },
   { key: 'usage', label: '用量' },
   { key: 'models', label: '模型与计价' },
-  { key: 'sessions', label: '会话' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -111,6 +116,24 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
       </div>
 
       {active === 'overview' && <Overview {...props} />}
+      {active === 'projects' &&
+        (project === null ? (
+          <ProjectBoard
+            projects={dashboard.projects}
+            symbol={symbol}
+            title="项目"
+            openHref={(entry) => `/p/${encodeURIComponent(entry.id)}`}
+          />
+        ) : (
+          <ProjectBoard workspaces={project.workspaceNodes} symbol={symbol} title={`工作区 · ${project.name}`} />
+        ))}
+      {active === 'agents' && (
+        <AgentBoard
+          agents={project === null ? dashboard.agents : project.agentTotals}
+          symbol={symbol}
+          title={project === null ? 'agent（全部项目）' : `agent · ${project.name}`}
+        />
+      )}
       {active === 'usage' && <UsageTab {...props} />}
       {active === 'models' && (
         <div className="space-y-4">

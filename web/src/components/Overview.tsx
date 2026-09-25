@@ -11,9 +11,10 @@ import { Link } from 'react-router-dom';
 
 import type { Dashboard, ProjectSummary, SessionNode, TimeseriesBucket } from '../types';
 import { formatCost, formatShare, formatTokens } from '../format';
-import { AgentBadge, Card, Notice } from './Bits';
+import { Card, Notice } from './Bits';
 import { Composition, KpiRow } from './Metrics';
 import { SessionLeaderboard } from './Sessions';
+import { ProjectBoard } from './Ranked';
 import { EChart, timeseriesOption, type SeriesMetric } from '../charts';
 
 /** The overview panel. */
@@ -141,16 +142,29 @@ export function Overview({
         </div>
       </div>
 
-      {/* The comparison view, reachable without hunting for the tab: the dearest
-          sessions across every project, with the columns that explain the money. */}
+      {/* Two compact rankings, the same rows the 项目 / 会话 tabs draw, five deep:
+          which projects spent it, and which sessions inside them. */}
+      {project === null && (
+        <ProjectBoard
+          projects={dashboard.projects}
+          symbol={symbol}
+          title="项目（前五）"
+          limit={5}
+          baseline={
+            <Link to="?view=projects" className="px-1 text-[11px] text-accent hover:underline">
+              全部 {dashboard.projects.length} 个（可排序）→
+            </Link>
+          }
+          openHref={(entry) => `/p/${encodeURIComponent(entry.id)}`}
+        />
+      )}
+
       <TopSessions
         sessions={project === null ? dashboard.projects.flatMap((entry) => entry.sessionReports) : project.sessionReports}
         symbol={symbol}
         showProject={project === null}
         scopeName={project === null ? null : project.name}
       />
-
-      {project === null && <ProjectRanking dashboard={dashboard} symbol={symbol} />}
 
       {dashboard.warnings.length > 0 && (
         <Notice tone="warn" title={`${dashboard.warnings.length} 条提示`}>
@@ -165,73 +179,7 @@ export function Overview({
   );
 }
 
-/** The project ranking: a share bar per project, plus a short card each. */
-function ProjectRanking({ dashboard, symbol }: { dashboard: Dashboard; symbol: string }): React.ReactElement {
-  const rows = [...dashboard.projects]
-    .sort((left, right) => Number(right.cost.total) - Number(left.cost.total))
-    .slice(0, 8);
-  const total = Number(dashboard.totals.cost.total);
-  return (
-    <Card title="项目花费">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="space-y-2">
-          {rows.map((project) => {
-            const share = total === 0 ? 0 : Number(project.cost.total) / total;
-            return (
-              <Link
-                key={project.id}
-                to={`/p/${encodeURIComponent(project.id)}`}
-                className="flex items-center gap-3 rounded-lg border border-line px-3 py-2 hover:bg-raised"
-              >
-                <span className="w-40 min-w-0 shrink-0 truncate text-[13px]" title={project.id}>
-                  {project.name}
-                </span>
-                <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-raised">
-                  <span className="block h-full rounded-full bg-accent" style={{ width: `${share * 100}%` }} />
-                </span>
-                <span className="tnum w-24 shrink-0 text-right text-[13px]">{formatCost(project.cost.total, symbol)}</span>
-                <span className="tnum w-24 shrink-0 text-right text-[12px] text-faint">
-                  {formatTokens(project.requests)} 请求
-                </span>
-              </Link>
-            );
-          })}
-        </div>
-        <div className="space-y-2">
-          {rows.slice(0, 4).map((project) => (
-            <div key={project.id} className="rounded-lg border border-line px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-[13px]" title={project.id}>
-                  {project.name}
-                </span>
-                <span className="flex shrink-0 items-center gap-1">
-                  {project.agents.map((agent) => (
-                    <AgentBadge key={agent} id={agent} small />
-                  ))}
-                </span>
-              </div>
-              <div className="mt-1 text-[12px] text-faint">
-                {project.sessions} 会话（子代理 {project.subagentSessions}）·{' '}
-                {formatTokens(
-                  project.tokens.input + project.tokens.output + project.tokens.cacheRead + project.tokens.cacheWrite,
-                  true,
-                )}{' '}
-                tokens
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-/**
- * The dearest sessions of the scope, as the same bars-and-ranks list the 会话 tab
- * uses — a table of thirteen columns is not how anyone compares sessions.
- *
- * @param props - the sessions to rank, and the currency symbol.
- */
+/** The dearest sessions of the scope, the same rows the 会话 tab draws. */
 function TopSessions({
   sessions,
   symbol,
@@ -249,22 +197,17 @@ function TopSessions({
   );
   const dearest = [...roots].sort((left, right) => Number(right.cost.total) - Number(left.cost.total));
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-[12px] font-semibold tracking-wide text-muted">
-          {scopeName === null ? '花费最多的会话' : `花费最多的会话 · ${scopeName}`}
-        </h2>
-        <Link to="?view=sessions" className="text-[12px] text-accent hover:underline">
-          全部 {roots.length} 个会话（可排序）→
+    <SessionLeaderboard
+      sessions={dearest}
+      symbol={symbol}
+      showProject={showProject}
+      limit={5}
+      title={scopeName === null ? '会话（前五）' : `会话（前五）· ${scopeName}`}
+      baseline={
+        <Link to="?view=sessions" className="px-1 text-[11px] text-accent hover:underline">
+          全部 {roots.length} 个（可排序）→
         </Link>
-      </div>
-      <SessionLeaderboard
-        sessions={dearest}
-        symbol={symbol}
-        showProject={showProject}
-        limit={5}
-        title="花费最多的会话"
-      />
-    </div>
+      }
+    />
   );
 }

@@ -42,6 +42,13 @@ interface ApiSession {
 }
 
 interface ApiDashboard {
+  agents: {
+    id: string;
+    label: string;
+    requests: number;
+    tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number };
+    cost: { total: string };
+  }[];
   models: ApiRow[];
   bands: ApiRow[];
   totals: ApiFigures & { own: ApiFigures; spawned: ApiFigures };
@@ -56,6 +63,8 @@ interface ApiDashboard {
     own: ApiFigures;
     spawned: ApiFigures;
     sessionReports: ApiSession[];
+    agentTotals: { id: string; label: string; cost: { total: string } }[];
+    workspaceNodes: { path: string; name: string; cost: { total: string } }[];
   }[];
 }
 
@@ -176,16 +185,20 @@ test.describe('the overview', () => {
     expect(labels).toContain('缓存命中输入');
   });
 
-  test('lists projects with their share, and opens one on click', async ({ page }) => {
+  test('ranks the projects and the sessions, and opens one on click', async ({ page }) => {
     await page.goto('/');
     const dashboard = await apiDashboard(page);
-    const card = cardOf(page, '项目花费');
-    await expect(card).toBeVisible();
-    const links = card.locator('a[href^="/p/"]');
-    expect(await links.count()).toBeGreaterThan(0);
-    // The ranking is by spend, whatever order the API listed the projects in.
+
     const dearest = [...dashboard.projects].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    await links.first().click();
+    const projects = cardStartingWith(page, '项目（前五）');
+    await expect(projects.locator('ol > li')).toHaveCount(Math.min(5, dashboard.projects.length));
+    await expect(projects.locator('ol > li').first()).toContainText(dearest?.name ?? '');
+
+    const sessions = cardStartingWith(page, '会话（前五）');
+    await expect(sessions.locator('ol > li')).toHaveCount(Math.min(5, rootSessions(dashboard).length));
+
+    const link = projects.locator('a[href^="/p/"]').first();
+    await link.click();
     await expect(page.locator('main h1')).toHaveText(dearest?.name ?? '');
   });
 });
@@ -240,6 +253,55 @@ test.describe('scope switching', () => {
 
     await page.locator('main section header').getByRole('button', { name: '合并子代理' }).click();
     await expect(page.locator('main ol > li')).toHaveCount(project.sessionReports.length);
+  });
+});
+
+test.describe('the project and agent rankings', () => {
+  test('every project is ranked, with its own buckets on expand', async ({ page }) => {
+    await page.goto('/?view=projects');
+    const dashboard = await apiDashboard(page);
+    const rows = page.locator('main ol > li');
+    await expect(rows).toHaveCount(dashboard.projects.length);
+
+    const dearest = [...dashboard.projects].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
+    await expect(rows.first()).toContainText(dearest?.name ?? '');
+    // The row names every bucket it used, not just the dominant one.
+    const first = await rows.first().innerText();
+    for (const short of ['I/M', 'I/C']) expect(first).toContain(short);
+    // Expanding shows the bucket table with money per bucket.
+    await rows.first().click();
+    const detail = await rows.first().locator('table tbody tr').allInnerTexts();
+    expect(detail.join(' ')).toContain('合计');
+    expect((detail.join(' ').match(/¥/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('the agent board ranks what was read, and sorts', async ({ page }) => {
+    await page.goto('/?view=agents');
+    const dashboard = await apiDashboard(page);
+    const rows = page.locator('main ol > li');
+    await expect(rows).toHaveCount(dashboard.agents.length);
+
+    const dearest = [...dashboard.agents].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
+    await expect(rows.first()).toContainText(dearest?.label ?? '');
+    await page.locator('main section header').getByRole('button', { name: 'tokens', exact: true }).click();
+    const mostTokens = [...dashboard.agents].sort(
+      (left, right) =>
+        right.tokens.input + right.tokens.output + right.tokens.cacheRead + right.tokens.cacheWrite -
+        (left.tokens.input + left.tokens.output + left.tokens.cacheRead + left.tokens.cacheWrite),
+    )[0];
+    await expect(rows.first()).toContainText(mostTokens?.label ?? '');
+  });
+
+  test('a project scope ranks its own workspaces and agents', async ({ page }) => {
+    await page.goto('/');
+    const project = (await twoProjects(page))[0];
+    if (project === undefined) return;
+    await selectProject(page, project.name);
+
+    await openTab(page, '项目');
+    await expect(page.locator('main ol > li')).toHaveCount(project.workspaceNodes.length);
+    await openTab(page, 'agent');
+    await expect(page.locator('main ol > li')).toHaveCount(project.agentTotals.length);
   });
 });
 
@@ -353,9 +415,9 @@ test.describe('the session leaderboard', () => {
     const first = await rowAt(page, 0).innerText();
     expect(first).toContain(dearest?.title ?? '');
     expect(first).toContain(dearest?.cost.total ?? '');
-    // The row also says how many tokens and how much of the cache it used.
+    // The row names its buckets, so a dominant one cannot hide the others.
+    for (const short of ['I/M', 'I/C']) expect(first).toContain(short);
     expect(first).toContain('Q ');
-    expect(first).toContain('缓存 ');
   });
 
   test('sorts by cost, tokens and cache money', async ({ page }) => {
@@ -389,7 +451,7 @@ test.describe('the session leaderboard', () => {
   test('expands one session into every bucket, with money', async ({ page }) => {
     await page.goto('/?view=sessions');
     const first = rowAt(page, 0);
-    await first.locator('button').first().click();
+    await first.locator('[role="button"]').first().click();
 
     const detail = page.locator('main ol > li').first();
     const buckets = await detail.locator('table tbody tr').allInnerTexts();
@@ -405,7 +467,7 @@ test.describe('the session leaderboard', () => {
     await expect(detail.getByRole('link', { name: /打开会话详情/ })).toBeVisible();
 
     // Clicking again folds it back.
-    await first.locator('button').first().click();
+    await first.locator('[role="button"]').first().click();
     await expect(page.locator('main ol > li').first().locator('table')).toHaveCount(0);
   });
 
@@ -427,10 +489,10 @@ test.describe('the session leaderboard', () => {
     const sessions = rootSessions(await apiDashboard(page));
     const dearest = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
     // The overview's own ranking is the same list, five rows deep.
-    const ranked = page.locator('main ol > li');
-    await expect(ranked.first()).toContainText(dearest?.title ?? '');
-    await expect(ranked).toHaveCount(Math.min(5, sessions.length));
-    await page.getByRole('link', { name: /全部 .* 个会话/ }).click();
+    const card = cardStartingWith(page, '会话（前五）');
+    await expect(card.locator('ol > li')).toHaveCount(Math.min(5, sessions.length));
+    await expect(card.locator('ol > li').first()).toContainText(dearest?.title ?? '');
+    await card.getByRole('link', { name: /全部 .* 个/ }).click();
     await expect(page).toHaveURL(/view=sessions/);
   });
 });
