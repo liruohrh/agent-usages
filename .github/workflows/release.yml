@@ -13,6 +13,14 @@ name: release
 on:
   push:
     tags: ['v*']
+  # Re-uploading an asset (a deleted release, a failed upload) without inventing a
+  # new version. The tag must already contain these helper scripts — true for any
+  # tag cut after this workflow landed.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已存在的 tag，例如 v0.0.1
+        required: true
 
 permissions:
   contents: write # create the release and upload the asset
@@ -22,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22.18'
@@ -29,7 +39,7 @@ jobs:
         with:
           version: 11
       - run: pnpm install --frozen-lockfile
-      # The asset must be a commit that passed the suite, same gates as publish.yml.
+      # The asset must be a commit that passed the suite: same gates as publish.yml.
       - run: pnpm build
       - run: pnpm test
       - run: pnpm --filter web typecheck
@@ -41,9 +51,11 @@ jobs:
       - name: 建 release 并上传 tarball
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           # `gh release create` on an annotated tag takes the tag's own message as
-          # the release body, so the curated notes live with the tag.
-          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --verify-tag
-          gh release upload "$GITHUB_REF_NAME" release/agent-usages-*.tgz --clobber
+          # the release body, so the curated notes live with the tag. `--verify-tag`
+          # refuses to invent a tag that was never pushed.
+          gh release view "$TAG" > /dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --verify-tag
+          gh release upload "$TAG" release/agent-usages-*.tgz --clobber

@@ -24,31 +24,38 @@ DeepSeek 只是**目前唯一支持的计价来源**。两者互不知情：agen
 
 ## 快速开始
 
-**从 GitHub 直装**（不需要 npm 账号；首次安装会 clone 并构建，之后走 npm 缓存）：
+**装发布包**（推荐；用户机上不构建任何东西——tarball 里已经带了编译好的 CLI 与构建好的前端）：
 
 ```bash
-# 看一眼：本月花了多少，直接用浏览器打开报告（不启服务）
-npx github:liruohrh/agent-usages usage --range month --open
+# 装好（实测 12 秒；换个版本就改 URL 里的 v0.0.1）
+npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.1/agent-usages-0.0.1.tgz
 
 # 想要常驻的分析平台（项目树 + 榜单 + 图表），一条命令起来
-npx github:liruohrh/agent-usages ui
+agent-usages ui
 
-# 固定版本/提交，或当成依赖写进 package.json
-npm i -g github:liruohrh/agent-usages#<tag 或 commit>
+# 不装也能跑：让 npx 直接从这个 tarball 起
+npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.1/agent-usages-0.0.1.tgz agent-usages usage --range month --open
 ```
 
 `ui` 就是 `serve --open`。报告也可以存成文件或进管道：
 
 ```bash
-npx github:liruohrh/agent-usages usage --range month --html ~/usage.html  # 自包含单文件，可直接发给别人
-npx github:liruohrh/agent-usages usage --range month --json              # 结构化输出
-npx github:liruohrh/agent-usages session list                             # 项目与会话清单
-npx github:liruohrh/agent-usages price                                    # 价格表（含峰谷与节假日规则）
+agent-usages usage --range month --html ~/usage.html  # 自包含单文件，可直接发给别人
+agent-usages usage --range month --json               # 结构化输出
+agent-usages session list                             # 项目与会话清单
+agent-usages price                                    # 价格表（含峰谷与节假日规则）
 ```
 
-首次安装会跑一次 `prepare`：装前端依赖、编译 CLI、构建仪表盘。实测（2026-09-26，本机）——
-npm 缓存热时 **24 秒**；冷缓存要下 vite/react/echarts 那一整套，**808 秒（13 分半）**。
-所以第一次装请留出时间，之后由 npm 缓存接管。要求 **Node ≥ 22.18**。
+要求 **Node ≥ 22.18**。每个 tag 都会自动构建一份 tarball 并挂上去，见
+[Releases](https://github.com/liruohrh/agent-usages/releases)。
+
+**从 GitHub 直装**（该版本还没有资产、或想跟 `master`）：不需要 npm 账号，但会在**你的机器上**
+装前端依赖并构建——实测冷缓存 **808 秒（13 分半）**、热缓存 24 秒（2026-09-26，本机）：
+
+```bash
+npx github:liruohrh/agent-usages ui
+npm i -g github:liruohrh/agent-usages#<tag 或 commit>
+```
 
 > 另外两条路：**npm registry**（包已整理好，只等能注册这个包名，见文末「发布」）与
 > **本地源码**（下面那条；checkout 里不需要编译 CLI，Node 直接跑 `.ts`）。
@@ -346,9 +353,10 @@ feature-x (~/ws/apps/demo-app/feature-x)  ← ~/ws/apps/demo-app 的 worktree
 
 | 方式 | 命令 | 需要什么 |
 | --- | --- | --- |
-| **GitHub 直装（推荐给使用者）** | `npx github:liruohrh/agent-usages ui` | Node ≥ 22.18；安装时自动编译 CLI + 构建前端 |
-| 全局安装 | `npm i -g github:liruohrh/agent-usages` | 同上 |
-| npm registry（待能注册） | `npx @agent/usages ui` | 包已整理好：`files` 带 `dist/` 与 `web/dist`，`prepare` 在打包时构建 |
+| **Release 资产（推荐给使用者）** | `npm i -g <release tarball URL>` | Node ≥ 22.18；用户机上**不构建**：tarball 自带 `dist/` 与 `web/dist`，实测 12 秒 |
+| GitHub 直装（想跟 `master`，或该版本没有资产） | `npx github:liruohrh/agent-usages ui` | 会在本机装前端依赖并构建：冷缓存实测 808 秒、热缓存 24 秒 |
+| 全局安装（同为直装） | `npm i -g github:liruohrh/agent-usages` | 同上 |
+| npm registry（待能注册） | `npx @agent/usages ui` | 与 release 资产是同一份 `npm pack` 产物 |
 | 从源码（开发） | 见下 | Node ≥ 22.6 + pnpm；web 要先 `pnpm web:build` |
 
 **一份源码，两种运行形态**：checkout 里 `src/*.ts` 就是程序（Node 原生类型擦除，无构建步骤）；
@@ -374,15 +382,20 @@ pnpm link --global                # 装到 PATH 后用 agent-usages …
 ### 发布（维护者）
 
 ```bash
-pnpm pack:check                           # 只列 tarball 内容（测试也用它守着：config/、web/dist 不能漏）
-git tag v0.0.1 && git push origin v0.0.1  # tag 只标记版本，不触发发布
+pnpm pack:check                            # 只列 tarball 内容（测试也用它守着：config/、web/dist 不能漏）
+git tag -a v0.0.2 -m "…" && git push origin v0.0.2   # → release.yml 构建并挂上 tarball
 ```
 
-`publish.yml` 是**手动**的（Actions → publish → Run workflow）：`@agent/usages` 这个包名在 npm 上还没
-注册，tag 触发只会白跑一次注定失败的 `npm publish`。等能注册时，先定下 `package.json` 的 `name`、
-配上仓库 secret `NPM_TOKEN`，再手动跑一次——它会构建 + 测试 + 冒烟，然后 `npm publish --provenance`。
-`prepare` 在打包时编译 CLI 并构建前端，所以 npm 上的 tarball 永远带着与源码同一次构建的 `dist/` 与
-`web/dist`；本地发布就 `npm publish`，效果相同。
+`release.yml` 跑在 tag 上：`pnpm build` → `pnpm test` → web typecheck → `pnpm web:smoke` →
+`pnpm release:pack`（= `npm pack --ignore-scripts`，产物进 `release/`）→
+`node scripts/verify-tarball.mjs`（像用户那样装一份、真的用一遍，11 项检查）→ 建 release 并上传资产。
+**校验不过就不会有资产**，所以 Release 上的每个 tarball 都是"装得上、跑得起来"的那一份。
+本地想先看一眼：`pnpm release:pack && pnpm release:verify release/agent-usages-0.0.2.tgz`。
+
+`publish.yml` 是**手动**的（Actions → publish → Run workflow）：`@agent/usages` 这个包名在 npm 上
+还没注册，tag 触发只会白跑一次注定失败的 `npm publish`。等能注册时，先定下 `package.json` 的
+`name`、配上仓库 secret `NPM_TOKEN`，再手动跑一次——它构建出的是**同一份 tarball**，所以资产与
+registry 上的包不会有两套内容。
 
 `.github/workflows/install-check.yml` 守着**用户的安装路径**：把本仓库当 git 依赖装进
 `node_modules`，跑 `--version` / `price` / `check-config`，并确认 `serve` 真的返回页面——

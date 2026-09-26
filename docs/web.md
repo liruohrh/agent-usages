@@ -96,17 +96,24 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 
 ## 1. 启动
 
-从 GitHub 直装的话（当前没有 npm registry 可用），一条命令就够：
+**推荐用发布资产**：每个 tag 都会构建一份 tarball，里面已经带了编译好的 CLI（`dist/`）与前端
+（`web/dist/`）；npm 对 tarball **不跑任何构建脚本**，所以用户机上不编译、不构建，实测 12 秒装完。
 
 ```sh
-npx github:liruohrh/agent-usages ui            # = serve --open，起平台并打开浏览器
-npx github:liruohrh/agent-usages usage --range month --open   # 不起服务：生成 HTML 报告并用浏览器打开
+npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.1/agent-usages-0.0.1.tgz
+agent-usages ui                                # = serve --open，起平台并打开浏览器
+agent-usages usage --range month --open        # 不起服务：生成 HTML 报告并用浏览器打开
+
+# 不装也可以
+npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.1/agent-usages-0.0.1.tgz agent-usages ui
 ```
 
-安装时 npm 会跑 `prepare`（`scripts/prepare.mjs`）：编译 CLI 到 `dist/`（`node_modules` 里 Node
-拒绝擦 TypeScript 类型，那份必须是 JS）+ 构建前端到 `web/dist`。失败只打印一行、不让安装失败——
-CLI 不依赖前端，`serve` 会提示怎么构建。`.github/workflows/install-check.yml` 在 CI 里把这条
-路径完整跑一遍（装进 `node_modules` → `--version`/`price`/`check-config` → `serve` 返回页面）。
+**从 GitHub 直装**（想跟 `master`、或该版本没有资产）则会在**你的机器上**构建：npm 跑
+`prepare`（`scripts/prepare.mjs`）编译 CLI 到 `dist/`（`node_modules` 里 Node 拒绝擦 TypeScript
+类型，那份必须是 JS）+ 构建前端到 `web/dist`，冷缓存实测 808 秒。失败只打印一行、不让安装失败——
+CLI 不依赖前端，`serve` 会提示怎么构建。两条路径各有 CI 守着：`release.yml`（推 tag）构建资产，
+并用 `scripts/verify-tarball.mjs` 像用户那样装一份再验证；`install-check.yml`（每次 push）把
+git 直装完整跑一遍（装进 `node_modules` → `--version`/`price`/`check-config` → `serve` 返回页面）。
 
 仓库里跑则要先装依赖、构建前端（约 930 KB）：
 
@@ -120,7 +127,7 @@ pnpm serve                               # = node src/serve/main.ts，不经过 
 ```
 
 `ui` 是 `serve --open` 的简写（argv 里替换，不是第二份命令定义），所以参数完全一样：
-`npx @agent/usages ui --port 8000`。
+`agent-usages ui --port 8000`。
 
 `agent-usages serve` 与 `pnpm serve` 是同一条路径的两种入口：前者走 CLI（帮助文案有
 中英两套、和别的子命令共享 `--agent/--home/--no-update`），后者是给「还没装 CLI、只想
