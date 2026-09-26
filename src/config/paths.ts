@@ -26,7 +26,7 @@ export function userConfigPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** A cached copy of one fetched configuration file. */
-export function cachePath(kind: 'pricing' | 'rates', env: NodeJS.ProcessEnv = process.env): string {
+export function cachePath(kind: 'pricing' | 'rates' | 'holidays', env: NodeJS.ProcessEnv = process.env): string {
   return join(configDir(env), `cache-${kind}.json`);
 }
 

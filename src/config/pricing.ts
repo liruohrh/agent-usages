@@ -1,3 +1,4 @@
+import { CALENDAR_IDS, type CalendarId } from './holidays.ts';
 /**
  * The pricing configuration file.
  *
@@ -255,6 +256,22 @@ function period(value: unknown, path: string): PricePeriod {
   if (to !== null && to.instant <= from.instant) throw new ConfigError(`${path}.to`, 'configToNotAfterFrom', {});
   const source = text(node['source'], `${path}.source`);
   if (!/^https?:\/\//.test(source)) throw new ConfigError(`${path}.source`, 'configSourceUrl', { value: JSON.stringify(source) });
+  // A period may name the holiday calendar its peak windows respect. An unknown
+  // id is an error rather than a silent no-op: the difference between "no
+  // calendar" and "a calendar I did not understand" is the holiday surcharge.
+  const calendarValue = node['holidayCalendar'];
+  const holidayCalendar =
+    calendarValue === undefined
+      ? undefined
+      : (CALENDAR_IDS as readonly string[]).includes(String(calendarValue))
+        ? (String(calendarValue) as CalendarId)
+        : (() => {
+            throw new ConfigError(
+              `${path}.holidayCalendar`,
+              'configUnknownCalendar',
+              { known: CALENDAR_IDS.join(' / '), value: JSON.stringify(calendarValue) },
+            );
+          })();
   return {
     id: text(node['id'], `${path}.id`),
     label: text(node['label'], `${path}.label`),
@@ -265,6 +282,7 @@ function period(value: unknown, path: string): PricePeriod {
     offPeak: array(node['offPeak'], `${path}.offPeak`).map((entry, index) => component(entry, `${path}.offPeak[${index}]`)),
     peak,
     peakWindows,
+    ...(holidayCalendar === undefined ? {} : { holidayCalendar }),
     currency,
     source,
     note: text(node['note'], `${path}.note`),

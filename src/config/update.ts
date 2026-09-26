@@ -19,6 +19,7 @@
 
 import { renderDiagnostic } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
+import { parseHolidaysConfig } from './holidays.ts';
 import { parsePricingConfig } from './pricing.ts';
 import { parseRatesConfig, shippedRates } from './rates.ts';
 import { cachePath, statePath } from './paths.ts';
@@ -29,6 +30,16 @@ export type UpdateKind = 'pricing' | 'rates';
 
 /** Where the price list is fetched from. */
 export const PRICING_URL = 'https://raw.githubusercontent.com/liruohrh/agent-usages/master/config/pricing.json';
+
+/**
+ * The holiday calendar, from the same repository.
+ *
+ * It rides on the price-list check rather than having one of its own: both are
+ * hand-maintained files in this repository, both change when a vendor's rules
+ * change, and the three-week cadence is right for both — the days off for a year
+ * are announced once, in November.
+ */
+export const HOLIDAYS_URL = 'https://raw.githubusercontent.com/liruohrh/agent-usages/master/config/holidays.json';
 
 /** How long a single request may take before it is abandoned. */
 const TIMEOUT_MS = 2_000;
@@ -186,11 +197,14 @@ export async function updatePricing(options: UpdateOptions = {}): Promise<Update
       etag: response.headers.get('etag') ?? undefined,
       text,
     } satisfies CacheEntry);
+    // The calendar goes with the price list; a failed calendar fetch is worth a
+    // note but never a reason to throw away a price list that arrived.
+    const calendar = await updateHolidays({ ...options, fetchImpl, now });
     writeJsonQuietly(statePath(env), state);
     return {
       kind: 'pricing',
       status: 'updated',
-      detail: renderDiagnostic('updatePricesUpdated', { date: parsed.updatedAt }),
+      detail: renderDiagnostic('updatePricesUpdated', { date: parsed.updatedAt, calendar }),
     };
   } catch (error) {
     writeJsonQuietly(statePath(env), state);
@@ -199,6 +213,37 @@ export async function updatePricing(options: UpdateOptions = {}): Promise<Update
       status: 'failed',
       detail: renderDiagnostic('updatePricesUnusable', { reason: (error as Error).message }),
     };
+  }
+}
+
+/**
+ * Refresh the holiday calendar next to the price list.
+ *
+ * Never fatal: the shipped calendar is a valid fallback, so a repository that is
+ * unreachable, or a file that no longer parses, leaves the previous copy in place
+ * and says so in the price-list line.
+ * @param options - environment, clock, fetch.
+ * @returns a short note for the update line: `''` when nothing needed doing.
+ */
+async function updateHolidays(options: UpdateOptions & { fetchImpl: typeof fetch; now: Date }): Promise<string> {
+  const env = options.env ?? process.env;
+  const cached = readJson<CacheEntry>(cachePath('holidays', env)).value;
+  const headers: Record<string, string> = {};
+  if (cached?.etag !== undefined) headers['If-None-Match'] = cached.etag;
+  const response = await request(HOLIDAYS_URL, { headers }, options.fetchImpl);
+  if (response === undefined || !response.ok) return renderDiagnostic('calendarUnchanged', {});
+  if (response.status === 304) return renderDiagnostic('calendarUnchanged', {});
+  const text = await response.text();
+  try {
+    const calendar = parseHolidaysConfig(JSON.parse(text));
+    writeJsonQuietly(cachePath('holidays', env), {
+      fetchedAt: options.now.getTime(),
+      etag: response.headers.get('etag') ?? undefined,
+      text,
+    } satisfies CacheEntry);
+    return renderDiagnostic('calendarUpdated', { to: calendar.to });
+  } catch (error) {
+    return renderDiagnostic('calendarUnusable', { reason: (error as Error).message });
   }
 }
 
@@ -327,7 +372,7 @@ export async function runUpdates(
  * @param env - environment to resolve the cache path from.
  * @returns the cached text, or `undefined` when there is no usable cache.
  */
-export function cachedConfigText(kind: UpdateKind, env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function cachedConfigText(kind: UpdateKind | 'holidays', env: NodeJS.ProcessEnv = process.env): string | undefined {
   const entry = readJson<CacheEntry>(cachePath(kind, env)).value;
   return typeof entry?.text === 'string' ? entry.text : undefined;
 }

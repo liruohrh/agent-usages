@@ -40,6 +40,7 @@ import type { RateMode } from './config/user.ts';
 import { cachedConfigText, runUpdates, type UpdateKind } from './config/update.ts';
 import { parsePricingConfig, shippedPricingText } from './config/pricing.ts';
 import { parseRatesConfig, shippedRatesText } from './config/rates.ts';
+import { parseHolidaysConfig, shippedHolidaysText } from './config/holidays.ts';
 import { readUserConfig } from './config/user.ts';
 import { userConfigPath } from './config/paths.ts';
 import {
@@ -289,7 +290,10 @@ async function loadOrExit(
       series === undefined
         ? convertProvider(selected.provider, choice.currency ?? { code: '', symbol: '', name: '' }, rate)
         : selected.provider,
-      series === undefined ? {} : { convertAt: (instant: number) => rateOn(series as LoadedRateSeries, instant) },
+      {
+        ...(series === undefined ? {} : { convertAt: (instant: number) => rateOn(series as LoadedRateSeries, instant) }),
+        ...(config.holidays === undefined ? {} : { holidays: config.holidays }),
+      },
     );
     return {
       dataset,
@@ -509,7 +513,7 @@ function runPrice(options: PriceOptions, config: ResolvedConfig): void {
   const now = Date.now();
   const lines: string[] = [];
   for (const provider of providers) {
-    const engine = createPricingEngine(provider);
+    const engine = createPricingEngine(provider, config.holidays === undefined ? {} : { holidays: config.holidays });
     const currencies = providerCurrencies(provider);
     const listed = currencies.filter((code) => wanted === undefined || code === wanted);
     if (listed.length === 0) {
@@ -643,6 +647,7 @@ function runCheckConfig(json: boolean): void {
   for (const [file, parse] of [
     ['config/pricing.json', (): unknown => parsePricingConfig(shippedPricingText())],
     ['config/rates.json', (): unknown => parseRatesConfig(shippedRatesText())],
+    ['config/holidays.json', (): unknown => parseHolidaysConfig(JSON.parse(shippedHolidaysText()))],
   ] as const) {
     try {
       parse();

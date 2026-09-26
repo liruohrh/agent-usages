@@ -383,13 +383,30 @@ function mergeCharges(left: ComponentCharge, right: ComponentCharge): ComponentC
 class Engine implements PricingEngine {
   readonly provider: PricingProvider;
   private readonly fallbackModel: string | null;
+  /** Everything the caller handed in, including the holiday calendar. */
+  private readonly options: PricingEngineOptions;
   /** Period lookups keyed by model + how many period boundaries precede the instant. */
   private readonly periodCache = new Map<string, { period: PricePeriod; resolution: PriceResolution }>();
 
   private readonly convertAt: ((instant: number) => string) | undefined;
 
+  /**
+   * The holiday a record falls on, when the period asks for a calendar.
+   * @param instant - the record's time.
+   * @param period - the period being charged.
+   * @returns the holiday's name, or `undefined` for an ordinary day.
+   */
+  private holidayAt(instant: number, period: PricePeriod): string | undefined {
+    const wanted = period.holidayCalendar;
+    if (wanted === undefined) return undefined;
+    const calendar = this.options.holidays;
+    if (calendar === undefined || calendar.id !== wanted) return undefined;
+    return calendar.days.get(zoneTime(instant, period.utcOffset).isoDate);
+  }
+
   constructor(provider: PricingProvider, options: PricingEngineOptions) {
     this.provider = provider;
+    this.options = options;
     this.fallbackModel = options.defaultModel === undefined ? provider.defaultModel : options.defaultModel;
     this.convertAt = options.convertAt;
   }
@@ -460,13 +477,21 @@ class Engine implements PricingEngine {
     const resolution: PriceResolution = usedDefault ? 'fallback-default' : selected.resolution;
     const tiered = period.peak !== null && period.peakWindows.length > 0;
     if (!tiered) {
-      return { model, period, tier: 'flat', components: period.offPeak, resolution };
+      return { model, period, tier: 'flat', reason: 'flat', components: period.offPeak, resolution };
     }
-    const peak = isPeak(record.time, period.peakWindows, period.utcOffset);
+    // A holiday is off-peak for the whole day, whatever the clock says: the
+    // calendars this tool knows are the ones whose days off are *not* working
+    // days for the vendor. A date the calendar does not cover falls back to the
+    // weekday rule — and the configuration warns about that, because the other
+    // behaviour would quietly charge the peak rate on a holiday.
+    const holiday = this.holidayAt(record.time, period);
+    const peak = holiday === undefined && isPeak(record.time, period.peakWindows, period.utcOffset);
     return {
       model,
       period,
       tier: peak ? 'peak' : 'off-peak',
+      reason: holiday === undefined ? (peak ? 'peak-window' : 'off-window') : 'holiday',
+      ...(holiday === undefined ? {} : { holiday }),
       // `peak` is non-null whenever `tiered` is true.
       components: peak ? (period.peak as readonly RateComponent[]) : period.offPeak,
       resolution,
@@ -525,7 +550,13 @@ class Engine implements PricingEngine {
         !window.weekdays.includes(6),
     );
     const days = everyDay ? labels.everyDay : weekdaysOnly ? labels.weekdays : labels.someDays;
-    return labels.tiers(days, windows, offsetLabel(period.utcOffset));
+    const base = labels.tiers(days, windows, offsetLabel(period.utcOffset));
+    // A period that respects a holiday calendar says so where the rule is read:
+    // the peak windows stop applying on those days, which is half the price.
+    if (period.holidayCalendar === undefined) return base;
+    const calendar = this.options.holidays;
+    const name = calendar === undefined ? t().period.holidaysUnknown : t().period.holidays(calendar.from, calendar.to);
+    return `${base}；${t().period.holidaysOffPeak(name)}`;
   }
 
   describeBasis(basis: BillingBasis): string {

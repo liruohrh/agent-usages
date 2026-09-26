@@ -226,3 +226,44 @@ describe('historical rate mode', () => {
     expect(total('2026-09-19T12:00:00Z')).toBe('18.0000');
   });
 });
+
+describe('the holiday calendar', () => {
+  it('warns when it stops before the periods that use it', async () => {
+    // A cached calendar that ends in January, with a price list whose in-force
+    // periods run to "now": past that date a holiday would be billed at the peak
+    // rate, so the configuration has to say so.
+    const env = envWith({
+      'cache-holidays.json': {
+        fetchedAt: Date.now(),
+        text: JSON.stringify({
+          version: 1,
+          zone: 'Asia/Shanghai',
+          source: 'test',
+          days: { '2026-01-01': '元旦', '2026-01-05': '元旦' },
+        }),
+      },
+    });
+    const config = await resolveConfig({ env, noUpdate: true, now: new Date('2026-09-26T00:00:00Z') });
+    const warning = config.warnings.find((item) => item.code === 'holidaysNotCovering');
+    expect(warning, config.warnings.map((item) => item.code).join(', ')).toBeDefined();
+    expect(warning?.message).toContain('2026-01-05');
+    // The calendar itself is still loaded, so what it does cover is still free.
+    expect(config.holidays?.days.size).toBe(2);
+  });
+
+  it('says nothing when the calendar covers everything in force', async () => {
+    const config = await resolveConfig({ env: envWith(), noUpdate: true, now: new Date('2026-09-26T00:00:00Z') });
+    // The shipped calendar covers 2026, and every holiday-aware period is closed
+    // by then or open-ended from within that year.
+    expect(config.warnings.some((item) => item.code === 'holidaysNotCovering')).toBe(false);
+    expect(config.holidays?.days.get('2026-10-01')).toBe('国庆节');
+  });
+
+  it('falls back to the shipped calendar when the cached one is broken', async () => {
+    const env = envWith({ 'cache-holidays.json': { fetchedAt: Date.now(), text: '{"version":1,"days":{}}' } });
+    const config = await resolveConfig({ env, noUpdate: true, now: new Date('2026-09-26T00:00:00Z') });
+    const unusable = config.warnings.find((item) => item.code === 'cachedHolidaysUnusable');
+    expect(unusable, config.warnings.map((item) => item.code).join(', ')).toBeDefined();
+    expect(config.holidays?.days.get('2026-10-01')).toBe('国庆节');
+  });
+});

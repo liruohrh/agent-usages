@@ -343,7 +343,8 @@
                 }
               ],
               "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
-              "note": "DeepSeek-V4.1-Flash 上线并同步降价；模型名改为 deepseek-flash，旧名 deepseek-v4-flash / deepseek-v4-flash-vision-exp 仍按 Flash 价格计费。峰谷规则沿用 2026-08-23 起的周一至周五。"
+              "note": "DeepSeek-V4.1-Flash 上线并同步降价；模型名改为 deepseek-flash，旧名 deepseek-v4-flash / deepseek-v4-flash-vision-exp 仍按 Flash 价格计费。峰谷规则沿用 2026-08-23 起的周一至周五。 高峰时段排除中国法定节假日（日期见 config/holidays.json，节假日全天按低谷价）。",
+              "holidayCalendar": "cn"
             },
             {
               "id": "2026-01-01",
@@ -670,7 +671,8 @@
                 }
               ],
               "source": "https://api-docs.deepseek.com/quick_start/pricing",
-              "note": "V4.1-Flash launched with a matching price cut, in dollars."
+              "note": "V4.1-Flash launched with a matching price cut, in dollars. Peak hours exclude Chinese public holidays (see config/holidays.json; a holiday is off-peak all day).",
+              "holidayCalendar": "cn"
             }
           ]
         },
@@ -926,7 +928,8 @@
                 }
               ],
               "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
-              "note": "沿用 2026-08-23 起的周末全天低谷规则；2026-09-10 的 Flash 降价未影响 V4-Pro，DeepSeek 已公告 2026-09-14 之后继续提供该模型且计费方式不变。"
+              "note": "沿用 2026-08-23 起的周末全天低谷规则；2026-09-10 的 Flash 降价未影响 V4-Pro，DeepSeek 已公告 2026-09-14 之后继续提供该模型且计费方式不变。 高峰时段排除中国法定节假日（日期见 config/holidays.json，节假日全天按低谷价）。",
+              "holidayCalendar": "cn"
             },
             {
               "id": "2026-04-24",
@@ -1174,7 +1177,8 @@
                 }
               ],
               "source": "https://api-docs.deepseek.com/quick_start/pricing",
-              "note": "Keeps the weekend off-peak rule, as published in dollars."
+              "note": "Keeps the weekend off-peak rule, as published in dollars. Peak hours exclude Chinese public holidays (see config/holidays.json; a holiday is off-peak all day).",
+              "holidayCalendar": "cn"
             }
           ]
         }

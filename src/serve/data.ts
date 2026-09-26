@@ -715,7 +715,7 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
   }> => {
     const config = await resolveConfig({ noUpdate: options.noUpdate ?? true, env, now });
     const provider = resolvePricingProvider(undefined, adapters[0]?.id, config.providers);
-    const engine = createPricingEngine(provider);
+    const engine = createPricingEngine(provider, config.holidays === undefined ? {} : { holidays: config.holidays });
     const currency = providerCurrencies(provider)[0] ?? 'USD';
     const symbol = currencyOf(currency).symbol;
     const context = { engine, pricingProvider: provider.id };

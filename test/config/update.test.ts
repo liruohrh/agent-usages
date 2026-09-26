@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { shippedHolidaysText } from '../../src/config/holidays.ts';
 import { readJson } from '../../src/config/store.ts';
 import { PRICING_URL, cachedConfigText, updatePricing, updateRates } from '../../src/config/update.ts';
 
@@ -53,17 +54,33 @@ describe('updatePricing', () => {
 
   it('checks at most once every three weeks', async () => {
     const directory = env();
-    const { impl, calls } = stubFetch(() => new Response(shippedPricingText(), { status: 200 }));
+    const { impl, calls } = stubFetch((url) =>
+      url.includes('holidays') ? new Response(shippedHolidaysText(), { status: 200 }) : new Response(shippedPricingText(), { status: 200 }),
+    );
+    const prices = (): number => calls.filter((call) => !call.url.includes('holidays')).length;
     const first = new Date('2026-09-21T08:00:00');
     expect((await updatePricing({ env: directory, now: first, fetchImpl: impl })).status).toBe('updated');
     // The same day, and every day after it, is too soon.
     expect((await updatePricing({ env: directory, now: new Date('2026-09-21T20:00:00'), fetchImpl: impl })).status).toBe('skipped');
     expect((await updatePricing({ env: directory, now: new Date('2026-10-01T09:00:00'), fetchImpl: impl })).status).toBe('skipped');
-    expect(calls).toHaveLength(1);
+    expect(prices()).toBe(1);
     // Twenty-one days later it looks again — the price list is hand-maintained, so
     // this is about noticing a vendor's change, not about polling.
     expect((await updatePricing({ env: directory, now: new Date('2026-10-12T09:00:00'), fetchImpl: impl })).status).toBe('updated');
-    expect(calls).toHaveLength(2);
+    expect(prices()).toBe(2);
+  });
+
+  it('fetches the holiday calendar with the price list', async () => {
+    const directory = env();
+    const { impl, calls } = stubFetch((url) =>
+      url.includes('holidays') ? new Response(shippedHolidaysText(), { status: 200 }) : new Response(shippedPricingText(), { status: 200 }),
+    );
+    const outcome = await updatePricing({ env: directory, now: new Date('2026-09-21T08:00:00'), fetchImpl: impl });
+    expect(outcome.status).toBe('updated');
+    expect(calls.some((call) => call.url.includes('holidays.json'))).toBe(true);
+    // Both files are cached, and the line says how far the calendar reaches.
+    expect(cachedConfigText('holidays', directory)).toContain('2026-10-07');
+    expect(outcome.detail).toContain('节假日表到 2026-10-07');
   });
 
   it('says how long ago it looked, and how often it does', async () => {
@@ -78,11 +95,13 @@ describe('updatePricing', () => {
 
   it('looks again when the clock moved backwards', async () => {
     const directory = env();
-    const { impl, calls } = stubFetch(() => new Response(shippedPricingText(), { status: 200 }));
+    const { impl, calls } = stubFetch((url) =>
+      url.includes('holidays') ? new Response(shippedHolidaysText(), { status: 200 }) : new Response(shippedPricingText(), { status: 200 }),
+    );
     await updatePricing({ env: directory, now: new Date('2026-09-21T08:00:00'), fetchImpl: impl });
     // A machine whose clock jumped back must not stop checking until it catches up.
     expect((await updatePricing({ env: directory, now: new Date('2026-01-01T08:00:00'), fetchImpl: impl })).status).toBe('updated');
-    expect(calls).toHaveLength(2);
+    expect(calls.filter((call) => !call.url.includes('holidays'))).toHaveLength(2);
   });
 
   it('sends the stored ETag and treats 304 as unchanged', async () => {

@@ -129,6 +129,11 @@ export const zh = {
     /** `2026-01-01 00:00 → 2026-04-24 00:00 (UTC+08:00)`. */
     window: (from: string, to: string, offset: string) => `${from} → ${to} (${offset})`,
     listJoin: '、',
+    /** `2026-01-01 ~ 2026-10-07` — the span a holiday calendar covers. */
+    holidays: (from: string, to: string) => `${from} ~ ${to}`,
+    holidaysUnknown: '未收录',
+    /** `中国法定节假日全天低谷（已收录 2026-01-01 ~ 2026-10-07）`. */
+    holidaysOffPeak: (span: string) => `中国法定节假日全天低谷（已收录 ${span}）`,
   },
   /** The `price` command's own output. */
   price: {
@@ -362,6 +367,13 @@ export const zh = {
     configProjectPath: (p: { value: string }) => `应为非空的路径字符串，收到 ${p.value}`,
     configIgnored: (p: { path: string; reason: string }) => `忽略用户配置 ${p.path}：${p.reason}`,
     cachedPricesUnusable: (p: { reason: string }) => `已缓存的价目表不可用，改用随包版本：${p.reason}`,
+    cachedHolidaysUnusable: (p: { reason: string }) => `已缓存的节假日表不可用，改用随包版本：${p.reason}`,
+    configHolidayDate: (p: { value: string }) => `应为 YYYY-MM-DD 且是真实日期，收到 ${p.value}`,
+    configHolidaysEmpty: '节假日表至少要有一个日期',
+    configUnknownCalendar: (p: { known: string; value: string }) =>
+      `未知的节假日表 ${p.value}（可用：${p.known}）`,
+    holidaysNotCovering: (p: { to: string; name: string }) =>
+      `节假日表只覆盖到 ${p.to}：之后的日期按星期几判定，${p.name} 的节假日会被按高峰价计（请更新 config/holidays.json）`,
     cachedRatesUnusable: (p: { reason: string }) => `已缓存的汇率表不可用，改用随包版本：${p.reason}`,
     mergeFailed: (p: { reason: string }) => `用户价格配置与默认表合并失败，改用默认表：${p.reason}`,
     storeNotJson: (p: { reason: string }) => `不是合法 JSON：${p.reason}`,
@@ -379,7 +391,11 @@ export const zh = {
     updatePricesChecked: (p: { ago: string; every: string }) => `价格表 ${p.ago}检查过（${p.every}）`,
     updateRatesChecked: (p: { ago: string; every: string }) => `汇率 ${p.ago}检查过（${p.every}）`,
     updatePricesUnchanged: '价格表没有变化',
-    updatePricesUpdated: (p: { date: string }) => `价格表已更新（文件日期 ${p.date}）`,
+    updatePricesUpdated: (p: { date: string; calendar: string }) => `价格表已更新（文件日期 ${p.date}${p.calendar}）`,
+    /** Appended to the price-list line: what the holiday calendar did. */
+    calendarUpdated: (p: { to: string }) => `，节假日表到 ${p.to}`,
+    calendarUnchanged: () => '',
+    calendarUnusable: (p: { reason: string }) => `，节假日表没更新（${p.reason}）`,
     updatePricesOffline: '取价格表失败（离线或超时），沿用现有数据',
     updatePricesHttp: (p: { status: string }) => `取价格表失败：HTTP ${p.status}`,
     updatePricesUnusable: (p: { reason: string }) => `拉到的价格表不可用，已忽略：${p.reason}`,

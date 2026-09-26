@@ -19,6 +19,7 @@
  *   component; a vendor that does not bill cache writes simply omits one.
  */
 
+import type { CalendarId, HolidayCalendar } from '../config/holidays.ts';
 import type { CacheWriteTtl, CostTotals, TokenBuckets, UsageRecord } from '../core/types.ts';
 
 /** A billable quantity: which tokens a rate applies to. */
@@ -127,6 +128,16 @@ export interface PricePeriod {
   /** Peak windows in the period's own wall-clock time. */
   peakWindows: readonly PeakWindow[];
   /**
+   * Holiday calendar whose days are off-peak for the whole day.
+   *
+   * DeepSeek's peak windows are "Monday to Friday, excluding Chinese public
+   * holidays": a weekday that happens to be a holiday is off-peak all day, and
+   * the dates cannot be computed (lunar calendar plus a yearly announcement), so
+   * they come from `config/holidays.json` — see {@link PricePeriod.peakWindows}.
+   * Absent means "this period only knows about weekdays".
+   */
+  holidayCalendar?: CalendarId | undefined;
+  /**
    * Minutes east of UTC that this period's wall clock runs on.
    *
    * Read from the offset the period's own `from` carries (`+08:00` → 480), which
@@ -188,6 +199,10 @@ export interface ResolvedRate {
   period: PricePeriod;
   /** Tier within the period: `peak`, `off-peak`, or `flat`. */
   tier: 'peak' | 'off-peak' | 'flat';
+  /** Why that tier: a peak window, a holiday, everything else, or no tiers. */
+  reason: TierReason;
+  /** The holiday's name, when {@link ResolvedRate.reason} is `holiday`. */
+  holiday?: string | undefined;
   /** The components to charge. */
   components: readonly RateComponent[];
   /** How the period was selected. */
@@ -351,6 +366,17 @@ export interface PricingEngine {
   quantityOf(component: RateComponent, tokens: TokenBuckets): number;
 }
 
+/** Why a record landed in the tier it did, for reports and readers. */
+export type TierReason =
+  /** Inside a peak window on a working day. */
+  | 'peak-window'
+  /** A day the calendar says is a holiday: off-peak all day. */
+  | 'holiday'
+  /** Outside every window, or on a day no window applies to. */
+  | 'off-window'
+  /** The period has no tiers at all. */
+  | 'flat';
+
 /** Options for {@link createPricingEngine}. */
 export interface PricingEngineOptions {
   /**
@@ -369,6 +395,14 @@ export interface PricingEngineOptions {
    * per one unit of the price list's.
    */
   convertAt?: ((instant: number) => string) | undefined;
+  /**
+   * The holiday calendar periods may refer to.
+   *
+   * A period that names a calendar this engine does not have keeps the weekday
+   * rule — and the configuration says so, because the alternative is billing a
+   * holiday at the peak rate without telling anyone.
+   */
+  holidays?: HolidayCalendar | undefined;
 }
 
 /** Everything a cost report exposes. */

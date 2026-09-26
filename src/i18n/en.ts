@@ -95,6 +95,9 @@ export const en: Messages = {
     tiers: (days: string, windows: string, offset: string) => `${days} ${windows} (${offset})`,
     window: (from: string, to: string, offset: string) => `${from} → ${to} (${offset})`,
     listJoin: ', ',
+    holidays: (from: string, to: string) => `${from} ~ ${to}`,
+    holidaysUnknown: 'none loaded',
+    holidaysOffPeak: (span: string) => `Chinese public holidays are off-peak all day (calendar covers ${span})`,
   },
   price: {
     missing: (vendor: string, id: string, code: string) => `▸ ${vendor} (${id}) has no ${code} prices`,
@@ -296,6 +299,14 @@ export const en: Messages = {
     configProjectPath: (p: { value: string }) => `expected a non-empty path string, got ${p.value}`,
     configIgnored: (p: { path: string; reason: string }) => `ignoring user config ${p.path}: ${p.reason}`,
     cachedPricesUnusable: (p: { reason: string }) => `the cached price list is unusable; falling back to the shipped one: ${p.reason}`,
+    cachedHolidaysUnusable: (p: { reason: string }) =>
+      `the cached holiday calendar is unusable; falling back to the shipped one: ${p.reason}`,
+    configHolidayDate: (p: { value: string }) => `expected YYYY-MM-DD naming a real date, got ${p.value}`,
+    configHolidaysEmpty: 'a holiday calendar needs at least one date',
+    configUnknownCalendar: (p: { known: string; value: string }) =>
+      `unknown holiday calendar ${p.value} (known: ${p.known})`,
+    holidaysNotCovering: (p: { to: string; name: string }) =>
+      `the holiday calendar stops at ${p.to}: later dates are judged by weekday alone, so ${p.name} holidays would be billed at the peak rate (update config/holidays.json)`,
     cachedRatesUnusable: (p: { reason: string }) => `the cached rate table is unusable; falling back to the shipped one: ${p.reason}`,
     mergeFailed: (p: { reason: string }) => `merging the user's prices with the shipped table failed; using the shipped table: ${p.reason}`,
     storeNotJson: (p: { reason: string }) => `not valid JSON: ${p.reason}`,
@@ -315,7 +326,10 @@ export const en: Messages = {
       `the price list was checked ${p.ago} (${p.every})`,
     updateRatesChecked: (p: { ago: string; every: string }) => `the rates were checked ${p.ago} (${p.every})`,
     updatePricesUnchanged: 'the price list has not changed',
-    updatePricesUpdated: (p: { date: string }) => `price list updated (file dated ${p.date})`,
+    updatePricesUpdated: (p: { date: string; calendar: string }) => `price list updated (file dated ${p.date}${p.calendar})`,
+    calendarUpdated: (p: { to: string }) => `, holidays covered to ${p.to}`,
+    calendarUnchanged: () => '',
+    calendarUnusable: (p: { reason: string }) => `, holiday calendar not updated (${p.reason})`,
     updatePricesOffline: 'could not fetch the price list (offline or timed out); keeping what we have',
     updatePricesHttp: (p: { status: string }) => `could not fetch the price list: HTTP ${p.status}`,
     updatePricesUnusable: (p: { reason: string }) => `the fetched price list is unusable and was ignored: ${p.reason}`,

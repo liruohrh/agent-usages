@@ -1079,13 +1079,18 @@ describe('configuration commands', () => {
     expect(code).toBe(0);
     expect(stdout).toContain('config/pricing.json  通过');
     expect(stdout).toContain('config/rates.json  通过');
+    expect(stdout).toContain('config/holidays.json  通过');
   });
 
   it('checks it as JSON too', async () => {
     const parsed = JSON.parse((await cli(['check-config', '--json'])).stdout) as {
       results: { file: string; ok: boolean }[];
     };
-    expect(parsed.results.map((result) => result.file)).toEqual(['config/pricing.json', 'config/rates.json']);
+    expect(parsed.results.map((result) => result.file)).toEqual([
+      'config/pricing.json',
+      'config/rates.json',
+      'config/holidays.json',
+    ]);
     expect(parsed.results.every((result) => result.ok)).toBe(true);
   });
 

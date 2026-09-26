@@ -10,6 +10,7 @@
 
 import { UserError, renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import type { Language } from '../i18n/index.ts';
+import { readHolidays, type HolidayCalendar } from './holidays.ts';
 import type { ProjectGroup } from '../core/merge.ts';
 import type { PricingProvider } from '../pricing/contract.ts';
 import type { RateTable } from '../pricing/currency.ts';
@@ -40,6 +41,8 @@ export interface ResolvedConfig {
   updates: UpdateSettings;
   /** Anything worth showing about how the configuration was put together. */
   warnings: Warning[];
+  /** The holiday calendar, when one could be read. */
+  holidays: HolidayCalendar | undefined;
 }
 
 /** What the caller knows about the run. */
@@ -95,6 +98,7 @@ function ratesConfig(env: NodeJS.ProcessEnv, warnings: Warning[]): RatesConfig {
  */
 export async function resolveConfig(options: ResolveOptions = {}): Promise<ResolvedConfig> {
   const env = options.env ?? process.env;
+  const now = options.now ?? new Date();
   const warnings: Warning[] = [];
   const user = readUserConfig(env);
   warnings.push(...user.warnings);
@@ -124,8 +128,31 @@ export async function resolveConfig(options: ResolveOptions = {}): Promise<Resol
   }
 
   const rates = ratesConfig(env, warnings);
+  const holidays = readHolidays(env, warnings);
+  // A period that prices holidays needs a calendar that still covers the days it
+  // is applied to. Falling back to the weekday rule is the only safe behaviour,
+  // but it must be *said*: the alternative is a holiday silently billed at the
+  // peak rate, which is money the user did not spend.
+  if (holidays !== undefined) {
+    for (const provider of providers) {
+      for (const model of provider.models) {
+        for (const period of model.periods) {
+          if (period.holidayCalendar === undefined) continue;
+          // A day of slack: this is a "go update the file" reminder, not a billing
+          // decision, and the calendar's own zone is the vendor's, not UTC's.
+          const covered = Date.parse(`${holidays.to}T00:00:00Z`) + 86_400_000;
+          if ((period.to ?? now.getTime()) <= covered) continue;
+          warnings.push(
+            new UserError('holidaysNotCovering', { to: holidays.to, name: provider.label }),
+          );
+          break;
+        }
+      }
+    }
+  }
   return {
     providers: providers.map(providerFromConfig),
+    holidays,
     rateTable: {
       base: rates.base,
       rates: rates.table,

@@ -148,6 +148,7 @@ src/
 ├── core/                  中立模型与基础设施（不认识任何 agent / 厂商）
 │   ├── types.ts           UsageRecord / SessionRecord / ProjectRecord / UsageDataset / CostTotals
 │   ├── money.ts           十进制精确算术
+│   ├── holidays.ts        节假日表：随包 + 缓存 + 校验，供按工作日历定价的区间使用
 │   ├── git.ts             项目目录 → git 仓库（主工作区 / worktree / 子模块），只读 `.git`，不调用 git
 │   ├── paths.ts           工作区路径身份：realpath + 规范化比较键（适配器与合并层共用）
 │   ├── merge.ts           多 agent 数据集 → 一份：按工作区/仓库/配置归项目、按 agent+id 认会话
