@@ -35,6 +35,7 @@ export function Filters({
   dark,
   onToggleTheme,
   onToggleSidebar,
+  onOpenSettings,
 }: {
   dashboard: Dashboard | null;
   language: Language;
@@ -46,6 +47,7 @@ export function Filters({
   dark: boolean;
   onToggleTheme: () => void;
   onToggleSidebar: () => void;
+  onOpenSettings: () => void;
 }): React.ReactElement {
   const t = useT();
   const [agentMenu, setAgentMenu] = useState(false);
@@ -186,6 +188,15 @@ export function Filters({
           title={t.filters.rescanHint}
         >
           {refreshing ? t.filters.rescanning : t.filters.rescan}
+        </button>
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:text-fg"
+          title={t.settings.openHint}
+          aria-label={t.settings.open}
+        >
+          ⚙
         </button>
         <button
           type="button"

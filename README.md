@@ -138,7 +138,12 @@ agent-usages serve --dev           # 前端走 Vite 开发服务器，热更新
 agent-usages serve --snapshot web/mock/dashboard.snapshot.json   # 离线快照，不读任何 agent 数据
 ```
 
-前端要先构建一次：`pnpm --filter web build`（产物 `web/dist`，未构建时首页会直接告诉你）。装法、API、数据契约与快照格式见 [本地 Web 分析平台](docs/web.md)。
+前端要先构建一次：`pnpm --filter web build`（产物 `web/dist`，未构建时首页会直接告诉你）。
+
+右上角 `⚙` 是**配置页**（`/settings`）：项目的名字与路径（"哪些目录算一个项目"）、语言、币种、
+汇率与自动更新都能就地改，保存后重扫生效；它写的就是 `~/.config/agent-usages/config.json`
+（页面原文，`~` 与页面不管的键都原样保留）。价格覆盖只在页面里只读展示，改价格仍走编辑器 +
+`check-config`。装法、API、数据契约与快照格式见 [本地 Web 分析平台](docs/web.md)，配置字段见 [配置与更新](docs/config.md)。
 
 ---
 

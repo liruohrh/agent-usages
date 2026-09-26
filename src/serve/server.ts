@@ -31,13 +31,21 @@ import { dirname, join, resolve } from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
-import { localizeDashboard, openStore, type DashboardQuery, type DashboardStore } from './data.ts';
+import { flattenWarning, localizeDashboard, openStore, type DashboardQuery, type DashboardStore } from './data.ts';
 import { LANGUAGES, language, messagesFor, parseLanguage, setLanguage, t, type Language } from '../i18n/index.ts';
 import { renderDiagnostic } from '../i18n/errors.ts';
-import { readUserConfig, updateUserConfig } from '../config/user.ts';
+import {
+  readUserConfig,
+  readUserConfigDocument,
+  updateUserConfig,
+  validateUserPatch,
+  type UserConfigPatch,
+} from '../config/user.ts';
+import { ConfigError } from '../config/pricing.ts';
 import { userConfigPath } from '../config/paths.ts';
 import { UserError } from '../i18n/errors.ts';
 import type {
+  ConfigPayload,
   SettingsPayload,
   Dashboard,
   DashboardMeta,
@@ -346,6 +354,112 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
 
   app.get('/api/settings', route((request, response) => {
     json(response, withRequestLanguage(request, settings));
+  }));
+
+  /** The configuration file, the way the settings page edits it. */
+  const configPayload = (): ConfigPayload => {
+    const { path, exists, document } = readUserConfigDocument();
+    const loaded = readUserConfig();
+    return {
+      path,
+      exists,
+      document,
+      config: {
+        language: loaded.config.language ?? null,
+        currency: loaded.config.currency ?? null,
+        rateMode: loaded.config.rateMode ?? null,
+        rateSource: loaded.config.rateSource ?? null,
+        updates: loaded.config.updates,
+        projects: loaded.config.projects.map((group) => ({ name: group.name, paths: [...group.paths] })),
+        pricingProviders: loaded.config.pricing.map((provider) => provider.id),
+      },
+      warnings: loaded.warnings.map((item) => flattenWarning(item)),
+    };
+  };
+
+  app.get('/api/config', route((request, response) => {
+    json(response, withRequestLanguage(request, configPayload));
+  }));
+
+  /**
+   * Write the settings the page manages, then rescan.
+   *
+   * Project declarations are applied by the merge layer during a scan, and the
+   * currency and rate settings are baked into the pricing engine, so the answer
+   * to a write is a *new scan*: it re-reads the configuration, rebuilds the
+   * engine and re-groups the sessions. The scan takes a couple of seconds on a
+   * real machine, which is why the page says so on the button.
+   */
+  app.put('/api/config', route((request, response) => {
+    const origin = request.get('origin');
+    if (origin !== undefined && origin.length > 0 && !sameOrigin(request, origin)) {
+      withRequestLanguage(request, () =>
+        json(response, { error: { code: 'settingsForeignOrigin', message: t().errors.settingsForeignOrigin({ origin }) } }, 403),
+      );
+      return;
+    }
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    // Only the keys the settings page manages: anything else in the body is a
+    // caller that misunderstood the endpoint, and guessing would be worse than
+    // saying so.
+    const allowed = ['projects', 'currency', 'rateMode', 'rateSource', 'updates'] as const;
+    const unknown = Object.keys(body).filter((key) => !(allowed as readonly string[]).includes(key));
+    if (unknown.length > 0) {
+      json(
+        response,
+        {
+          error: {
+            code: 'settingsUnknownKey',
+            message: t().errors.settingsUnknownKey({ allowed: allowed.join(', '), key: unknown.join(', ') }),
+          },
+        },
+        400,
+      );
+      return;
+    }
+    const patch = body as UserConfigPatch;
+    try {
+      withRequestLanguage(request, () => validateUserPatch(patch));
+    } catch (error) {
+      const detail = error instanceof ConfigError ? error : undefined;
+      json(
+        response,
+        {
+          error: {
+            code: detail?.code ?? 'settingsWriteFailed',
+            message: error instanceof Error ? error.message : String(error),
+            ...(detail === undefined ? {} : { field: detail.path }),
+          },
+        },
+        400,
+      );
+      return;
+    }
+    try {
+      updateUserConfig(patch as Record<string, unknown>);
+    } catch (error) {
+      withRequestLanguage(request, () =>
+        json(
+          response,
+          {
+            error: {
+              code: 'settingsWriteFailed',
+              message: error instanceof Error ? error.message : String(error),
+            },
+          },
+          500,
+        ),
+      );
+      return;
+    }
+    void store
+      .refresh()
+      .then((report: RefreshReport) => {
+        withRequestLanguage(request, () => json(response, { ...configPayload(), refresh: report }));
+      })
+      .catch((error: unknown) => {
+        json(response, { error: { code: 'refreshFailed', message: (error as Error).message } }, 500);
+      });
   }));
 
   app.put('/api/settings', route((request, response) => {

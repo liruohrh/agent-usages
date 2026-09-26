@@ -14,7 +14,8 @@ import { describe, expect, it } from 'vitest';
 
 import { parsePricingConfig, providerFromConfig, shippedProviders } from '../../src/config/pricing.ts';
 import { readFileSync } from 'node:fs';
-import { mergePeriods, mergeProviders, readUserConfig, updateUserConfig } from '../../src/config/user.ts';
+import { mergePeriods, mergeProviders, readUserConfig, updateUserConfig, validateUserPatch } from '../../src/config/user.ts';
+import { userConfigPath as userConfigPathOf } from '../../src/config/paths.ts';
 import type { BillingBasis, PricePeriod, RateComponent } from '../../src/pricing/contract.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { record } from '../support/dataset.ts';
@@ -312,5 +313,48 @@ describe('updateUserConfig', () => {
   it('refuses a file whose root is not an object', () => {
     const env = withConfig([1, 2, 3]);
     expect(() => updateUserConfig({ language: 'en' }, env)).toThrow(/not a JSON object/);
+  });
+});
+
+describe('validateUserPatch', () => {
+  const env = { ...process.env, HOME: '/home/tester' };
+
+  it('accepts what the file readers accept', () => {
+    expect(() =>
+      validateUserPatch(
+        {
+          currency: 'cny',
+          rateMode: 'historical',
+          rateSource: 'ecb',
+          updates: { rates: true },
+          projects: [{ name: 'demo', paths: ['~/ws/demo', '/abs/other'] }],
+        },
+        env,
+      ),
+    ).not.toThrow();
+  });
+
+  it('names the field it rejected, the way the file reader would', () => {
+    // The types stop a caller at compile time; these cast past them, because a
+    // JSON body arrives as `unknown` whatever the types say.
+    const loose = (patch: Record<string, unknown>): (() => void) => () => validateUserPatch(patch, env);
+    expect(loose({ currency: 'yuan' })).toThrow(/currency: /);
+    expect(loose({ rateMode: 'sometimes' })).toThrow(/rateMode: /);
+    expect(loose({ updates: { pricing: 'yes' } })).toThrow(/updates\.pricing: /);
+    expect(loose({ projects: [{ name: 'demo', paths: [] }] })).toThrow(/projects\[0\]\.paths: /);
+  });
+
+  it('reads a null as "remove the key"', () => {
+    const env2 = withConfig({ currency: 'USD', rateSource: 'ecb', language: 'zh' });
+    expect(() => validateUserPatch({ currency: null, rateSource: null }, env2)).not.toThrow();
+    updateUserConfig({ currency: null, rateSource: null }, env2);
+    const after = JSON.parse(readFileSync(userConfigPathOf(env2), 'utf8')) as Record<string, unknown>;
+    expect(after).toEqual({ language: 'zh' });
+  });
+
+  it('checks only the keys it was given', () => {
+    // A file whose `projects` is broken must still accept a language change: the
+    // readers are per key, exactly as they are for the file.
+    expect(() => validateUserPatch({ language: 'en' }, env)).not.toThrow();
   });
 });

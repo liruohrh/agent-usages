@@ -189,6 +189,7 @@ web/                       # 前端 workspace 包（package.json name = "web"）
       SessionDetail.tsx    #   会话页：四张数字卡 + 构成 + 三段指标 + 委派树
       Tables.tsx           #   按 agent / 会话 / 模型 / 计价区间 / token 五桶五张表
       Bits.tsx             #   徽标、卡片、统计块、提示条、树行里的费用+`T`/`Q`
+      Settings.tsx         #   配置页：项目分组、常规开关、价格覆盖（只读）与文件原文
   scripts/smoke.mjs        # 冒烟测试（起服务 → 打接口 → 断言 → 关闭）
   scripts/e2e-server.mjs   # 给 Playwright 起的服务（优先离线快照，没有就实时扫）
   e2e/dashboard.spec.ts    # 浏览器里的端到端测试：切项目/切会话/布局与溢出
@@ -245,7 +246,9 @@ CLI 的 `bin` / `files` / `version` 未改动。
 | `GET /api/dashboard` | 上面所有内容的合集（前端一次请求拿全，快照文件就是它的形状） |
 | `POST /api/refresh` | 重扫所有 agent；成功 `{ok:true,ms,agents[],warnings[]}`，快照模式 409 |
 | `GET /api/settings` | `{language, configured, path, languages[]}`：当前语言、配置文件里写的语言（没有则 `null`）、写入路径 |
-| `PUT /api/settings` | **本服务唯一的写操作**：`{"language":"zh"\|"en"}` 合并进配置文件（保留其它键），返回同上；未知语言 400，`Origin` 不是本机 403 |
+| `PUT /api/settings` | 写语言：`{"language":"zh"\|"en"}` 合并进配置文件（保留其它键），返回同上；未知语言 400，`Origin` 不是本机 403 |
+| `GET /api/config` | `{path, exists, document, config, warnings[]}`：配置文件原文（页面编辑的就是它）、解析后的值、读取时的告警 |
+| `PUT /api/config` | 写 `projects` / `currency` / `rateMode` / `rateSource` / `updates`（其余键 400），**然后重扫**并把刷新结果一并返回；校验失败 400 + `{code, message, field}` |
 | 其它 `/api/*` | JSON 404（不会回退到前端 HTML） |
 | 其它路径（GET） | `web/dist` 静态文件；找不到则回退 `index.html`（SPA 路由） |
 
@@ -370,7 +373,27 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 
 ---
 
-## 7. 已知限制
+## 7. 配置页（`/settings`）
+
+顶栏 `⚙` 打开独立路由 `/settings`（链接可分享）。它编辑的是**配置文件本身**，所以规则和
+别的页面不同：写盘、并且写完要重扫。
+
+| 区块 | 内容 |
+| --- | --- |
+| 项目分组 | 改名字、逐条增删路径、新建/删除分组；"加一个扫到的路径"从本次扫描的工作区里选，也能手输（支持 `~`）。选父目录会把它下面的工作区一起并进来 |
+| 常规 | 语言（与顶栏那个开关同一个值）、币种、汇率模式、汇率来源、自动更新开关 |
+| 价格覆盖（只读） | 文件里写了哪些 provider 的覆盖 + 文件原文；改价格仍走编辑器 + `check-config` |
+| 当前扫到的项目与工作区 | 本次扫描的结果，用来对照声明 |
+
+- **保存并重扫**：项目声明由合并层应用、币种/汇率设置进计价引擎，所以写入之后必须重扫才算数
+  （快照模式不重扫，页面会明说）；扫描每次都会重读配置，因此**手改文件后点顶栏「重新扫描」也生效**。
+- 页面只提交**与文件不同的键**，写回时保留 `~/` 写法与页面不管的键；清空某个输入框 = 删掉那个键
+  （交回默认），不是写一个空值。
+- 校验用文件读取器的那一套，错误带字段位置（`projects[0].paths: …`），直接显示在页面上。
+
+---
+
+## 8. 已知限制
 
 - **会话列表只列"有消耗的"会话**：`range` 内没有计费的会话不在树里，但它仍计入
   `sessions`（总数）；点开一个没消耗的会话仍能看到它的委派树（零金额）。
@@ -381,6 +404,8 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 - **`--provider` / `--json` 不是 `serve` 的选项**：仪表盘的计价来源按 agent 自动选，
   输出永远是网页 + JSON API。写在 `serve` 后面 commander 会报未知选项，写在前面则被明确
   拒绝（`serveOptionUnsupported`）——两者都不静默忽略。
+- **配置页只在实时模式立刻生效**：`--snapshot` 是一份冻结的数据，写配置可以（文件是真的），
+  但"保存并重扫"只写不扫——页面会提示改用实时模式或重新生成快照。
 - **`?lang=` 只改散文**：告警与时间范围标签会跟着请求语言换，其它由数据层生成的文案
   （计价区间的期间标签、快照里的窗口）是构建/录制时写下的，切语言不会重写。
 - **币种固定是计价来源的币种**（当前 CNY），既不跟随语言、也不做 `--currency` 换算：
@@ -392,15 +417,15 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 
 ---
 
-## 8. 验证：构建、冒烟、截图
+## 9. 验证：构建、冒烟、截图
 
 ```sh
 pnpm install                                        # 2 个 workspace 包
 pnpm --filter web build                             # tsc --noEmit && vite build
 pnpm web:snapshot                                   # 生成离线 fixture（不入库，先跑一次）
-pnpm web:smoke                                      # 离线快照，53 项断言（含 /api/settings 与 ?lang=）
+pnpm web:smoke                                      # 离线快照，56 项断言（含 /api/settings、/api/config 与 ?lang=）
 node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 95 项
-pnpm web:e2e                                        # 真浏览器：28 条，起服务 + 切标签/项目/会话 + 排序 + 口径与布局 + 缩写口径 + 中英切换
+pnpm web:e2e                                        # 真浏览器：30 条，起服务 + 切标签/项目/会话 + 排序 + 口径与布局 + 缩写口径 + 中英切换 + 配置页
 CI=true pnpm typecheck                              # 根 tsconfig 覆盖 src/serve/**
 CI=true pnpm test                                   # 488 个用例
 ```
@@ -430,7 +455,7 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 
 ---
 
-## 9. 为什么是这些选择
+## 10. 为什么是这些选择
 
 | 选择 | 理由 |
 | --- | --- |
@@ -448,7 +473,7 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 
 ---
 
-## 10. 相关文件
+## 11. 相关文件
 
 | 文件 | 内容 |
 | --- | --- |

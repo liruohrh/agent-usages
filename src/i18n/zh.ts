@@ -434,6 +434,8 @@ export const zh = {
     settingsWriteFailed: (p: { path: string; reason: string }) => `写不进配置文件 ${p.path}：${p.reason}`,
     settingsForeignOrigin: (p: { origin: string }) =>
       `只接受本页面发来的设置请求（Origin 是 ${p.origin}）`,
+    settingsUnknownKey: (p: { allowed: string; key: string }) =>
+      `这个接口只写 ${p.allowed}，收到 ${p.key}`,
     /* ---- billed components ---- */
     basisInput: '缓存未命中输入',
     basisOutput: '输出',

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { formatDecimal, parseDecimal, sumAmounts } from '../src/core/money.ts';
@@ -961,6 +961,76 @@ describe('serve', () => {
         // Which means the CLI itself speaks English on its next run.
         const help = await cli(['--help'], env);
         expect(help.stdout).toContain('Token usage and cost for coding agents');
+      } finally {
+        await stop(child);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'edits the project declarations from the page, and rescans to apply them',
+    async () => {
+      // A live scan against the fixture: project declarations are applied by the
+      // merge layer, so the only honest test is one that rescans.
+      const configHome = mkdtempSync(join(tmpdir(), 'agent-usages-serve-config-'));
+      const child = startServe(['--port', '0', '--agent', 'dsh', '--home', join(home, '.dsh'), '--no-update'], {
+        XDG_CONFIG_HOME: configHome,
+      });
+      try {
+        const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
+        const before = (await (await fetch(`${url}/api/dashboard`)).json()) as {
+          projects: { name: string; workspaces: string[]; sessions: number }[];
+        };
+        expect(before.projects.length).toBeGreaterThan(0);
+        const first = before.projects[0]!;
+        const path = first.workspaces[0]!;
+
+        const config = (await (await fetch(`${url}/api/config`)).json()) as {
+          path: string;
+          exists: boolean;
+          document: Record<string, unknown>;
+        };
+        expect(config.exists).toBe(false);
+        expect(config.path).toBe(join(configHome, 'agent-usages', 'config.json'));
+
+        // A declaration that does not pass the readers never reaches the file.
+        const invalid = await fetch(`${url}/api/config`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ projects: [{ name: '', paths: [] }] }),
+        });
+        expect(invalid.status).toBe(400);
+        const failure = (await invalid.json()) as { error: { code: string; field: string } };
+        expect(failure.error.code).toBe('configProjectName');
+        expect(failure.error.field).toBe('projects[0].name');
+        expect(existsSync(join(configHome, 'agent-usages', 'config.json'))).toBe(false);
+
+        const saved = await fetch(`${url}/api/config`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ projects: [{ name: 'renamed-project', paths: [path] }] }),
+        });
+        expect(saved.status).toBe(200);
+        const answer = (await saved.json()) as { refresh: { ok: boolean }; config: { projects: unknown[] } };
+        expect(answer.refresh.ok).toBe(true);
+        expect(answer.config.projects).toEqual([{ name: 'renamed-project', paths: [path] }]);
+
+        // The declaration is in the file…
+        const written = JSON.parse(await readFile(join(configHome, 'agent-usages', 'config.json'), 'utf8')) as {
+          projects: unknown[];
+        };
+        expect(written.projects).toEqual([{ name: 'renamed-project', paths: [path] }]);
+
+        // …and the next dashboard is grouped by it.
+        const after = (await (await fetch(`${url}/api/dashboard`)).json()) as {
+          projects: { name: string; workspaces: string[]; sessions: number }[];
+        };
+        const renamed = after.projects.find((project) => project.name === 'renamed-project');
+        expect(renamed, `renamed project in ${after.projects.map((p) => p.name).join(', ')}`).toBeDefined();
+        expect(renamed?.workspaces).toContain(path);
+        expect(renamed?.sessions).toBe(first.sessions);
+        expect(after.projects.some((project) => project.name === first.name)).toBe(false);
       } finally {
         await stop(child);
       }

@@ -437,6 +437,36 @@ export interface SettingsPayload {
   languages: Language[];
 }
 
+/**
+ * A `GET /api/config` answer: the file, what it means, and what is wrong with it.
+ *
+ * `document` is the file as written — the page edits *that*, so a path spelled
+ * `~/ws/app` stays spelled that way and the keys the page does not manage (the
+ * price overrides) survive untouched. `config` is the same file after the
+ * readers, for showing what the tool actually took from it.
+ */
+export interface ConfigPayload {
+  /** The file the page reads and writes. */
+  path: string;
+  /** Whether the file exists yet. */
+  exists: boolean;
+  /** The file's own JSON, or `{}` when there is no file. */
+  document: Record<string, unknown>;
+  /** The parsed configuration, for display. */
+  config: {
+    language: Language | null;
+    currency: string | null;
+    rateMode: string | null;
+    rateSource: string | null;
+    updates: { pricing: boolean; rates: boolean };
+    projects: { name: string; paths: string[] }[];
+    /** How many price overrides the file carries, per provider id. */
+    pricingProviders: string[];
+  };
+  /** Problems found while reading it (a broken file is ignored, not fatal). */
+  warnings: DashboardWarning[];
+}
+
 /** A `GET /api/sessions/:id` answer: one session and everything under it. */
 export interface SessionDetail {
   /** The session itself, with its own/spawned/total split. */

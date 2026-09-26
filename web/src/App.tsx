@@ -32,6 +32,7 @@ import { ScopeView } from './components/ScopeView';
 import { SessionDetailPanel } from './components/SessionDetail';
 import type { SeriesMetric } from './charts';
 import { Notice } from './components/Bits';
+import { Settings } from './components/Settings';
 
 /** Decode a route parameter, leaving it alone when it is not percent-encoded. */
 function decodeParam(value: string | undefined): string | null {
@@ -96,6 +97,8 @@ function Dashboard({
   // a screenshot of it): the class on <html> is the only switch.
   const [dark, setDark] = useState(() => new URLSearchParams(window.location.search).get('theme') !== 'light');
   const [sidebar, setSidebar] = useState(false);
+  /** Bumped after a settings write, so the numbers behind the page are re-read. */
+  const [configTick, setConfigTick] = useState(0);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [points, setPoints] = useState<TimeseriesBucket[]>([]);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -135,7 +138,7 @@ function Dashboard({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [apiFilters, bucket, tick]);
+  }, [apiFilters, bucket, tick, configTick]);
 
   // The session panel follows the route.
   useEffect(() => {
@@ -156,7 +159,7 @@ function Dashboard({
         setDetailError((cause as Error).message);
       });
     return () => controller.abort();
-  }, [selectedUid, apiFilters, tick]);
+  }, [selectedUid, apiFilters, tick, configTick]);
 
   // The theme is one class on <html>, which is where index.css switches colours.
   useEffect(() => {
@@ -189,6 +192,7 @@ function Dashboard({
         dark={dark}
         onToggleTheme={() => setDark((value) => !value)}
         onToggleSidebar={() => setSidebar((open) => !open)}
+        onOpenSettings={() => navigate('/settings')}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -268,6 +272,16 @@ function Dashboard({
                     loading={loading}
                   />
                 )
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <Settings
+                  dashboard={dashboard}
+                  onLanguage={onLanguage}
+                  onSaved={() => setConfigTick((value) => value + 1)}
+                />
               }
             />
             <Route

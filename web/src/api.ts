@@ -7,6 +7,9 @@
  */
 
 import type {
+  ConfigPatch,
+  ConfigPayload,
+  ConfigSaved,
   Dashboard,
   Language,
   RangeKey,
@@ -109,6 +112,28 @@ export function fetchSession(uid: string, filters: Filters, signal?: AbortSignal
 /** Rescan the agents on the server. */
 export function refresh(): Promise<RefreshReport> {
   return request<RefreshReport>('/api/refresh', { method: 'POST' });
+}
+
+/** The tool's own configuration file, as the settings page edits it. */
+export function fetchConfig(signal?: AbortSignal): Promise<ConfigPayload> {
+  return request<ConfigPayload>('/api/config', { signal });
+}
+
+/**
+ * Write the settings the page manages, and rescan.
+ *
+ * The answer arrives after the server has re-read the configuration and scanned
+ * again (a couple of seconds), because that is what makes a project declaration
+ * actually show up in the dashboard.
+ * @param patch - the keys to write; anything else in the file is preserved.
+ * @returns the file after the write, plus the rescan report.
+ */
+export function saveConfig(patch: ConfigPatch): Promise<ConfigSaved> {
+  return request<ConfigSaved>('/api/config', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
 }
 
 /** The language the server would speak: the configuration file, then the locale. */

@@ -369,6 +369,8 @@ export const en: Messages = {
       `language must be one of ${p.known}, got ${p.value}`,
     settingsWriteFailed: (p: { path: string; reason: string }) => `cannot write ${p.path}: ${p.reason}`,
     settingsForeignOrigin: (p: { origin: string }) => `settings may only be changed from this page (Origin is ${p.origin})`,
+    settingsUnknownKey: (p: { allowed: string; key: string }) =>
+      `this endpoint writes ${p.allowed} only, got ${p.key}`,
     basisInput: 'cache-miss input',
     basisOutput: 'output',
     basisCacheRead: 'cache-hit input',

@@ -60,7 +60,14 @@ import { mergeDatasets } from '../core/merge.ts';
 import type { CostTotals, TokenBuckets, UsageDataset, UsageRecord } from '../core/types.ts';
 import { renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import { language, t } from '../i18n/index.ts';
-import { createPricingEngine, currencyOf, providerCurrencies, resolvePricingProvider, type PricingEngine } from '../pricing/index.ts';
+import {
+  createPricingEngine,
+  currencyOf,
+  providerCurrencies,
+  resolvePricingProvider,
+  type PricingEngine,
+} from '../pricing/index.ts';
+import type { PricingProvider } from '../pricing/contract.ts';
 import {
   runQuery,
   type AgentTotals as ReportAgentTotals,
@@ -567,7 +574,7 @@ function baseNameOf(path: string): string {
 // ---------------------------------------------------------------------------
 
 /** Flatten a diagnostic into the JSON shape. */
-function flattenWarning(item: Warning): DashboardWarning {
+export function flattenWarning(item: Warning): DashboardWarning {
   const params = (item as { params?: unknown }).params;
   return {
     code: String((item as { code?: unknown }).code ?? 'warning'),
@@ -695,20 +702,48 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
   const env = options.env ?? process.env;
   const now = options.now ?? new Date();
   const adapters = selectAdapters(options.agent);
-  const config = await resolveConfig({ noUpdate: options.noUpdate ?? true, env, now });
-  const provider = resolvePricingProvider(undefined, adapters[0]?.id, config.providers);
-  const engine = createPricingEngine(provider);
-  const currency = providerCurrencies(provider)[0] ?? 'USD';
-  const symbol = currencyOf(currency).symbol;
-  const context = { engine, pricingProvider: provider.id };
-  const rate: RateInfo = {
-    base: currency,
-    display: currency,
-    rate: '1',
-    mode: 'latest',
-    reason: 'fallback-base',
-    source: provider.id,
-    date: '',
+
+  /** Read the configuration, and build everything that depends on it. */
+  const resolveRuntime = async (): Promise<{
+    config: Awaited<ReturnType<typeof resolveConfig>>;
+    provider: PricingProvider;
+    engine: PricingEngine;
+    currency: string;
+    symbol: string;
+    context: { engine: PricingEngine; pricingProvider: string };
+    rate: RateInfo;
+  }> => {
+    const config = await resolveConfig({ noUpdate: options.noUpdate ?? true, env, now });
+    const provider = resolvePricingProvider(undefined, adapters[0]?.id, config.providers);
+    const engine = createPricingEngine(provider);
+    const currency = providerCurrencies(provider)[0] ?? 'USD';
+    const symbol = currencyOf(currency).symbol;
+    const context = { engine, pricingProvider: provider.id };
+    const rate: RateInfo = {
+      base: currency,
+      display: currency,
+      rate: '1',
+      mode: 'latest',
+      reason: 'fallback-base',
+      source: provider.id,
+      date: '',
+    };
+    return { config, provider, engine, currency, symbol, context, rate };
+  };
+
+  let { config, provider, engine, currency, symbol, context, rate } = await resolveRuntime();
+
+  /**
+   * Read the configuration again.
+   *
+   * The file changes while the server runs: the settings page writes it, and so
+   * can the person who owns it. Every scan starts here, so `POST /api/refresh` is
+   * also "pick up my edits" — currency, rate mode, rate source, price overrides
+   * and project declarations all take effect on the next scan.
+   */
+  const reloadConfig = async (): Promise<void> => {
+    ({ config, provider, engine, currency, symbol, context, rate } = await resolveRuntime());
+    cache.clear();
   };
   const queryOf = (range: TimeRange) => ({
     dimension: 'session' as const,
@@ -742,6 +777,7 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
   /** Read every selected adapter, degrading to a warning per failure. */
   const read = async (): Promise<void> => {
     const started = Date.now();
+    await reloadConfig();
     const loaded: UsageDataset[] = [];
     const sources: { id: string; label: string; source: string }[] = [];
     const warnings: DashboardWarning[] = [...config.warnings.map(flattenWarning)];

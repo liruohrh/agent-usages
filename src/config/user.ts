@@ -140,6 +140,57 @@ function projectGroups(value: unknown, env: NodeJS.ProcessEnv): ProjectGroup[] {
 }
 
 /**
+ * What a patch is allowed to say.
+ *
+ * Only the keys a caller may write, and only the values this build understands.
+ * The per-key readers above are the same ones the file goes through, so a patch
+ * and a hand-edited file can never disagree about what is valid — and a patch is
+ * validated *per key*, never as a whole document: a file with a broken `projects`
+ * entry must still accept a language change.
+ */
+export interface UserConfigPatch {
+  /** The language to speak. */
+  language?: Language;
+  /** Display currency, three letters. `null` removes the key. */
+  currency?: string | null;
+  /** One rate for the whole report, or each record's own day's rate. */
+  rateMode?: RateMode;
+  /** Preferred rate source id. `null` removes the key. */
+  rateSource?: string | null;
+  /** Which resources may refresh themselves. */
+  updates?: Partial<UpdateSettings>;
+  /** Project declarations: which directories are one project. */
+  projects?: unknown;
+}
+
+/** A `null` says "take this key out of the file", not "set it to null". */
+function isRemoval(value: unknown): boolean {
+  return value === null;
+}
+
+/**
+ * Check a patch without writing it.
+ *
+ * Each key goes through its own reader, so the error a caller sees is the same
+ * sentence the file reader would have produced for that key.
+ * @param patch - the keys to set.
+ * @param env - environment for `~` expansion in paths.
+ * @throws {ConfigError} when a key is present but wrong.
+ */
+export function validateUserPatch(patch: UserConfigPatch, env: NodeJS.ProcessEnv = process.env): void {
+  if (patch.language !== undefined) languageSetting(patch.language, 'language');
+  if (patch.currency !== undefined && !isRemoval(patch.currency)) currencySetting(patch.currency);
+  if (patch.rateMode !== undefined) rateMode(patch.rateMode, 'rateMode');
+  if (patch.rateSource !== undefined && !isRemoval(patch.rateSource)) rateSourceSetting(patch.rateSource);
+  if (patch.projects !== undefined) projectGroups(patch.projects, env);
+  if (patch.updates !== undefined) {
+    const updates = (patch.updates ?? {}) as Record<string, unknown>;
+    setting(updates['pricing'], 'updates.pricing', DEFAULT_UPDATES.pricing);
+    setting(updates['rates'], 'updates.rates', DEFAULT_UPDATES.rates);
+  }
+}
+
+/**
  * Write one or more settings back into the user's configuration file.
  *
  * The page's language switch is the same setting the CLI reads, so it has to land
@@ -163,8 +214,16 @@ export function updateUserConfig(patch: Record<string, unknown>, env: NodeJS.Pro
   if (base === undefined) {
     throw new UserError('settingsWriteFailed', { path, reason: 'not a JSON object' });
   }
+  // A `null` means "remove the key": that is how the page clears a setting it can
+  // no longer express, and deleting it is what puts the tool back on its own
+  // default for that key.
+  const next: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) delete next[key];
+    else next[key] = value;
+  }
   try {
-    writeJson(path, { ...base, ...patch });
+    writeJson(path, next);
   } catch (error) {
     throw new UserError('settingsWriteFailed', { path, reason: (error as Error).message });
   }
@@ -176,6 +235,39 @@ function languageSetting(value: unknown, path: string): Language | undefined {
   if (value === undefined) return undefined;
   if (typeof value === 'string' && (LANGUAGES as readonly string[]).includes(value)) return value as Language;
   throw new ConfigError(path, 'configUnknownLanguage', { known: LANGUAGES.join(' / '), value: JSON.stringify(value) });
+}
+
+/**
+ * The configuration file's own JSON, as the page edits it.
+ *
+ * Deliberately unparsed: the settings page shows and writes the *document*, so a
+ * path written as `~/ws/app` goes back as `~/ws/app`, and whatever the page does
+ * not manage is never touched.
+ * @param env - environment to resolve the path from.
+ * @returns the path, whether it exists, and its content (or `{}`).
+ */
+export function readUserConfigDocument(env: NodeJS.ProcessEnv = process.env): {
+  path: string;
+  exists: boolean;
+  document: Record<string, unknown>;
+} {
+  const path = userConfigPath(env);
+  const read = readJson<unknown>(path);
+  return { path, exists: read.value !== undefined, document: asRecord(read.value) ?? {} };
+}
+
+/** Read a display currency, rejecting anything that is not a three-letter code. */
+function currencySetting(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string' && /^[A-Za-z]{3}$/.test(value.trim())) return value.trim().toUpperCase();
+  throw new ConfigError('currency', 'configCurrencyCode', { value: JSON.stringify(value) });
+}
+
+/** Read a rate-source id, rejecting anything that is not a non-empty string. */
+function rateSourceSetting(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  throw new ConfigError('rateSource', 'configRateSourceId', { value: JSON.stringify(value) });
 }
 
 /** Read a rate mode, rejecting anything else. */
@@ -224,26 +316,12 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): LoadedUser
       config: {
         language: languageSetting(node['language'], 'language'),
         rateMode: rateMode(node['rateMode'], 'rateMode'),
-        currency:
-          currency === undefined
-            ? undefined
-            : typeof currency === 'string' && /^[A-Za-z]{3}$/.test(currency.trim())
-              ? currency.trim().toUpperCase()
-              : (() => {
-                  throw new ConfigError('currency', 'configCurrencyCode', { value: JSON.stringify(currency) });
-                })(),
+        currency: currencySetting(currency),
         updates: {
           pricing: setting(updates['pricing'], 'updates.pricing', DEFAULT_UPDATES.pricing),
           rates: setting(updates['rates'], 'updates.rates', DEFAULT_UPDATES.rates),
         },
-        rateSource:
-          rateSource === undefined
-            ? undefined
-            : typeof rateSource === 'string' && rateSource.trim().length > 0
-              ? rateSource.trim()
-              : (() => {
-                  throw new ConfigError('rateSource', 'configRateSourceId', { value: JSON.stringify(rateSource) });
-                })(),
+        rateSource: rateSourceSetting(rateSource),
         projects: projectGroups(node['projects'], env),
         pricing,
       },

@@ -103,6 +103,22 @@ async function exercise(base, { live }) {
   const english = await call(base, '/api/dashboard?lang=en');
   check('?lang=en 把散文换成英文', /all time|today|this week|this month/.test(english.body?.rangeLabel ?? ''), english.body?.rangeLabel);
 
+  // The settings page's own endpoint: the file it edits, as the page edits it.
+  const config = await call(base, '/api/config');
+  check('GET /api/config → 200', config.status === 200, `HTTP ${config.status}`);
+  check(
+    'config 报了路径、原文与解析后的值',
+    typeof config.body?.path === 'string' &&
+      typeof config.body?.document === 'object' &&
+      Array.isArray(config.body?.config?.projects),
+    JSON.stringify(config.body?.config),
+  );
+  check('config 只接受它管的键', (await call(base, '/api/config', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ language: 'en' }),
+  })).status === 400);
+
   const summary = await call(base, '/api/summary');
   check('GET /api/summary → 200', summary.status === 200, `HTTP ${summary.status}`);
   const agents = summary.body?.agents ?? [];

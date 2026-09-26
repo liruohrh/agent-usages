@@ -237,6 +237,42 @@ export interface SettingsPayload {
   languages: Language[];
 }
 
+/** A `GET /api/config` answer: the file the settings page edits. */
+export interface ConfigPayload {
+  /** The file the page reads and writes. */
+  path: string;
+  /** Whether the file exists yet. */
+  exists: boolean;
+  /** The file's own JSON — what the page edits, so `~` stays `~`. */
+  document: Record<string, unknown>;
+  /** The same file after the readers, for showing what the tool took from it. */
+  config: {
+    language: Language | null;
+    currency: string | null;
+    rateMode: 'latest' | 'historical' | null;
+    rateSource: string | null;
+    updates: { pricing: boolean; rates: boolean };
+    projects: { name: string; paths: string[] }[];
+    pricingProviders: string[];
+  };
+  /** Problems found while reading it. */
+  warnings: { code: string; message: string; params?: Record<string, unknown> }[];
+}
+
+/** The keys `PUT /api/config` accepts. */
+export interface ConfigPatch {
+  projects?: { name: string; paths: string[] }[];
+  currency?: string;
+  rateMode?: 'latest' | 'historical';
+  rateSource?: string;
+  updates?: { pricing: boolean; rates: boolean };
+}
+
+/** A `PUT /api/config` answer: the file after the write, plus how the rescan went. */
+export interface ConfigSaved extends ConfigPayload {
+  refresh: RefreshReport;
+}
+
 export interface DashboardMeta {
   generatedAt: number;
   mode: 'live' | 'snapshot';

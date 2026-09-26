@@ -838,6 +838,59 @@ test.describe('the language switch', () => {
   });
 });
 
+test.describe('the settings page', () => {
+  test('is reachable from the top bar', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('main section').first()).toBeVisible();
+    await page.getByRole('button', { name: '配置', exact: true }).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByRole('heading', { name: '配置', exact: true })).toBeVisible();
+  });
+
+  test('edits the project declarations and writes the configuration file', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByRole('heading', { name: '配置', exact: true })).toBeVisible();
+    const save = page.locator('[data-save-config]');
+    // Opening the page is not a change.
+    await expect(save).toBeDisabled();
+    await expect(page.locator('[data-dirty]')).toHaveCount(0);
+
+    // A new declaration: a name, and one of the workspaces this scan found.
+    await page.getByRole('button', { name: '新建分组' }).click();
+    await page.getByLabel('项目名').last().fill('demo-group');
+    const picker = page.locator('[data-add-path]').last();
+    const path = await picker.locator('option').nth(1).getAttribute('value');
+    expect(path, 'a scanned workspace to add').toBeTruthy();
+    await picker.selectOption(path!);
+    // The path shows up in the group (and again in the reference list below).
+    await expect(page.getByText(path!, { exact: true }).first()).toBeVisible();
+
+    // Now it is a change, and the page says so until it is saved.
+    await expect(page.locator('[data-dirty]')).toBeVisible();
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(page.locator('[data-config-status]')).toBeVisible();
+    await expect(page.locator('[data-dirty]')).toHaveCount(0);
+
+    // The file itself now carries the declaration — and still carries the language
+    // the switch wrote, because a patch merges rather than replaces.
+    const stored = (await page.evaluate(async () => (await fetch('/api/config')).json())) as {
+      config: { projects: { name: string; paths: string[] }[]; language: string | null };
+      path: string;
+    };
+    expect(stored.path).toContain('.tmp');
+    expect(stored.config.projects).toContainEqual({ name: 'demo-group', paths: [path] });
+    expect(stored.config.language).toBe('zh');
+
+    // Discarding puts the draft back to the file.
+    await page.getByRole('button', { name: '新建分组' }).click();
+    await expect(page.locator('[data-dirty]')).toBeVisible();
+    await page.getByRole('button', { name: '放弃修改' }).click();
+    await expect(page.locator('[data-dirty]')).toHaveCount(0);
+    await expect(save).toBeDisabled();
+  });
+});
+
 test.describe('the metric vocabulary', () => {
   /**
    * The names of the figures, in words, are definitions — they belong in a
