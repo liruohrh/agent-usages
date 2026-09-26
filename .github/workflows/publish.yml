@@ -1,10 +1,9 @@
-# Publishing: a tag does it, so the tarball on npm is always a commit that
-# passed the suite — and always contains the front end it was built with.
+# Publishing is manual on purpose: the package name is not registered on npm
+# yet, so a tag would only trigger a doomed `npm publish`. Tags are version
+# markers; run this workflow from the Actions tab when the name exists.
 name: publish
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 jobs:
@@ -25,8 +24,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The published package carries `web/dist` (see `files` in package.json),
       # so the web UI needs no build on the user's machine — but the tarball must
-      # not ship a stale bundle, hence a build here and `prepack` as the belt.
-      # Both halves of the package: the compiled CLI (`dist/`) and the dashboard.
+      # not ship a stale bundle, hence the build here (`prepare` also runs it for
+      # git installs). Both halves: the compiled CLI (`dist/`) and the dashboard.
       - run: pnpm build
       - run: pnpm test
       - run: pnpm --filter web typecheck

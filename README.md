@@ -49,7 +49,7 @@ npx github:liruohrh/agent-usages price                                    # 价�
 首次安装会跑一次 `prepare`：编译 CLI + 构建仪表盘（约 20 秒到 1 分钟，取决于机器与网络），
 之后由 npm 缓存。要求 **Node ≥ 22.18**。
 
-> 另外两条路：**npm registry**（包已整理好，只等能注册时打 tag 发布，见文末「发布」）与
+> 另外两条路：**npm registry**（包已整理好，只等能注册这个包名，见文末「发布」）与
 > **本地源码**（下面那条；checkout 里不需要编译 CLI，Node 直接跑 `.ts`）。
 
 ### 从源码跑（开发）
@@ -373,13 +373,15 @@ pnpm link --global                # 装到 PATH 后用 agent-usages …
 ### 发布（维护者）
 
 ```bash
-pnpm pack:check        # 只列 tarball 内容（测试也用它守着：config/、web/dist 不能漏）
-git tag v0.2.1 && git push origin v0.2.1
+pnpm pack:check                           # 只列 tarball 内容（测试也用它守着：config/、web/dist 不能漏）
+git tag v0.0.1 && git push origin v0.0.1  # tag 只标记版本，不触发发布
 ```
 
-打 tag 后 `.github/workflows/publish.yml` 会跑构建 + 测试 + 冒烟，然后 `npm publish --provenance`
-（需要仓库 secret `NPM_TOKEN`）。`prepare` 在打包时编译 CLI 并构建前端，所以 npm 上的 tarball 永远
-带着与源码同一次构建的 `dist/` 与 `web/dist`；本地发布就 `npm publish`，效果相同。
+`publish.yml` 是**手动**的（Actions → publish → Run workflow）：`@agent/usages` 这个包名在 npm 上还没
+注册，tag 触发只会白跑一次注定失败的 `npm publish`。等能注册时，先定下 `package.json` 的 `name`、
+配上仓库 secret `NPM_TOKEN`，再手动跑一次——它会构建 + 测试 + 冒烟，然后 `npm publish --provenance`。
+`prepare` 在打包时编译 CLI 并构建前端，所以 npm 上的 tarball 永远带着与源码同一次构建的 `dist/` 与
+`web/dist`；本地发布就 `npm publish`，效果相同。
 
 `.github/workflows/install-check.yml` 守着**用户的安装路径**：把本仓库当 git 依赖装进
 `node_modules`，跑 `--version` / `price` / `check-config`，并确认 `serve` 真的返回页面——
