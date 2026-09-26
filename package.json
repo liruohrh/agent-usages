@@ -23,13 +23,14 @@
     "url": "https://github.com/liruohrh/agent-usages/issues"
   },
   "files": [
-    "scripts",
+    "dist",
+    "web/dist",
     "bin",
+    "scripts",
     "src",
     "config",
     "docs",
-    "README.md",
-    "web/dist"
+    "README.md"
   ],
   "type": "module",
   "engines": {
@@ -39,9 +40,9 @@
     "agent-usages": "./bin/agent-usages.js"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./agents": "./src/agents/index.ts",
-    "./pricing": "./src/pricing/index.ts"
+    ".": "./dist/index.js",
+    "./agents": "./dist/agents/index.js",
+    "./pricing": "./dist/pricing/index.js"
   },
   "scripts": {
     "cli": "node src/cli.ts",
@@ -56,7 +57,11 @@
     "web:typecheck": "pnpm --filter web typecheck",
     "web:smoke": "node web/scripts/smoke.mjs",
     "web:snapshot": "node src/serve/main.ts --write-snapshot web/mock/dashboard.snapshot.json",
-    "web:e2e": "pnpm --filter web test:e2e"
+    "web:e2e": "pnpm --filter web test:e2e",
+    "build:cli": "tsc -p tsconfig.build.json",
+    "build:web": "pnpm --filter web build",
+    "build": "pnpm run build:cli && pnpm run build:web",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "commander": "^14.0.0",
@@ -70,5 +75,6 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
-  }
+  },
+  "main": "./dist/index.js"
 }

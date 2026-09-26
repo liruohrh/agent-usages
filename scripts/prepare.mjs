@@ -68,9 +68,16 @@ if (!existsSync(join(web, 'node_modules', 'vite'))) {
   }
 }
 
+// The CLI itself, compiled: Node refuses to strip types for files under
+// `node_modules`, so an installed copy must be plain JavaScript.
+process.stdout.write('agent-usages: compiling the CLI\n');
+if (!run('npm', ['run', 'build:cli', '--silent']) || !existsSync(join(repo, 'dist', 'cli.js'))) {
+  warn('could not compile the CLI; run `pnpm build:cli` (or use a source checkout)');
+}
+
 process.stdout.write('agent-usages: building the dashboard (once per install)\n');
 if (!run('npm', ['--prefix', web, 'run', 'build']) || !existsSync(join(web, 'dist', 'index.html'))) {
   warn('the dashboard did not build; the CLI works, `serve` will say how to build it');
   process.exit(0);
 }
-process.stdout.write('agent-usages: dashboard ready\n');
+process.stdout.write('agent-usages: ready\n');

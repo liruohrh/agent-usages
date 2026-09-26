@@ -2,9 +2,11 @@ node_modules/
 *.log
 .DS_Store
 .agents/drafts
-# The dashboard is built from source (`pnpm --filter web build`); the bundle is a
-# local artifact, not something to review in a diff.
+# Build outputs: the dashboard bundle (for a checkout that serves it) and the
+# compiled CLI (what an installed copy runs, since Node will not strip types
+# under node_modules). Both are local artifacts, not something to review.
 web/dist/
+dist/
 # The offline fixture and the screenshots are dumps of *this* machine's usage:
 # real paths, session titles and amounts. They are generated on demand
 # (`pnpm web:snapshot`, see web/mock/README.md) and deliberately not tracked.

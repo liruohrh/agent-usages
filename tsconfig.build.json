@@ -1,0 +1,21 @@
+{
+  /**
+   * The compiled copy that gets installed.
+   *
+   * The repository runs TypeScript directly (Node strips the types), which is why
+   * the source imports carry `.ts` extensions — but Node refuses to strip types
+   * for files under `node_modules`, so anything installed as a dependency has to
+   * be plain JavaScript. `rewriteRelativeImportExtensions` is what makes the two
+   * live together: the source keeps `.ts`, the emitted files import `.js`.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": false
+  },
+  "include": ["src/**/*.ts"]
+}
