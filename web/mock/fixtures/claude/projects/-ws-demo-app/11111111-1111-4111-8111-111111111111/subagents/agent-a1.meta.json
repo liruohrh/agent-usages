@@ -1,0 +1,7 @@
+{
+  "agentType": "claude",
+  "description": "review the diff",
+  "toolUseId": "call_fixture",
+  "spawnDepth": 1,
+  "requestShape": "foreground"
+}

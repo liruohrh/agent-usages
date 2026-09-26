@@ -26,4 +26,6 @@ jobs:
       - run: pnpm --filter web typecheck
       # The smoke test drives a real server, so the dashboard has to be built first.
       - run: pnpm build
-      - run: pnpm web:smoke
+      # The offline fixture is a dump of a real machine and is not tracked, so CI runs
+      # the synthetic one that is: `web/mock/fixtures/` → `web/mock/ci.snapshot.json`.
+      - run: node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json

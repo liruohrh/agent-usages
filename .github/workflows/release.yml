@@ -47,7 +47,9 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - run: pnpm --filter web typecheck
-      - run: pnpm web:smoke
+      # The smoke test needs an offline fixture; the developer's own dump is not
+      # tracked, so CI replays the synthetic one instead.
+      - run: node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json
       - run: pnpm release:pack
       # Installs the tarball the way a user does — under a dot-directory, on a port
       # nothing else occupies — and uses it: version, price table, config check, the

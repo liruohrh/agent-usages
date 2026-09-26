@@ -7,11 +7,14 @@
  * process exits non-zero on the first failed assertion and never leaves a server
  * behind, because the server lives in this process rather than in a shell.
  *
- * Two modes:
+ * The offline fixture is a dump of a real machine, so it is not tracked. `--snapshot`
+ * points the run at another one — CI uses the synthetic fixture that *is* tracked
+ * (`web/mock/ci.snapshot.json`, generated from `web/mock/fixtures/`):
  *
  * ```sh
- * node web/scripts/smoke.mjs           # offline snapshot fixture (deterministic)
- * node web/scripts/smoke.mjs --live    # also rescan this machine's real data
+ * node web/scripts/smoke.mjs                                        # this machine's dump
+ * node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json   # synthetic, what CI runs
+ * node web/scripts/smoke.mjs --live                                 # also rescan real data
  * ```
  *
  * The live pass is a second, bigger check: it proves the adapters, the merge
@@ -27,7 +30,13 @@ import { isolateConfig } from './tmp-config.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..');
-const snapshotPath = resolve(repo, 'web', 'mock', 'dashboard.snapshot.json');
+/** The fixture to replay: `--snapshot <path>`, else this machine's own dump. */
+function fixtureFrom(argv) {
+  const index = argv.indexOf('--snapshot');
+  const given = index === -1 ? undefined : argv[index + 1];
+  return given === undefined ? resolve(repo, 'web', 'mock', 'dashboard.snapshot.json') : resolve(process.cwd(), given);
+}
+const snapshotPath = fixtureFrom(process.argv.slice(2));
 
 // The language the page reads lives in the user's configuration file, and this
 // test switches it. Point the server at a copy so a run never rewrites the file
@@ -320,7 +329,9 @@ process.stdout.write('agent-usages serve · 冒烟测试\n');
 // fresh clone has to make one. Say that instead of failing inside the reader.
 if (!existsSync(snapshotPath)) {
   process.stdout.write(
-    `\n找不到离线快照 ${snapshotPath}\n先运行 pnpm web:snapshot 生成它（见 web/mock/README.md），或加 --live 只跑实时扫描。\n`,
+    `\n找不到离线快照 ${snapshotPath}\n` +
+      '本机生成一份：pnpm web:snapshot（见 web/mock/README.md）；\n' +
+      '或者用仓库里合成的那份：node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json\n',
   );
   process.exit(2);
 }

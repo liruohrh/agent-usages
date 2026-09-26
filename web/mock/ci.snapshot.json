@@ -1,0 +1,1928 @@
+{
+  "generatedAt": 1790407826685,
+  "mode": "live",
+  "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+  "scannedAt": 1790407826681,
+  "scanMs": 17,
+  "loadedAgents": [
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude"
+    }
+  ],
+  "currency": "CNY",
+  "currencySymbol": "¥",
+  "pricingProvider": "deepseek",
+  "pricingLabel": "DeepSeek",
+  "rangeLabel": "全部时间",
+  "rangeFrom": null,
+  "rangeTo": null,
+  "agents": [
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+      "sessions": 3,
+      "subagentSessions": 1,
+      "activeSessions": 3,
+      "requests": 6,
+      "unpriced": 0,
+      "firstUsage": 1790128801000,
+      "lastUsage": 1790320800000,
+      "tokens": {
+        "input": 593000,
+        "output": 8800,
+        "cacheRead": 3450000,
+        "cacheWrite": 62000,
+        "reasoning": 3110
+      },
+      "cost": {
+        "cacheHitInputTokens": 3450000,
+        "cacheMissInputTokens": 655000,
+        "outputTokens": 8800,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.1380",
+        "cacheMissInputCost": "1.3100",
+        "outputCost": "0.0704",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0249",
+        "total": "1.5184"
+      }
+    }
+  ],
+  "totals": {
+    "sessions": 3,
+    "subagentSessions": 1,
+    "activeSessions": 3,
+    "projects": 2,
+    "workspaces": 2,
+    "requests": 6,
+    "unpriced": 0,
+    "firstUsage": 1790128801000,
+    "lastUsage": 1790320800000,
+    "tokens": {
+      "input": 593000,
+      "output": 8800,
+      "cacheRead": 3450000,
+      "cacheWrite": 62000,
+      "reasoning": 3110
+    },
+    "tokenBreakdown": {
+      "input": {
+        "tokens": 593000,
+        "share": 0.1441489620302397,
+        "cost": "1.3100"
+      },
+      "output": {
+        "tokens": 8800,
+        "share": 0.0021391414264183965,
+        "cost": "0.0704"
+      },
+      "cacheRead": {
+        "tokens": 3450000,
+        "share": 0.8386406728572123,
+        "cost": "0.1380"
+      },
+      "cacheWrite": {
+        "tokens": 62000,
+        "share": 0.015071223686129613,
+        "cost": "0.0000"
+      },
+      "reasoning": {
+        "tokens": 3110,
+        "share": 0.0007559920268365015,
+        "cost": "0.0249"
+      }
+    },
+    "cost": {
+      "cacheHitInputTokens": 3450000,
+      "cacheMissInputTokens": 655000,
+      "outputTokens": 8800,
+      "cacheWriteTokens": 0,
+      "cacheHitInputCost": "0.1380",
+      "cacheMissInputCost": "1.3100",
+      "outputCost": "0.0704",
+      "cacheWriteInputCost": "0.0000",
+      "reasoningCost": "0.0249",
+      "total": "1.5184"
+    },
+    "own": {
+      "sessions": 2,
+      "requests": 5,
+      "tokens": {
+        "input": 533000,
+        "output": 8100,
+        "cacheRead": 3050000,
+        "cacheWrite": 54000,
+        "reasoning": 2850
+      },
+      "cost": {
+        "cacheHitInputTokens": 3050000,
+        "cacheMissInputTokens": 587000,
+        "outputTokens": 8100,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.1220",
+        "cacheMissInputCost": "1.1740",
+        "outputCost": "0.0648",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0228",
+        "total": "1.3608"
+      }
+    },
+    "spawned": {
+      "sessions": 1,
+      "requests": 1,
+      "tokens": {
+        "input": 60000,
+        "output": 700,
+        "cacheRead": 400000,
+        "cacheWrite": 8000,
+        "reasoning": 260
+      },
+      "cost": {
+        "cacheHitInputTokens": 400000,
+        "cacheMissInputTokens": 68000,
+        "outputTokens": 700,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.0160",
+        "cacheMissInputCost": "0.1360",
+        "outputCost": "0.0056",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0021",
+        "total": "0.1576"
+      }
+    }
+  },
+  "projects": [
+    {
+      "id": "-ws-other",
+      "name": "other",
+      "kind": "path",
+      "workspaces": [
+        "/ws/other"
+      ],
+      "agents": [
+        "claude"
+      ],
+      "sessions": 1,
+      "subagentSessions": 0,
+      "activeSessions": 1,
+      "requests": 2,
+      "unpriced": 0,
+      "firstUsage": 1790316005000,
+      "lastUsage": 1790320800000,
+      "tokens": {
+        "input": 83000,
+        "output": 1100,
+        "cacheRead": 270000,
+        "cacheWrite": 9000,
+        "reasoning": 350
+      },
+      "tokenBreakdown": {
+        "input": {
+          "tokens": 83000,
+          "share": 0.2285871660699532,
+          "cost": "0.1840"
+        },
+        "output": {
+          "tokens": 1100,
+          "share": 0.003029468465987331,
+          "cost": "0.0088"
+        },
+        "cacheRead": {
+          "tokens": 270000,
+          "share": 0.7435968052877995,
+          "cost": "0.0108"
+        },
+        "cacheWrite": {
+          "tokens": 9000,
+          "share": 0.024786560176259985,
+          "cost": "0.0000"
+        },
+        "reasoning": {
+          "tokens": 350,
+          "share": 0.0009639217846323327,
+          "cost": "0.0028"
+        }
+      },
+      "cost": {
+        "cacheHitInputTokens": 270000,
+        "cacheMissInputTokens": 92000,
+        "outputTokens": 1100,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.0108",
+        "cacheMissInputCost": "0.1840",
+        "outputCost": "0.0088",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0028",
+        "total": "0.2036"
+      },
+      "agentTotals": [
+        {
+          "id": "claude",
+          "label": "Claude Code",
+          "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+          "sessions": 1,
+          "subagentSessions": 0,
+          "activeSessions": 1,
+          "requests": 2,
+          "unpriced": 0,
+          "firstUsage": 1790128801000,
+          "lastUsage": 1790320800000,
+          "tokens": {
+            "input": 83000,
+            "output": 1100,
+            "cacheRead": 270000,
+            "cacheWrite": 9000,
+            "reasoning": 350
+          },
+          "cost": {
+            "cacheHitInputTokens": 270000,
+            "cacheMissInputTokens": 92000,
+            "outputTokens": 1100,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.0108",
+            "cacheMissInputCost": "0.1840",
+            "outputCost": "0.0088",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0028",
+            "total": "0.2036"
+          }
+        }
+      ],
+      "own": {
+        "sessions": 1,
+        "requests": 2,
+        "tokens": {
+          "input": 83000,
+          "output": 1100,
+          "cacheRead": 270000,
+          "cacheWrite": 9000,
+          "reasoning": 350
+        },
+        "cost": {
+          "cacheHitInputTokens": 270000,
+          "cacheMissInputTokens": 92000,
+          "outputTokens": 1100,
+          "cacheWriteTokens": 0,
+          "cacheHitInputCost": "0.0108",
+          "cacheMissInputCost": "0.1840",
+          "outputCost": "0.0088",
+          "cacheWriteInputCost": "0.0000",
+          "reasoningCost": "0.0028",
+          "total": "0.2036"
+        }
+      },
+      "spawned": {
+        "sessions": 0,
+        "requests": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 0
+        },
+        "cost": {
+          "cacheHitInputTokens": 0,
+          "cacheMissInputTokens": 0,
+          "outputTokens": 0,
+          "cacheWriteTokens": 0,
+          "cacheHitInputCost": "0.0000",
+          "cacheMissInputCost": "0.0000",
+          "outputCost": "0.0000",
+          "cacheWriteInputCost": "0.0000",
+          "reasoningCost": "0.0000",
+          "total": "0.0000"
+        }
+      },
+      "workspaceNodes": [
+        {
+          "path": "/ws/other",
+          "name": "other",
+          "agents": [
+            "claude"
+          ],
+          "sessionCount": 1,
+          "subagentCount": 0,
+          "activeSessions": 1,
+          "requests": 2,
+          "tokens": {
+            "input": 83000,
+            "output": 1100,
+            "cacheRead": 270000,
+            "cacheWrite": 9000,
+            "reasoning": 350
+          },
+          "cost": {
+            "cacheHitInputTokens": 270000,
+            "cacheMissInputTokens": 92000,
+            "outputTokens": 1100,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.0108",
+            "cacheMissInputCost": "0.1840",
+            "outputCost": "0.0088",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0028",
+            "total": "0.2036"
+          },
+          "agentTotals": [
+            {
+              "id": "claude",
+              "label": "Claude Code",
+              "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+              "sessions": 1,
+              "subagentSessions": 0,
+              "activeSessions": 1,
+              "requests": 2,
+              "unpriced": 0,
+              "firstUsage": 1790128801000,
+              "lastUsage": 1790320800000,
+              "tokens": {
+                "input": 83000,
+                "output": 1100,
+                "cacheRead": 270000,
+                "cacheWrite": 9000,
+                "reasoning": 350
+              },
+              "cost": {
+                "cacheHitInputTokens": 270000,
+                "cacheMissInputTokens": 92000,
+                "outputTokens": 1100,
+                "cacheWriteTokens": 0,
+                "cacheHitInputCost": "0.0108",
+                "cacheMissInputCost": "0.1840",
+                "outputCost": "0.0088",
+                "cacheWriteInputCost": "0.0000",
+                "reasoningCost": "0.0028",
+                "total": "0.2036"
+              }
+            }
+          ],
+          "own": {
+            "sessions": 1,
+            "requests": 2,
+            "tokens": {
+              "input": 83000,
+              "output": 1100,
+              "cacheRead": 270000,
+              "cacheWrite": 9000,
+              "reasoning": 350
+            },
+            "cost": {
+              "cacheHitInputTokens": 270000,
+              "cacheMissInputTokens": 92000,
+              "outputTokens": 1100,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0108",
+              "cacheMissInputCost": "0.1840",
+              "outputCost": "0.0088",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0028",
+              "total": "0.2036"
+            }
+          },
+          "spawned": {
+            "sessions": 0,
+            "requests": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0
+            },
+            "cost": {
+              "cacheHitInputTokens": 0,
+              "cacheMissInputTokens": 0,
+              "outputTokens": 0,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0000",
+              "cacheMissInputCost": "0.0000",
+              "outputCost": "0.0000",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0000",
+              "total": "0.0000"
+            }
+          },
+          "sessionReports": [
+            {
+              "uid": "claude:22222222-2222-4222-8222-222222222222",
+              "id": "22222222-2222-4222-8222-222222222222",
+              "agent": "claude",
+              "projectId": "-ws-other",
+              "projectName": "other",
+              "workspace": "/ws/other",
+              "title": null,
+              "cwd": "/ws/other",
+              "createdAt": 1790316005000,
+              "firstUsage": 1790316005000,
+              "lastUsage": 1790320800000,
+              "requests": 2,
+              "tokens": {
+                "input": 83000,
+                "output": 1100,
+                "cacheRead": 270000,
+                "cacheWrite": 9000,
+                "reasoning": 350
+              },
+              "cost": {
+                "cacheHitInputTokens": 270000,
+                "cacheMissInputTokens": 92000,
+                "outputTokens": 1100,
+                "cacheWriteTokens": 0,
+                "cacheHitInputCost": "0.0108",
+                "cacheMissInputCost": "0.1840",
+                "outputCost": "0.0088",
+                "cacheWriteInputCost": "0.0000",
+                "reasoningCost": "0.0028",
+                "total": "0.2036"
+              },
+              "isSubagent": false,
+              "depth": 0,
+              "archived": false,
+              "subagentCount": 0,
+              "parentId": null,
+              "own": {
+                "sessions": 1,
+                "requests": 2,
+                "tokens": {
+                  "input": 83000,
+                  "output": 1100,
+                  "cacheRead": 270000,
+                  "cacheWrite": 9000,
+                  "reasoning": 350
+                },
+                "cost": {
+                  "cacheHitInputTokens": 270000,
+                  "cacheMissInputTokens": 92000,
+                  "outputTokens": 1100,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.0108",
+                  "cacheMissInputCost": "0.1840",
+                  "outputCost": "0.0088",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0028",
+                  "total": "0.2036"
+                }
+              },
+              "spawned": {
+                "sessions": 0,
+                "requests": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "reasoning": 0
+                },
+                "cost": {
+                  "cacheHitInputTokens": 0,
+                  "cacheMissInputTokens": 0,
+                  "outputTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.0000",
+                  "cacheMissInputCost": "0.0000",
+                  "outputCost": "0.0000",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0000",
+                  "total": "0.0000"
+                }
+              },
+              "total": {
+                "sessions": 1,
+                "requests": 2,
+                "tokens": {
+                  "input": 83000,
+                  "output": 1100,
+                  "cacheRead": 270000,
+                  "cacheWrite": 9000,
+                  "reasoning": 350
+                },
+                "cost": {
+                  "cacheHitInputTokens": 270000,
+                  "cacheMissInputTokens": 92000,
+                  "outputTokens": 1100,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.0108",
+                  "cacheMissInputCost": "0.1840",
+                  "outputCost": "0.0088",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0028",
+                  "total": "0.2036"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "sessionReports": [
+        {
+          "uid": "claude:22222222-2222-4222-8222-222222222222",
+          "id": "22222222-2222-4222-8222-222222222222",
+          "agent": "claude",
+          "projectId": "-ws-other",
+          "projectName": "other",
+          "workspace": "/ws/other",
+          "title": null,
+          "cwd": "/ws/other",
+          "createdAt": 1790316005000,
+          "firstUsage": 1790316005000,
+          "lastUsage": 1790320800000,
+          "requests": 2,
+          "tokens": {
+            "input": 83000,
+            "output": 1100,
+            "cacheRead": 270000,
+            "cacheWrite": 9000,
+            "reasoning": 350
+          },
+          "cost": {
+            "cacheHitInputTokens": 270000,
+            "cacheMissInputTokens": 92000,
+            "outputTokens": 1100,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.0108",
+            "cacheMissInputCost": "0.1840",
+            "outputCost": "0.0088",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0028",
+            "total": "0.2036"
+          },
+          "isSubagent": false,
+          "depth": 0,
+          "archived": false,
+          "subagentCount": 0,
+          "parentId": null,
+          "own": {
+            "sessions": 1,
+            "requests": 2,
+            "tokens": {
+              "input": 83000,
+              "output": 1100,
+              "cacheRead": 270000,
+              "cacheWrite": 9000,
+              "reasoning": 350
+            },
+            "cost": {
+              "cacheHitInputTokens": 270000,
+              "cacheMissInputTokens": 92000,
+              "outputTokens": 1100,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0108",
+              "cacheMissInputCost": "0.1840",
+              "outputCost": "0.0088",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0028",
+              "total": "0.2036"
+            }
+          },
+          "spawned": {
+            "sessions": 0,
+            "requests": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0
+            },
+            "cost": {
+              "cacheHitInputTokens": 0,
+              "cacheMissInputTokens": 0,
+              "outputTokens": 0,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0000",
+              "cacheMissInputCost": "0.0000",
+              "outputCost": "0.0000",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0000",
+              "total": "0.0000"
+            }
+          },
+          "total": {
+            "sessions": 1,
+            "requests": 2,
+            "tokens": {
+              "input": 83000,
+              "output": 1100,
+              "cacheRead": 270000,
+              "cacheWrite": 9000,
+              "reasoning": 350
+            },
+            "cost": {
+              "cacheHitInputTokens": 270000,
+              "cacheMissInputTokens": 92000,
+              "outputTokens": 1100,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0108",
+              "cacheMissInputCost": "0.1840",
+              "outputCost": "0.0088",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0028",
+              "total": "0.2036"
+            }
+          }
+        }
+      ],
+      "models": [
+        {
+          "agent": "claude",
+          "projectId": "-ws-other",
+          "model": "deepseek-flash",
+          "requests": 2,
+          "tokens": {
+            "input": 83000,
+            "output": 1100,
+            "cacheRead": 270000,
+            "cacheWrite": 9000,
+            "reasoning": 350
+          },
+          "cost": {
+            "cacheHitInputTokens": 0,
+            "cacheMissInputTokens": 0,
+            "outputTokens": 0,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.0108",
+            "cacheMissInputCost": "0.1840",
+            "outputCost": "0.0088",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0028",
+            "total": "0.2036"
+          }
+        }
+      ],
+      "bands": [
+        {
+          "agent": "claude",
+          "projectId": "-ws-other",
+          "model": "deepseek-flash",
+          "periodId": "2026-09-10",
+          "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
+          "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
+          "tier": "peak",
+          "resolution": "exact",
+          "requests": 2,
+          "tokens": {
+            "input": 83000,
+            "output": 1100,
+            "cacheRead": 270000,
+            "cacheWrite": 9000,
+            "reasoning": 350
+          },
+          "cost": {
+            "cacheHitInputTokens": 0,
+            "cacheMissInputTokens": 0,
+            "outputTokens": 0,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.0108",
+            "cacheMissInputCost": "0.1840",
+            "outputCost": "0.0088",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0028",
+            "total": "0.2036"
+          },
+          "components": [
+            {
+              "id": "input-hit",
+              "label": "缓存命中输入",
+              "rate": "0.04",
+              "per": 1000000,
+              "tokens": 270000,
+              "amount": "0.0108"
+            },
+            {
+              "id": "input-miss",
+              "label": "缓存未命中输入",
+              "rate": "2",
+              "per": 1000000,
+              "tokens": 92000,
+              "amount": "0.1840"
+            },
+            {
+              "id": "output",
+              "label": "输出",
+              "rate": "8",
+              "per": 1000000,
+              "tokens": 1100,
+              "amount": "0.0088"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "-ws-demo-app",
+      "name": "demo-app",
+      "kind": "path",
+      "workspaces": [
+        "/ws/demo-app"
+      ],
+      "agents": [
+        "claude"
+      ],
+      "sessions": 2,
+      "subagentSessions": 1,
+      "activeSessions": 2,
+      "requests": 4,
+      "unpriced": 0,
+      "firstUsage": 1790128801000,
+      "lastUsage": 1790211900000,
+      "tokens": {
+        "input": 510000,
+        "output": 7700,
+        "cacheRead": 3180000,
+        "cacheWrite": 53000,
+        "reasoning": 2760
+      },
+      "tokenBreakdown": {
+        "input": {
+          "tokens": 510000,
+          "share": 0.13597461807129335,
+          "cost": "1.1260"
+        },
+        "output": {
+          "tokens": 7700,
+          "share": 0.0020529501159783506,
+          "cost": "0.0616"
+        },
+        "cacheRead": {
+          "tokens": 3180000,
+          "share": 0.847841736209241,
+          "cost": "0.1272"
+        },
+        "cacheWrite": {
+          "tokens": 53000,
+          "share": 0.014130695603487349,
+          "cost": "0.0000"
+        },
+        "reasoning": {
+          "tokens": 2760,
+          "share": 0.0007358626389740581,
+          "cost": "0.0221"
+        }
+      },
+      "cost": {
+        "cacheHitInputTokens": 3180000,
+        "cacheMissInputTokens": 563000,
+        "outputTokens": 7700,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.1272",
+        "cacheMissInputCost": "1.1260",
+        "outputCost": "0.0616",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0221",
+        "total": "1.3148"
+      },
+      "agentTotals": [
+        {
+          "id": "claude",
+          "label": "Claude Code",
+          "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+          "sessions": 2,
+          "subagentSessions": 1,
+          "activeSessions": 2,
+          "requests": 4,
+          "unpriced": 0,
+          "firstUsage": 1790128801000,
+          "lastUsage": 1790320800000,
+          "tokens": {
+            "input": 510000,
+            "output": 7700,
+            "cacheRead": 3180000,
+            "cacheWrite": 53000,
+            "reasoning": 2760
+          },
+          "cost": {
+            "cacheHitInputTokens": 3180000,
+            "cacheMissInputTokens": 563000,
+            "outputTokens": 7700,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.1272",
+            "cacheMissInputCost": "1.1260",
+            "outputCost": "0.0616",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0221",
+            "total": "1.3148"
+          }
+        }
+      ],
+      "own": {
+        "sessions": 1,
+        "requests": 3,
+        "tokens": {
+          "input": 450000,
+          "output": 7000,
+          "cacheRead": 2780000,
+          "cacheWrite": 45000,
+          "reasoning": 2500
+        },
+        "cost": {
+          "cacheHitInputTokens": 2780000,
+          "cacheMissInputTokens": 495000,
+          "outputTokens": 7000,
+          "cacheWriteTokens": 0,
+          "cacheHitInputCost": "0.1112",
+          "cacheMissInputCost": "0.9900",
+          "outputCost": "0.0560",
+          "cacheWriteInputCost": "0.0000",
+          "reasoningCost": "0.0200",
+          "total": "1.1572"
+        }
+      },
+      "spawned": {
+        "sessions": 1,
+        "requests": 1,
+        "tokens": {
+          "input": 60000,
+          "output": 700,
+          "cacheRead": 400000,
+          "cacheWrite": 8000,
+          "reasoning": 260
+        },
+        "cost": {
+          "cacheHitInputTokens": 400000,
+          "cacheMissInputTokens": 68000,
+          "outputTokens": 700,
+          "cacheWriteTokens": 0,
+          "cacheHitInputCost": "0.0160",
+          "cacheMissInputCost": "0.1360",
+          "outputCost": "0.0056",
+          "cacheWriteInputCost": "0.0000",
+          "reasoningCost": "0.0021",
+          "total": "0.1576"
+        }
+      },
+      "workspaceNodes": [
+        {
+          "path": "/ws/demo-app",
+          "name": "demo-app",
+          "agents": [
+            "claude"
+          ],
+          "sessionCount": 2,
+          "subagentCount": 1,
+          "activeSessions": 2,
+          "requests": 5,
+          "tokens": {
+            "input": 570000,
+            "output": 8400,
+            "cacheRead": 3580000,
+            "cacheWrite": 61000,
+            "reasoning": 3020
+          },
+          "cost": {
+            "cacheHitInputTokens": 3580000,
+            "cacheMissInputTokens": 631000,
+            "outputTokens": 8400,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.1432",
+            "cacheMissInputCost": "1.2620",
+            "outputCost": "0.0672",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0242",
+            "total": "1.4724"
+          },
+          "agentTotals": [
+            {
+              "id": "claude",
+              "label": "Claude Code",
+              "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+              "sessions": 2,
+              "subagentSessions": 1,
+              "activeSessions": 2,
+              "requests": 4,
+              "unpriced": 0,
+              "firstUsage": 1790128801000,
+              "lastUsage": 1790320800000,
+              "tokens": {
+                "input": 510000,
+                "output": 7700,
+                "cacheRead": 3180000,
+                "cacheWrite": 53000,
+                "reasoning": 2760
+              },
+              "cost": {
+                "cacheHitInputTokens": 3180000,
+                "cacheMissInputTokens": 563000,
+                "outputTokens": 7700,
+                "cacheWriteTokens": 0,
+                "cacheHitInputCost": "0.1272",
+                "cacheMissInputCost": "1.1260",
+                "outputCost": "0.0616",
+                "cacheWriteInputCost": "0.0000",
+                "reasoningCost": "0.0221",
+                "total": "1.3148"
+              }
+            }
+          ],
+          "own": {
+            "sessions": 1,
+            "requests": 3,
+            "tokens": {
+              "input": 450000,
+              "output": 7000,
+              "cacheRead": 2780000,
+              "cacheWrite": 45000,
+              "reasoning": 2500
+            },
+            "cost": {
+              "cacheHitInputTokens": 2780000,
+              "cacheMissInputTokens": 495000,
+              "outputTokens": 7000,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.1112",
+              "cacheMissInputCost": "0.9900",
+              "outputCost": "0.0560",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0200",
+              "total": "1.1572"
+            }
+          },
+          "spawned": {
+            "sessions": 1,
+            "requests": 1,
+            "tokens": {
+              "input": 60000,
+              "output": 700,
+              "cacheRead": 400000,
+              "cacheWrite": 8000,
+              "reasoning": 260
+            },
+            "cost": {
+              "cacheHitInputTokens": 400000,
+              "cacheMissInputTokens": 68000,
+              "outputTokens": 700,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0160",
+              "cacheMissInputCost": "0.1360",
+              "outputCost": "0.0056",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0021",
+              "total": "0.1576"
+            }
+          },
+          "sessionReports": [
+            {
+              "uid": "claude:11111111-1111-4111-8111-111111111111",
+              "id": "11111111-1111-4111-8111-111111111111",
+              "agent": "claude",
+              "projectId": "-ws-demo-app",
+              "projectName": "demo-app",
+              "workspace": "/ws/demo-app",
+              "title": "demo work",
+              "cwd": "/ws/demo-app",
+              "createdAt": 1790128801000,
+              "firstUsage": 1790128801000,
+              "lastUsage": 1790211900000,
+              "requests": 4,
+              "tokens": {
+                "input": 510000,
+                "output": 7700,
+                "cacheRead": 3180000,
+                "cacheWrite": 53000,
+                "reasoning": 2760
+              },
+              "cost": {
+                "cacheHitInputTokens": 3180000,
+                "cacheMissInputTokens": 563000,
+                "outputTokens": 7700,
+                "cacheWriteTokens": 0,
+                "cacheHitInputCost": "0.1272",
+                "cacheMissInputCost": "1.1260",
+                "outputCost": "0.0616",
+                "cacheWriteInputCost": "0.0000",
+                "reasoningCost": "0.0221",
+                "total": "1.3148"
+              },
+              "isSubagent": false,
+              "depth": 0,
+              "archived": false,
+              "subagentCount": 0,
+              "parentId": null,
+              "own": {
+                "sessions": 1,
+                "requests": 3,
+                "tokens": {
+                  "input": 450000,
+                  "output": 7000,
+                  "cacheRead": 2780000,
+                  "cacheWrite": 45000,
+                  "reasoning": 2500
+                },
+                "cost": {
+                  "cacheHitInputTokens": 2780000,
+                  "cacheMissInputTokens": 495000,
+                  "outputTokens": 7000,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.1112",
+                  "cacheMissInputCost": "0.9900",
+                  "outputCost": "0.0560",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0200",
+                  "total": "1.1572"
+                }
+              },
+              "spawned": {
+                "sessions": 1,
+                "requests": 1,
+                "tokens": {
+                  "input": 60000,
+                  "output": 700,
+                  "cacheRead": 400000,
+                  "cacheWrite": 8000,
+                  "reasoning": 260
+                },
+                "cost": {
+                  "cacheHitInputTokens": 400000,
+                  "cacheMissInputTokens": 68000,
+                  "outputTokens": 700,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.0160",
+                  "cacheMissInputCost": "0.1360",
+                  "outputCost": "0.0056",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0021",
+                  "total": "0.1576"
+                }
+              },
+              "total": {
+                "sessions": 2,
+                "requests": 4,
+                "tokens": {
+                  "input": 510000,
+                  "output": 7700,
+                  "cacheRead": 3180000,
+                  "cacheWrite": 53000,
+                  "reasoning": 2760
+                },
+                "cost": {
+                  "cacheHitInputTokens": 3180000,
+                  "cacheMissInputTokens": 563000,
+                  "outputTokens": 7700,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.1272",
+                  "cacheMissInputCost": "1.1260",
+                  "outputCost": "0.0616",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0221",
+                  "total": "1.3148"
+                }
+              }
+            },
+            {
+              "uid": "claude:a1",
+              "id": "a1",
+              "agent": "claude",
+              "projectId": "-ws-demo-app",
+              "projectName": "demo-app",
+              "workspace": "/ws/demo-app",
+              "title": "review the diff",
+              "cwd": "/ws/demo-app",
+              "createdAt": 1790129100000,
+              "firstUsage": 1790129100000,
+              "lastUsage": 1790129100000,
+              "requests": 1,
+              "tokens": {
+                "input": 60000,
+                "output": 700,
+                "cacheRead": 400000,
+                "cacheWrite": 8000,
+                "reasoning": 260
+              },
+              "cost": {
+                "cacheHitInputTokens": 400000,
+                "cacheMissInputTokens": 68000,
+                "outputTokens": 700,
+                "cacheWriteTokens": 0,
+                "cacheHitInputCost": "0.0160",
+                "cacheMissInputCost": "0.1360",
+                "outputCost": "0.0056",
+                "cacheWriteInputCost": "0.0000",
+                "reasoningCost": "0.0021",
+                "total": "0.1576"
+              },
+              "isSubagent": true,
+              "depth": 1,
+              "archived": false,
+              "subagentCount": 0,
+              "parentId": "11111111-1111-4111-8111-111111111111",
+              "own": {
+                "sessions": 1,
+                "requests": 1,
+                "tokens": {
+                  "input": 60000,
+                  "output": 700,
+                  "cacheRead": 400000,
+                  "cacheWrite": 8000,
+                  "reasoning": 260
+                },
+                "cost": {
+                  "cacheHitInputTokens": 400000,
+                  "cacheMissInputTokens": 68000,
+                  "outputTokens": 700,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.0160",
+                  "cacheMissInputCost": "0.1360",
+                  "outputCost": "0.0056",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0021",
+                  "total": "0.1576"
+                }
+              },
+              "spawned": {
+                "sessions": 0,
+                "requests": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "reasoning": 0
+                },
+                "cost": {
+                  "cacheHitInputTokens": 0,
+                  "cacheMissInputTokens": 0,
+                  "outputTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.0000",
+                  "cacheMissInputCost": "0.0000",
+                  "outputCost": "0.0000",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0000",
+                  "total": "0.0000"
+                }
+              },
+              "total": {
+                "sessions": 1,
+                "requests": 1,
+                "tokens": {
+                  "input": 60000,
+                  "output": 700,
+                  "cacheRead": 400000,
+                  "cacheWrite": 8000,
+                  "reasoning": 260
+                },
+                "cost": {
+                  "cacheHitInputTokens": 400000,
+                  "cacheMissInputTokens": 68000,
+                  "outputTokens": 700,
+                  "cacheWriteTokens": 0,
+                  "cacheHitInputCost": "0.0160",
+                  "cacheMissInputCost": "0.1360",
+                  "outputCost": "0.0056",
+                  "cacheWriteInputCost": "0.0000",
+                  "reasoningCost": "0.0021",
+                  "total": "0.1576"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "sessionReports": [
+        {
+          "uid": "claude:11111111-1111-4111-8111-111111111111",
+          "id": "11111111-1111-4111-8111-111111111111",
+          "agent": "claude",
+          "projectId": "-ws-demo-app",
+          "projectName": "demo-app",
+          "workspace": "/ws/demo-app",
+          "title": "demo work",
+          "cwd": "/ws/demo-app",
+          "createdAt": 1790128801000,
+          "firstUsage": 1790128801000,
+          "lastUsage": 1790211900000,
+          "requests": 4,
+          "tokens": {
+            "input": 510000,
+            "output": 7700,
+            "cacheRead": 3180000,
+            "cacheWrite": 53000,
+            "reasoning": 2760
+          },
+          "cost": {
+            "cacheHitInputTokens": 3180000,
+            "cacheMissInputTokens": 563000,
+            "outputTokens": 7700,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.1272",
+            "cacheMissInputCost": "1.1260",
+            "outputCost": "0.0616",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0221",
+            "total": "1.3148"
+          },
+          "isSubagent": false,
+          "depth": 0,
+          "archived": false,
+          "subagentCount": 0,
+          "parentId": null,
+          "own": {
+            "sessions": 1,
+            "requests": 3,
+            "tokens": {
+              "input": 450000,
+              "output": 7000,
+              "cacheRead": 2780000,
+              "cacheWrite": 45000,
+              "reasoning": 2500
+            },
+            "cost": {
+              "cacheHitInputTokens": 2780000,
+              "cacheMissInputTokens": 495000,
+              "outputTokens": 7000,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.1112",
+              "cacheMissInputCost": "0.9900",
+              "outputCost": "0.0560",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0200",
+              "total": "1.1572"
+            }
+          },
+          "spawned": {
+            "sessions": 1,
+            "requests": 1,
+            "tokens": {
+              "input": 60000,
+              "output": 700,
+              "cacheRead": 400000,
+              "cacheWrite": 8000,
+              "reasoning": 260
+            },
+            "cost": {
+              "cacheHitInputTokens": 400000,
+              "cacheMissInputTokens": 68000,
+              "outputTokens": 700,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0160",
+              "cacheMissInputCost": "0.1360",
+              "outputCost": "0.0056",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0021",
+              "total": "0.1576"
+            }
+          },
+          "total": {
+            "sessions": 2,
+            "requests": 4,
+            "tokens": {
+              "input": 510000,
+              "output": 7700,
+              "cacheRead": 3180000,
+              "cacheWrite": 53000,
+              "reasoning": 2760
+            },
+            "cost": {
+              "cacheHitInputTokens": 3180000,
+              "cacheMissInputTokens": 563000,
+              "outputTokens": 7700,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.1272",
+              "cacheMissInputCost": "1.1260",
+              "outputCost": "0.0616",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0221",
+              "total": "1.3148"
+            }
+          }
+        },
+        {
+          "uid": "claude:a1",
+          "id": "a1",
+          "agent": "claude",
+          "projectId": "-ws-demo-app",
+          "projectName": "demo-app",
+          "workspace": "/ws/demo-app",
+          "title": "review the diff",
+          "cwd": "/ws/demo-app",
+          "createdAt": 1790129100000,
+          "firstUsage": 1790129100000,
+          "lastUsage": 1790129100000,
+          "requests": 1,
+          "tokens": {
+            "input": 60000,
+            "output": 700,
+            "cacheRead": 400000,
+            "cacheWrite": 8000,
+            "reasoning": 260
+          },
+          "cost": {
+            "cacheHitInputTokens": 400000,
+            "cacheMissInputTokens": 68000,
+            "outputTokens": 700,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.0160",
+            "cacheMissInputCost": "0.1360",
+            "outputCost": "0.0056",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0021",
+            "total": "0.1576"
+          },
+          "isSubagent": true,
+          "depth": 1,
+          "archived": false,
+          "subagentCount": 0,
+          "parentId": "11111111-1111-4111-8111-111111111111",
+          "own": {
+            "sessions": 1,
+            "requests": 1,
+            "tokens": {
+              "input": 60000,
+              "output": 700,
+              "cacheRead": 400000,
+              "cacheWrite": 8000,
+              "reasoning": 260
+            },
+            "cost": {
+              "cacheHitInputTokens": 400000,
+              "cacheMissInputTokens": 68000,
+              "outputTokens": 700,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0160",
+              "cacheMissInputCost": "0.1360",
+              "outputCost": "0.0056",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0021",
+              "total": "0.1576"
+            }
+          },
+          "spawned": {
+            "sessions": 0,
+            "requests": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0
+            },
+            "cost": {
+              "cacheHitInputTokens": 0,
+              "cacheMissInputTokens": 0,
+              "outputTokens": 0,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0000",
+              "cacheMissInputCost": "0.0000",
+              "outputCost": "0.0000",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0000",
+              "total": "0.0000"
+            }
+          },
+          "total": {
+            "sessions": 1,
+            "requests": 1,
+            "tokens": {
+              "input": 60000,
+              "output": 700,
+              "cacheRead": 400000,
+              "cacheWrite": 8000,
+              "reasoning": 260
+            },
+            "cost": {
+              "cacheHitInputTokens": 400000,
+              "cacheMissInputTokens": 68000,
+              "outputTokens": 700,
+              "cacheWriteTokens": 0,
+              "cacheHitInputCost": "0.0160",
+              "cacheMissInputCost": "0.1360",
+              "outputCost": "0.0056",
+              "cacheWriteInputCost": "0.0000",
+              "reasoningCost": "0.0021",
+              "total": "0.1576"
+            }
+          }
+        }
+      ],
+      "models": [
+        {
+          "agent": "claude",
+          "projectId": "-ws-demo-app",
+          "model": "deepseek-flash",
+          "requests": 3,
+          "tokens": {
+            "input": 420000,
+            "output": 3700,
+            "cacheRead": 2880000,
+            "cacheWrite": 44000,
+            "reasoning": 1260
+          },
+          "cost": {
+            "cacheHitInputTokens": 0,
+            "cacheMissInputTokens": 0,
+            "outputTokens": 0,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.1152",
+            "cacheMissInputCost": "0.9280",
+            "outputCost": "0.0296",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0101",
+            "total": "1.0728"
+          }
+        },
+        {
+          "agent": "claude",
+          "projectId": "-ws-demo-app",
+          "model": "deepseek-pro",
+          "requests": 1,
+          "tokens": {
+            "input": 90000,
+            "output": 4000,
+            "cacheRead": 300000,
+            "cacheWrite": 9000,
+            "reasoning": 1500
+          },
+          "cost": {
+            "cacheHitInputTokens": 0,
+            "cacheMissInputTokens": 0,
+            "outputTokens": 0,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.0120",
+            "cacheMissInputCost": "0.1980",
+            "outputCost": "0.0320",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0120",
+            "total": "0.2420"
+          }
+        }
+      ],
+      "bands": [
+        {
+          "agent": "claude",
+          "projectId": "-ws-demo-app",
+          "model": "deepseek-flash",
+          "periodId": "2026-09-10",
+          "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
+          "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
+          "tier": "peak",
+          "resolution": "exact",
+          "requests": 3,
+          "tokens": {
+            "input": 420000,
+            "output": 3700,
+            "cacheRead": 2880000,
+            "cacheWrite": 44000,
+            "reasoning": 1260
+          },
+          "cost": {
+            "cacheHitInputTokens": 0,
+            "cacheMissInputTokens": 0,
+            "outputTokens": 0,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.1152",
+            "cacheMissInputCost": "0.9280",
+            "outputCost": "0.0296",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0101",
+            "total": "1.0728"
+          },
+          "components": [
+            {
+              "id": "input-hit",
+              "label": "缓存命中输入",
+              "rate": "0.04",
+              "per": 1000000,
+              "tokens": 2880000,
+              "amount": "0.1152"
+            },
+            {
+              "id": "input-miss",
+              "label": "缓存未命中输入",
+              "rate": "2",
+              "per": 1000000,
+              "tokens": 464000,
+              "amount": "0.9280"
+            },
+            {
+              "id": "output",
+              "label": "输出",
+              "rate": "8",
+              "per": 1000000,
+              "tokens": 3700,
+              "amount": "0.0296"
+            }
+          ]
+        },
+        {
+          "agent": "claude",
+          "projectId": "-ws-demo-app",
+          "model": "deepseek-pro",
+          "periodId": "2026-09-10",
+          "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
+          "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
+          "tier": "peak",
+          "resolution": "fallback-default",
+          "requests": 1,
+          "tokens": {
+            "input": 90000,
+            "output": 4000,
+            "cacheRead": 300000,
+            "cacheWrite": 9000,
+            "reasoning": 1500
+          },
+          "cost": {
+            "cacheHitInputTokens": 0,
+            "cacheMissInputTokens": 0,
+            "outputTokens": 0,
+            "cacheWriteTokens": 0,
+            "cacheHitInputCost": "0.0120",
+            "cacheMissInputCost": "0.1980",
+            "outputCost": "0.0320",
+            "cacheWriteInputCost": "0.0000",
+            "reasoningCost": "0.0120",
+            "total": "0.2420"
+          },
+          "components": [
+            {
+              "id": "input-hit",
+              "label": "缓存命中输入",
+              "rate": "0.04",
+              "per": 1000000,
+              "tokens": 300000,
+              "amount": "0.0120"
+            },
+            {
+              "id": "input-miss",
+              "label": "缓存未命中输入",
+              "rate": "2",
+              "per": 1000000,
+              "tokens": 99000,
+              "amount": "0.1980"
+            },
+            {
+              "id": "output",
+              "label": "输出",
+              "rate": "8",
+              "per": 1000000,
+              "tokens": 4000,
+              "amount": "0.0320"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repos": [],
+  "timeseries": {
+    "day": [
+      {
+        "t": 1790092800000,
+        "bucket": "day",
+        "agent": "claude",
+        "projectId": "-ws-demo-app",
+        "requests": 3,
+        "tokens": {
+          "input": 420000,
+          "output": 3700,
+          "cacheRead": 2880000,
+          "cacheWrite": 44000,
+          "reasoning": 1260
+        },
+        "cost": "1.0728"
+      },
+      {
+        "t": 1790179200000,
+        "bucket": "day",
+        "agent": "claude",
+        "projectId": "-ws-demo-app",
+        "requests": 1,
+        "tokens": {
+          "input": 90000,
+          "output": 4000,
+          "cacheRead": 300000,
+          "cacheWrite": 9000,
+          "reasoning": 1500
+        },
+        "cost": "0.2420"
+      },
+      {
+        "t": 1790265600000,
+        "bucket": "day",
+        "agent": "claude",
+        "projectId": "-ws-other",
+        "requests": 2,
+        "tokens": {
+          "input": 83000,
+          "output": 1100,
+          "cacheRead": 270000,
+          "cacheWrite": 9000,
+          "reasoning": 350
+        },
+        "cost": "0.2036"
+      }
+    ],
+    "hour": [
+      {
+        "t": 1790128800000,
+        "bucket": "hour",
+        "agent": "claude",
+        "projectId": "-ws-demo-app",
+        "requests": 3,
+        "tokens": {
+          "input": 420000,
+          "output": 3700,
+          "cacheRead": 2880000,
+          "cacheWrite": 44000,
+          "reasoning": 1260
+        },
+        "cost": "1.0728"
+      },
+      {
+        "t": 1790211600000,
+        "bucket": "hour",
+        "agent": "claude",
+        "projectId": "-ws-demo-app",
+        "requests": 1,
+        "tokens": {
+          "input": 90000,
+          "output": 4000,
+          "cacheRead": 300000,
+          "cacheWrite": 9000,
+          "reasoning": 1500
+        },
+        "cost": "0.2420"
+      },
+      {
+        "t": 1790316000000,
+        "bucket": "hour",
+        "agent": "claude",
+        "projectId": "-ws-other",
+        "requests": 1,
+        "tokens": {
+          "input": 45000,
+          "output": 600,
+          "cacheRead": 150000,
+          "cacheWrite": 5000,
+          "reasoning": 200
+        },
+        "cost": "0.1108"
+      },
+      {
+        "t": 1790319600000,
+        "bucket": "hour",
+        "agent": "claude",
+        "projectId": "-ws-other",
+        "requests": 1,
+        "tokens": {
+          "input": 38000,
+          "output": 500,
+          "cacheRead": 120000,
+          "cacheWrite": 4000,
+          "reasoning": 150
+        },
+        "cost": "0.0928"
+      }
+    ]
+  },
+  "models": [
+    {
+      "agent": "claude",
+      "projectId": "-ws-demo-app",
+      "model": "deepseek-flash",
+      "requests": 3,
+      "tokens": {
+        "input": 420000,
+        "output": 3700,
+        "cacheRead": 2880000,
+        "cacheWrite": 44000,
+        "reasoning": 1260
+      },
+      "cost": {
+        "cacheHitInputTokens": 0,
+        "cacheMissInputTokens": 0,
+        "outputTokens": 0,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.1152",
+        "cacheMissInputCost": "0.9280",
+        "outputCost": "0.0296",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0101",
+        "total": "1.0728"
+      }
+    },
+    {
+      "agent": "claude",
+      "projectId": "-ws-demo-app",
+      "model": "deepseek-pro",
+      "requests": 1,
+      "tokens": {
+        "input": 90000,
+        "output": 4000,
+        "cacheRead": 300000,
+        "cacheWrite": 9000,
+        "reasoning": 1500
+      },
+      "cost": {
+        "cacheHitInputTokens": 0,
+        "cacheMissInputTokens": 0,
+        "outputTokens": 0,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.0120",
+        "cacheMissInputCost": "0.1980",
+        "outputCost": "0.0320",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0120",
+        "total": "0.2420"
+      }
+    },
+    {
+      "agent": "claude",
+      "projectId": "-ws-other",
+      "model": "deepseek-flash",
+      "requests": 2,
+      "tokens": {
+        "input": 83000,
+        "output": 1100,
+        "cacheRead": 270000,
+        "cacheWrite": 9000,
+        "reasoning": 350
+      },
+      "cost": {
+        "cacheHitInputTokens": 0,
+        "cacheMissInputTokens": 0,
+        "outputTokens": 0,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.0108",
+        "cacheMissInputCost": "0.1840",
+        "outputCost": "0.0088",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0028",
+        "total": "0.2036"
+      }
+    }
+  ],
+  "bands": [
+    {
+      "agent": "claude",
+      "projectId": "-ws-demo-app",
+      "model": "deepseek-flash",
+      "periodId": "2026-09-10",
+      "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
+      "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
+      "tier": "peak",
+      "resolution": "exact",
+      "requests": 3,
+      "tokens": {
+        "input": 420000,
+        "output": 3700,
+        "cacheRead": 2880000,
+        "cacheWrite": 44000,
+        "reasoning": 1260
+      },
+      "cost": {
+        "cacheHitInputTokens": 0,
+        "cacheMissInputTokens": 0,
+        "outputTokens": 0,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.1152",
+        "cacheMissInputCost": "0.9280",
+        "outputCost": "0.0296",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0101",
+        "total": "1.0728"
+      },
+      "components": [
+        {
+          "id": "input-hit",
+          "label": "缓存命中输入",
+          "rate": "0.04",
+          "per": 1000000,
+          "tokens": 2880000,
+          "amount": "0.1152"
+        },
+        {
+          "id": "input-miss",
+          "label": "缓存未命中输入",
+          "rate": "2",
+          "per": 1000000,
+          "tokens": 464000,
+          "amount": "0.9280"
+        },
+        {
+          "id": "output",
+          "label": "输出",
+          "rate": "8",
+          "per": 1000000,
+          "tokens": 3700,
+          "amount": "0.0296"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "projectId": "-ws-demo-app",
+      "model": "deepseek-pro",
+      "periodId": "2026-09-10",
+      "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
+      "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
+      "tier": "peak",
+      "resolution": "fallback-default",
+      "requests": 1,
+      "tokens": {
+        "input": 90000,
+        "output": 4000,
+        "cacheRead": 300000,
+        "cacheWrite": 9000,
+        "reasoning": 1500
+      },
+      "cost": {
+        "cacheHitInputTokens": 0,
+        "cacheMissInputTokens": 0,
+        "outputTokens": 0,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.0120",
+        "cacheMissInputCost": "0.1980",
+        "outputCost": "0.0320",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0120",
+        "total": "0.2420"
+      },
+      "components": [
+        {
+          "id": "input-hit",
+          "label": "缓存命中输入",
+          "rate": "0.04",
+          "per": 1000000,
+          "tokens": 300000,
+          "amount": "0.0120"
+        },
+        {
+          "id": "input-miss",
+          "label": "缓存未命中输入",
+          "rate": "2",
+          "per": 1000000,
+          "tokens": 99000,
+          "amount": "0.1980"
+        },
+        {
+          "id": "output",
+          "label": "输出",
+          "rate": "8",
+          "per": 1000000,
+          "tokens": 4000,
+          "amount": "0.0320"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "projectId": "-ws-other",
+      "model": "deepseek-flash",
+      "periodId": "2026-09-10",
+      "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
+      "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
+      "tier": "peak",
+      "resolution": "exact",
+      "requests": 2,
+      "tokens": {
+        "input": 83000,
+        "output": 1100,
+        "cacheRead": 270000,
+        "cacheWrite": 9000,
+        "reasoning": 350
+      },
+      "cost": {
+        "cacheHitInputTokens": 0,
+        "cacheMissInputTokens": 0,
+        "outputTokens": 0,
+        "cacheWriteTokens": 0,
+        "cacheHitInputCost": "0.0108",
+        "cacheMissInputCost": "0.1840",
+        "outputCost": "0.0088",
+        "cacheWriteInputCost": "0.0000",
+        "reasoningCost": "0.0028",
+        "total": "0.2036"
+      },
+      "components": [
+        {
+          "id": "input-hit",
+          "label": "缓存命中输入",
+          "rate": "0.04",
+          "per": 1000000,
+          "tokens": 270000,
+          "amount": "0.0108"
+        },
+        {
+          "id": "input-miss",
+          "label": "缓存未命中输入",
+          "rate": "2",
+          "per": 1000000,
+          "tokens": 92000,
+          "amount": "0.1840"
+        },
+        {
+          "id": "output",
+          "label": "输出",
+          "rate": "8",
+          "per": 1000000,
+          "tokens": 1100,
+          "amount": "0.0088"
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
