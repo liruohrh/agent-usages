@@ -73,7 +73,13 @@ export function Settings({
     const controller = new AbortController();
     fetchConfig(controller.signal)
       .then(adopt)
-      .catch((cause: unknown) => setError((cause as Error).message));
+      // React runs an effect twice in development to surface missing cleanups;
+      // the first run's fetch is aborted by its own cleanup, and that rejection
+      // is not a page that failed to load.
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        setError((cause as Error).message);
+      });
     return () => controller.abort();
   }, []);
 
@@ -166,7 +172,16 @@ export function Settings({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-[18px] font-semibold">{t.settings.title}</h1>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className={button} onClick={() => { setStatus({ kind: 'clean' }); fetchConfig().then(adopt).catch(() => undefined); }}>
+          <button
+            type="button"
+            className={button}
+            onClick={() => {
+              setStatus({ kind: 'clean' });
+              fetchConfig()
+                .then(adopt)
+                .catch((cause: unknown) => setError((cause as Error).message));
+            }}
+          >
             {t.settings.reload}
           </button>
           <button type="button" className={button} disabled={!dirty || status.kind === 'saving'} onClick={() => adopt({ ...loaded })}>

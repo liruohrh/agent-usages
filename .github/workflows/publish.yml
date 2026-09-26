@@ -1,0 +1,34 @@
+# Publishing: a tag does it, so the tarball on npm is always a commit that
+# passed the suite — and always contains the front end it was built with.
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          registry-url: https://registry.npmjs.org
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - run: pnpm install --frozen-lockfile
+      # The published package carries `web/dist` (see `files` in package.json),
+      # so the web UI needs no build on the user's machine — but the tarball must
+      # not ship a stale bundle, hence a build here and `prepack` as the belt.
+      - run: pnpm test
+      - run: pnpm --filter web typecheck
+      - run: pnpm web:smoke
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

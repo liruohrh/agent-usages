@@ -2,7 +2,6 @@
   "name": "@agent/usages",
   "version": "0.2.0",
   "packageManager": "pnpm@11.3.0",
-  "private": true,
   "description": "统计 coding agent 的 token 消耗与费用：agent 与模型价格两个维度均可扩展，支持项目/会话/子代理维度、时间范围与分时段峰谷定价",
   "keywords": [
     "token",
@@ -49,6 +48,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
+    "prepack": "pnpm --filter web build",
     "serve": "node src/serve/main.ts",
     "web:dev": "pnpm --filter web dev",
     "web:build": "pnpm --filter web build",

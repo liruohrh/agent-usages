@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { formatDecimal, parseDecimal, sumAmounts } from '../src/core/money.ts';
@@ -755,6 +755,36 @@ describe('serve', () => {
     snapshotFile = target;
     return target;
   }
+
+  it('opens the report in the browser, from a file the user can keep', async () => {
+    const { code, stdout } = await cli(['usage', '--range', 'month', '--open'], { AGENT_USAGES_NO_BROWSER: '1' });
+    expect(code).toBe(0);
+    const written = /已写入 (.+)$/m.exec(stdout)?.[1]?.trim();
+    expect(written, stdout.slice(0, 200)).toBeDefined();
+    // The default home is the system temporary directory, not the cwd.
+    expect(written).toContain('agent-usages-usage-');
+    const document = readFileSync(written as string, 'utf8');
+    expect(document.startsWith('<!doctype html>')).toBe(true);
+    expect(document).toContain('</html>');
+  });
+
+  it('lets --html name the path --open shows', async () => {
+    const target = join(home, 'opened-report.html');
+    const { code, stdout } = await cli(['usage', '--range', 'month', '--open', '--html', target], {
+      AGENT_USAGES_NO_BROWSER: '1',
+    });
+    expect(code).toBe(0);
+    expect(stdout).toContain(target);
+    expect(readFileSync(target, 'utf8').startsWith('<!doctype html>')).toBe(true);
+  });
+
+  it('spells `ui` as `serve --open`', async () => {
+    const { code, stdout } = await cli(['ui', '--help']);
+    expect(code).toBe(0);
+    // The alias is the serve command, options and all.
+    expect(stdout).toContain('serve [options]');
+    expect(stdout).toContain('--snapshot');
+  });
 
   it('documents the platform and every option it takes', async () => {
     const { code, stdout } = await cli(['serve', '--help']);

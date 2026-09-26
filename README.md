@@ -24,41 +24,37 @@ DeepSeek 只是**目前唯一支持的计价来源**。两者互不知情：agen
 
 ## 快速开始
 
+装好即用（Node ≥ 22.6，无需构建）：
+
 ```bash
+# 看一眼：本月花了多少，直接用浏览器打开报告（不启服务）
+npx @agent/usages usage --range month --open
+
+# 想要常驻的分析平台（项目树 + 榜单 + 图表），一条命令起来
+npx @agent/usages ui
+```
+
+`ui` 就是 `serve --open`。报告也可以存成文件或进管道：
+
+> **`@agent/usages` 还没发布到 npm 之前**，上面的 `npx` 会 404：先用 `npm pack` 的产物
+> （`npx ./agent-usages-0.2.0.tgz ui`）或直接走下面的源码路径；发布是维护者一步 tag，见文末「发布」。
+
+```bash
+npx @agent/usages usage --range month --html ~/usage.html   # 自包含单文件，可直接发给别人
+npx @agent/usages usage --range month --json               # 结构化输出
+npx @agent/usages session list                              # 项目与会话清单
+npx @agent/usages price                                     # 价格表（含峰谷与节假日规则）
+```
+
+### 从源码跑（开发）
+
+```bash
+git clone https://github.com/liruohrh/agent-usages && cd agent-usages
 pnpm install
-
-# 全部用量汇总（默认维度）
-pnpm cli usage
-
-# 按项目 / 按会话（含每个项目下的会话明细）
-pnpm cli usage --project
-pnpm cli usage --session
-
-# 列出所有项目与会话
-pnpm cli session list
-
-# 查看价格表；列出支持的 agent 与计价来源
-pnpm cli price
-pnpm cli agents
-
-# 本地 Web 分析平台（前端需先 pnpm --filter web build 一次）
-pnpm cli serve --open
+pnpm cli usage --range month       # 等价于 node src/cli.ts usage --range month
+pnpm cli ui                        # Web 平台；前端要先 pnpm web:build 一次
+pnpm link --global                 # 装到 PATH 后用 agent-usages …
 ```
-
-也可以直接用 Node 运行（无需构建，Node 原生擦除 TypeScript 类型）：
-
-```bash
-node src/cli.ts usage --year --json
-node src/cli.ts agents --json
-```
-
-或全局链接后使用 `agent-usages`：
-
-```bash
-pnpm link --global   # 之后可直接执行 agent-usages usage --month
-```
-
-要求 Node ≥ 22.6（类型擦除）。
 
 ### 目标 agent 与数据目录
 
@@ -339,21 +335,41 @@ feature-x (~/ws/apps/demo-app/feature-x)  ← ~/ws/apps/demo-app 的 worktree
 
 ## 安装与发布
 
-本仓库直接用 Node 运行 TypeScript（Node 22.6+ 原生类型剥离，无构建步骤）：
+三种装法，按"想省多少事"排序：
+
+| 方式 | 命令 | 需要什么 |
+| --- | --- | --- |
+| **npx（推荐给使用者）** | `npx @agent/usages ui` | Node ≥ 22.6；零 clone、零构建——**前端已随包**（`web/dist`，约 930 KB） |
+| 全局安装 | `npm i -g @agent/usages && agent-usages ui` | 同上 |
+| 从源码 | 见下 | Node ≥ 22.6 + pnpm；web 要先 `pnpm web:build` |
+
+包直接用 Node 运行 TypeScript（22.6+ 原生类型剥离），所以**运行时没有构建步骤**：
+`bin/agent-usages.js` 在 22.6–22.17 上加 `--experimental-strip-types`，更新的版本上这个开关是空操作。
+唯一的构建产物是前端，它在 `prepack` 里构建并随包发布，使用者不需要碰 vite。
+
+### 从源码
 
 ```bash
 git clone https://github.com/liruohrh/agent-usages && cd agent-usages
 pnpm install
-pnpm cli usage            # 等价于 node src/cli.ts usage
-# 或者装到 PATH
-pnpm link --global && agent-usages usage
+pnpm cli usage --range month      # 等价于 node src/cli.ts usage --range month
+pnpm web:build && pnpm cli ui     # Web 平台（仓库路径下前端要先构建）
+pnpm link --global                # 装到 PATH 后用 agent-usages …
 ```
 
-包已按可发布整理（`files` 含 `bin/`、`src/`、`config/`、`docs/`，`npm pack --dry-run` 有测试守着，
-保证随包的默认价格表/汇率表不会漏）。真要发布还差两步，由维护者决定：
+### 发布（维护者）
 
-1. `private` 改成 `false`，并把包名 `@agent/usages` 换成你拥有的名字（当前是 scoped 名，需要对应 npm 组织）；
-2. `npm publish`（`prepublishOnly` 没有额外步骤，发布的就是源码 + `config/`）。
+```bash
+pnpm pack:check        # 只列 tarball 内容（测试也用它守着：config/、web/dist 不能漏）
+git tag v0.2.1 && git push origin v0.2.1
+```
+
+打 tag 后 `.github/workflows/publish.yml` 会跑测试 + 冒烟，然后 `npm publish --provenance`
+（需要仓库 secret `NPM_TOKEN`）。`prepack` 钩子在打包时构建前端，所以 npm 上的 tarball 永远带着
+与源码同一次构建的 `web/dist`。本地发布就 `npm publish`，效果相同。
+
+包名现在是 `@agent/usages`（scoped，需要对应的 npm 组织）；要换成别的名字，改 `package.json`
+的 `name` 与本文里的 `npx` 行即可——仓库 URL、更新用的 GitHub raw 地址都与包名无关。
 
 
 ---

@@ -96,14 +96,26 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 
 ## 1. 启动
 
+从 npm 装的话，一条命令就够（包里带着构建好的前端，`prepack` 保证它是同一次构建的产物）：
+
+```sh
+npx @agent/usages ui            # = serve --open，起平台并打开浏览器
+npx @agent/usages usage --range month --open   # 不起服务：生成 HTML 报告并用浏览器打开
+```
+
+仓库里跑则要先装依赖、构建前端（约 930 KB）：
+
 ```sh
 pnpm install                # 仓库根，装 Web 与服务端依赖
-pnpm --filter web build     # 构建前端 → web/dist（约 870 KB，见 §7）
+pnpm --filter web build     # 构建前端 → web/dist（见 §2 目录结构）
 
 agent-usages serve --port 7788 --open    # 一等公民命令，参数由 commander 解析
-pnpm cli serve                           # 不想装到 PATH 时，pnpm cli = node src/cli.ts
+pnpm cli ui                              # 不想装到 PATH 时，pnpm cli = node src/cli.ts
 pnpm serve                               # = node src/serve/main.ts，不经过 CLI 的独立入口
 ```
+
+`ui` 是 `serve --open` 的简写（argv 里替换，不是第二份命令定义），所以参数完全一样：
+`npx @agent/usages ui --port 8000`。
 
 `agent-usages serve` 与 `pnpm serve` 是同一条路径的两种入口：前者走 CLI（帮助文案有
 中英两套、和别的子命令共享 `--agent/--home/--no-update`），后者是给「还没装 CLI、只想
@@ -112,9 +124,9 @@ pnpm serve                               # = node src/serve/main.ts，不经过 
 构建产物不存在时，服务仍然可用：非 API 路径会返回一段提示页，告诉你先跑
 `pnpm --filter web build` 或改用 `--dev`，而 `/api/*` 一直是通的。
 
-`web/dist` 已列进 `package.json` 的 `files`：**先构建再发布**，`npm i -g` 装到的包里就带着
-仪表盘（打包体积 535.8 kB，2026-09-25 18:42 实测 `npm pack --dry-run`）；忘了构建也能装，
-只是首页只有那张提示页。
+`web/dist` 已列进 `package.json` 的 `files`，并且 `prepack` 会在打包前构建它，所以 npm 上的
+tarball 一定带着仪表盘（2026-09-26 实测：577.9 kB 打包 / 1.9 MB 解包，`npm pack --dry-run` 有
+测试守着 `web/dist/index.html` 与 assets）；仓库里忘了构建也能起服务，只是首页只有那张提示页。
 
 ### 参数
 

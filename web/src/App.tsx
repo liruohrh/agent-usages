@@ -62,8 +62,11 @@ export function App(): React.ReactElement {
         setLanguage(settings.language);
       })
       // A page that cannot read the settings still works: the server's own
-      // language is what an unqualified request already gets.
-      .catch(() => setLanguage('zh'));
+      // language is what an unqualified request already gets. An aborted trial
+      // run (React's development double-effect) says nothing about either.
+      .catch(() => {
+        if (!controller.signal.aborted) setLanguage('zh');
+      });
     return () => controller.abort();
   }, []);
 

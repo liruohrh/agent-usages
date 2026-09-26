@@ -28,10 +28,13 @@ import {
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
 import { resolveRange } from './timerange.ts';
 import { resolveLanguage, setLanguage, t } from './i18n/index.ts';
+import { openInBrowser } from './open.ts';
 import { renderDiagnostic, UserError, type Warning } from './i18n/errors.ts';
 import { mergeDatasets } from './core/merge.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { resolveConfig, type ResolvedConfig } from './config/resolve.ts';
@@ -87,6 +90,8 @@ interface UsageOptions extends GlobalOptions {
   noEnrich?: boolean;
   /** `--html <path>` writes a file; `--html` or `--html -` writes to stdout. */
   html?: string | boolean;
+  /** `--open`: write the report somewhere the browser can read it, and show it. */
+  open?: boolean;
 }
 
 /** Options accepted by `serve`. */
@@ -428,13 +433,26 @@ async function runUsage(options: UsageOptions): Promise<void> {
   // A written file replaces the text report: printing the tree as well would bury
   // the one line that says where it went. `--json` keeps its stream, because a
   // script asked for a machine-readable answer rather than a rendering.
-  if (options.html !== undefined) {
+  if (options.html !== undefined || options.open === true) {
     const headings: ReportHeadings = {
       symbol,
       agentLabel: agentLabelOf(loaded.adapters),
       pricingLabel: engine.provider.label,
       scope: subagentMode !== 'total',
     };
+    // `--open` is "show me the report now": it writes the same document
+    // somewhere the browser can read — the path `--html` named, or a file of
+    // its own under the system's temporary directory, overwritten per day so
+    // repeated runs do not litter.
+    const tempPath = join(
+      tmpdir(),
+      `agent-usages-usage-${new Date().toISOString().slice(0, 10)}.html`,
+    );
+    if (options.open === true && (options.html === undefined || options.html === true || options.html === '-')) {
+      await writeHtmlReport(tempPath, sections, headings, options.json === true, requests);
+      if (process.exitCode !== EXIT_ERROR) await openInBrowser(tempPath);
+      return;
+    }
     // `--html` with no value, or `--html -`, is the pipeline spelling: the
     // document goes to stdout so it can be piped or redirected.
     const toStdout = options.html === true || options.html === '-';
@@ -449,6 +467,7 @@ async function runUsage(options: UsageOptions): Promise<void> {
       process.stderr.write(`agent-usages: ${t().html.stdoutTakenByJson}\n`);
     } else {
       await writeHtmlReport(String(options.html), sections, headings, options.json === true, requests);
+      if (options.open === true && process.exitCode !== EXIT_ERROR) await openInBrowser(String(options.html));
       return;
     }
   }
@@ -829,6 +848,7 @@ export function buildProgram(): Command {
       .option('--cost', t().help.cost)
       .option('--models', t().help.models)
       .option('--html [path]', t().help.html)
+      .option('--open', t().help.usageOpen)
       .option('-p, --project-filter <selector>', t().help.projectFilter, collect)
       .option('-s, --session-filter <selector>', t().help.sessionFilter, collect)
       .option('-r, --repo-filter <selector>', t().help.repoFilter, collect)
@@ -944,7 +964,12 @@ async function main(): Promise<void> {
   const program = buildProgram();
   program.exitOverride();
   try {
-    await program.parseAsync(process.argv);
+    // `ui` is the short spelling users reach for: the same command with the
+    // browser step turned on. Rewriting argv keeps one definition of `serve`
+    // (and its options) instead of a second, drifting copy under another name.
+    const argv = [...process.argv];
+    if (argv[2] === 'ui') argv.splice(2, 1, 'serve', '--open');
+    await program.parseAsync(argv);
   } catch (error) {
     // commander throws for --help/--version and for parse failures alike.
     const code = (error as { exitCode?: number }).exitCode;

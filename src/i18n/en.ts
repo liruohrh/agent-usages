@@ -176,6 +176,8 @@ export const en: Messages = {
     currencyRate: 'rate from 1 unit of the priced currency (usable alone; then no currency is named)',
     rateMode: 'latest (default, one rate throughout) or historical (each record’s own date)',
     html: 'write the report to an HTML file (inlined styles and chart, no scripts); `--html <path>` writes a file, `--html` or `--html -` writes to stdout',
+    usageOpen:
+      'render the HTML report and open it in the browser (a file under the system temp directory, overwritten the same day; `--html <path>` puts it where you say)',
     sessionCommand: 'session operations',
     sessionList: 'list every project and session (projects by first use, newest first; sessions newest first)',
     sessionListSubagents: 'list subagents on their own rows (folded into their parent by default)',
@@ -192,6 +194,7 @@ export const en: Messages = {
     updateForce: 'ignore the check interval and check now',
     updateWrite: 'write the fetched rates back to config/rates.json, for review and commit',
     checkConfig: 'validate the price and rate files under config/ (run before committing)',
+    ui: 'same as `serve --open`: run the platform and open it in the browser',
     serve:
       'run the local web analysis platform: a project / workspace / session / subagent tree, per-agent and total figures, time series and pricing detail (read-only)',
     servePort: 'port to listen on (default 7788; 0 picks a free one)',
