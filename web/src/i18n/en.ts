@@ -125,12 +125,8 @@ export const en: Messages = {
       `${sessions} session${s(sessions)} (${subagents} subagent${s(subagents)})`,
     unpriced: (count: string) => `${count} unpriced`,
     tokens: 'billed tokens = I/T + O/T',
-    hitRate: 'I/C share',
+    hitRate: 'I/C cache',
     hitRateHint: 'cache-hit input ÷ input total (I/C ÷ I/T)',
-    cacheRead: (value: string) => `I/C ${value}`,
-    inputTotal: (value: string) => `I/T ${value}`,
-    reasoning: (value: string) => `R ${value}`,
-    cacheWrite: (value: string) => `I/W ${value}`,
   },
   overview: {
     composition: 'Composition',
@@ -156,7 +152,7 @@ export const en: Messages = {
   usage: {
     scope: 'Usage in this scope',
     scopeRule: 'own + spawned = total',
-    columns: { range: 'Scope', hitRate: 'I/C share' },
+    columns: { range: 'Scope', hitRate: 'I/C cache' },
     scopeNote: (share: string) =>
       `Spawned share ${share}; same figures as the CLI’s usage --subagent, same abbreviations (Q I/M I/C I/W I/T O R O/T T).`,
     detail: 'Every figure',

@@ -203,18 +203,41 @@ async function twoProjects(page: Page): Promise<ApiDashboard['projects']> {
 }
 
 test.describe('the overview', () => {
-  test('leads with four figures, not with a wall of numbers', async ({ page }) => {
+  test('leads with four figures, in the order a reader asks for them', async ({ page }) => {
     await page.goto('/');
     const dashboard = await apiDashboard(page);
     const cards = page.locator('main div.grid > div.rounded-xl');
     await expect(cards).toHaveCount(4);
     const texts = (await cards.allInnerTexts()).join(' ');
-    for (const label of ['Q', 'T', 'I/C 占比']) expect(texts).toContain(label);
     // The money card names itself: the amount carries the currency symbol, so no
     // column heading and no card label spell it out.
     expect(texts).not.toContain('费用');
     expect(texts).not.toContain('金额');
     expect(texts).toContain(dashboard.totals.cost.total);
+
+    // Money, `T`, `I/C`, `Q` — and each card says one thing: the buckets and
+    // their money belong to the composition card below, not to a card's hint.
+    const labels = await cards.evaluateAll((nodes) =>
+      nodes.map((node) => (node.innerText.split('\n')[0] ?? '').trim()),
+    );
+    expect(labels[0]).toContain('¥');
+    expect(labels.slice(1)).toEqual(['T', 'I/C 缓存', 'Q']);
+    const lines = await cards.evaluateAll((nodes) =>
+      nodes.map((node) =>
+        node.innerText
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0),
+      ),
+    );
+    // Money has no label (2 lines: amount, currency); `T` and `I/C` have a label
+    // and a number and nothing else — the buckets belong to the composition card
+    // below; `Q` keeps its session count.
+    expect(lines.map((card) => card.length)).toEqual([2, 2, 2, 3]);
+    expect(lines[1]?.[0]).toBe('T');
+    expect(lines[1]?.[1]).toMatch(/[\d万亿KMB.,]/);
+    expect(lines[2]?.[0]).toBe('I/C 缓存');
+    expect(lines[2]?.[1]).toMatch(/%$/);
   });
 
   test('shows where the tokens and the money went', async ({ page }) => {

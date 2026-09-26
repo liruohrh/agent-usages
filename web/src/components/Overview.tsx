@@ -62,6 +62,10 @@ export function Overview({
 
   return (
     <div className="space-y-4">
+      {/* Four figures, in the order a reader asks for them: what it cost, how
+          many tokens, how much of that came from the cache, how many requests.
+          The cards say one thing each — the buckets and their money are the
+          composition card below, so repeating them here would say it twice. */}
       <KpiRow
         items={[
           {
@@ -72,25 +76,21 @@ export function Overview({
             tone: 'accent',
           },
           {
-            label: 'Q',
-            title: t.kpi.requests,
-            value: formatTokens(requests),
-            hint: t.kpi.requestsHint(String(sessions), String(subagents)),
-            ...(unpriced > 0 ? { note: t.kpi.unpriced(String(unpriced)) } : {}),
-          },
-          {
             label: 'T',
             title: t.kpi.tokens,
             value: formatTokens(billed, true),
-            ...(tokens.reasoning > 0 ? { hint: t.kpi.reasoning(formatTokens(tokens.reasoning, true)) } : {}),
-            ...(tokens.cacheWrite > 0 ? { note: t.kpi.cacheWrite(formatTokens(tokens.cacheWrite, true)) } : {}),
           },
           {
             label: t.kpi.hitRate,
             title: t.kpi.hitRateHint,
             value: formatShare(cacheHit),
-            hint: t.kpi.cacheRead(formatTokens(tokens.cacheRead, true)),
-            note: t.kpi.inputTotal(formatTokens(inputTotal, true)),
+          },
+          {
+            label: 'Q',
+            title: t.kpi.requests,
+            value: formatTokens(requests),
+            hint: t.kpi.requestsHint(String(sessions), String(subagents)),
+            ...(unpriced > 0 ? { note: t.kpi.unpriced(String(unpriced)) } : {}),
           },
         ]}
       />

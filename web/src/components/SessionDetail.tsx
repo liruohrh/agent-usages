@@ -116,9 +116,6 @@ export function SessionDetailPanel({
             label: 'T',
             title: t.session.tokensTitle,
             value: formatTokens(session.total.tokens.input + session.total.tokens.output + session.total.tokens.cacheRead + session.total.tokens.cacheWrite, true),
-            ...(session.total.tokens.reasoning > 0
-              ? { hint: t.kpi.reasoning(formatTokens(session.total.tokens.reasoning, true)) }
-              : {}),
           },
           {
             label: t.session.spawnedLabel,

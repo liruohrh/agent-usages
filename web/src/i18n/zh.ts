@@ -133,12 +133,8 @@ export const zh = {
     requestsHint: (sessions: string, subagents: string) => `${sessions} 个会话（含 ${subagents} 个子代理）`,
     unpriced: (count: string) => `未计价 ${count}`,
     tokens: '计费桶 token 合计 = I/T + O/T',
-    hitRate: 'I/C 占比',
+    hitRate: 'I/C 缓存',
     hitRateHint: '缓存命中输入 ÷ 输入合计（I/C ÷ I/T）',
-    cacheRead: (value: string) => `I/C ${value}`,
-    inputTotal: (value: string) => `I/T ${value}`,
-    reasoning: (value: string) => `R ${value}`,
-    cacheWrite: (value: string) => `I/W ${value}`,
   },
   /** The overview tab. */
   overview: {
@@ -165,7 +161,7 @@ export const zh = {
   usage: {
     scope: '这部分的用量',
     scopeRule: '自身 + 子代理 = 总',
-    columns: { range: '范围', hitRate: 'I/C 占比' },
+    columns: { range: '范围', hitRate: 'I/C 缓存' },
     scopeNote: (share: string) =>
       `子代理占 ${share}；与 CLI 的 usage --subagent 同一口径，缩写也同 CLI（Q I/M I/C I/W I/T O R O/T T）。`,
     detail: '完整指标',
