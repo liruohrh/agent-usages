@@ -50,6 +50,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
+    "release:pack": "pnpm build && mkdir -p release && npm pack --ignore-scripts --pack-destination release",
+    "release:verify": "node scripts/verify-tarball.mjs",
     "prepare": "node scripts/prepare.mjs",
     "serve": "node src/serve/main.ts",
     "web:dev": "pnpm --filter web dev",

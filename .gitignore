@@ -7,6 +7,9 @@ node_modules/
 # under node_modules). Both are local artifacts, not something to review.
 web/dist/
 dist/
+# The tarballs `pnpm release:pack` builds and `release.yml` uploads; the released
+# copies live on the GitHub Release, not in the repository.
+release/
 # The offline fixture and the screenshots are dumps of *this* machine's usage:
 # real paths, session titles and amounts. They are generated on demand
 # (`pnpm web:snapshot`, see web/mock/README.md) and deliberately not tracked.

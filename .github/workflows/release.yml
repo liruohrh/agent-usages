@@ -1,0 +1,49 @@
+# Releasing: a tag produces the tarball users install.
+#
+# The point is that nobody builds the dashboard on their own machine. npm treats
+# a tarball like a published package and runs **no build scripts** for it, so an
+# install is seconds instead of the ~13 minutes a cold `github:` install costs
+# (measured 2026-09-26) — provided the tarball carries `dist/` (the compiled CLI:
+# Node refuses to strip types under `node_modules`) and `web/dist/`.
+#
+# The asset is the same `npm pack` output the npm registry path would publish, so
+# when the package name finally exists, `publish.yml` ships the identical bytes.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create the release and upload the asset
+
+jobs:
+  tarball:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - run: pnpm install --frozen-lockfile
+      # The asset must be a commit that passed the suite, same gates as publish.yml.
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm --filter web typecheck
+      - run: pnpm web:smoke
+      - run: pnpm release:pack
+      # Installs the tarball the way a user does and uses it: version, price table,
+      # config check, and a served page. Nothing gets uploaded before this passes.
+      - run: node scripts/verify-tarball.mjs release/agent-usages-*.tgz
+      - name: 建 release 并上传 tarball
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # `gh release create` on an annotated tag takes the tag's own message as
+          # the release body, so the curated notes live with the tag.
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --verify-tag
+          gh release upload "$GITHUB_REF_NAME" release/agent-usages-*.tgz --clobber
