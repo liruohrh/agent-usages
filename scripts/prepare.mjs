@@ -71,7 +71,11 @@ if (!existsSync(join(web, 'node_modules', 'vite'))) {
 // The CLI itself, compiled: Node refuses to strip types for files under
 // `node_modules`, so an installed copy must be plain JavaScript.
 process.stdout.write('agent-usages: compiling the CLI\n');
-if (!run('npm', ['run', 'build:cli', '--silent']) || !existsSync(join(repo, 'dist', 'cli.js'))) {
+const cli = join(repo, 'dist', 'cli', 'index.js');
+if (!run('npm', ['run', 'build:cli', '--silent']) || !existsSync(cli) || !run(process.execPath, [cli, '--version'])) {
+  // Verified by *running* it: this check must not be able to pass on a path that
+  // no longer exists, which is exactly what happened when the CLI moved into
+  // `src/cli/` and the compiled entry became `dist/cli/index.js`.
   warn('could not compile the CLI; run `pnpm build:cli` (or use a source checkout)');
 }
 
