@@ -145,6 +145,11 @@ describe('architecture', () => {
     for (const file of typescriptUnder('src')) {
       const from = layerOf(file);
       if (from === null) continue; // src/index.ts is the public API: it may name anything.
+      const allowed = MAY_IMPORT[from];
+      if (allowed === undefined) {
+        violations.push(`${from} is a new layer with no rule  (${file})`);
+        continue;
+      }
       for (const specifier of specifiersOf(file)) {
         if (!specifier.startsWith('.')) continue;
         const target = relative('src', resolve(ROOT, dirname(file), specifier));
@@ -155,7 +160,7 @@ describe('architecture', () => {
         const parts = target.split('/');
         if (parts.length === 1) continue; // `../index.ts`, the API barrel itself.
         const to = parts[0]!;
-        if (to !== from && !MAY_IMPORT[from]!.includes(to)) violations.push(`${from} → ${to}  (${file})`);
+        if (to !== from && !allowed.includes(to)) violations.push(`${from} → ${to}  (${file})`);
       }
     }
     expect(violations).toEqual([]);
@@ -165,10 +170,11 @@ describe('architecture', () => {
     const violations: string[] = [];
     for (const file of typescriptUnder('src')) {
       const layer = layerOf(file) ?? 'cli';
+      const allowed = MAY_USE[layer] ?? [];
       for (const specifier of specifiersOf(file)) {
         const name = packageOf(specifier);
         if (name === null) continue;
-        if (!MAY_USE[layer]!.includes(name)) violations.push(`${layer} uses ${name}  (${file})`);
+        if (!allowed.includes(name)) violations.push(`${layer} uses ${name}  (${file})`);
       }
     }
     expect(violations).toEqual([]);
