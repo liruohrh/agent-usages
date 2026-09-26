@@ -34,7 +34,7 @@
   ],
   "type": "module",
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.18"
   },
   "bin": {
     "agent-usages": "./bin/agent-usages.js"

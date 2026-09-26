@@ -24,27 +24,33 @@ DeepSeek 只是**目前唯一支持的计价来源**。两者互不知情：agen
 
 ## 快速开始
 
-装好即用（Node ≥ 22.6，无需构建）：
+**从 GitHub 直装**（不需要 npm 账号；首次安装会 clone 并构建，之后走 npm 缓存）：
 
 ```bash
 # 看一眼：本月花了多少，直接用浏览器打开报告（不启服务）
-npx @agent/usages usage --range month --open
+npx github:liruohrh/agent-usages usage --range month --open
 
 # 想要常驻的分析平台（项目树 + 榜单 + 图表），一条命令起来
-npx @agent/usages ui
+npx github:liruohrh/agent-usages ui
+
+# 固定版本/提交，或当成依赖写进 package.json
+npm i -g github:liruohrh/agent-usages#<tag 或 commit>
 ```
 
 `ui` 就是 `serve --open`。报告也可以存成文件或进管道：
 
-> **`@agent/usages` 还没发布到 npm 之前**，上面的 `npx` 会 404：先用 `npm pack` 的产物
-> （`npx ./agent-usages-0.2.0.tgz ui`）或直接走下面的源码路径；发布是维护者一步 tag，见文末「发布」。
-
 ```bash
-npx @agent/usages usage --range month --html ~/usage.html   # 自包含单文件，可直接发给别人
-npx @agent/usages usage --range month --json               # 结构化输出
-npx @agent/usages session list                              # 项目与会话清单
-npx @agent/usages price                                     # 价格表（含峰谷与节假日规则）
+npx github:liruohrh/agent-usages usage --range month --html ~/usage.html  # 自包含单文件，可直接发给别人
+npx github:liruohrh/agent-usages usage --range month --json              # 结构化输出
+npx github:liruohrh/agent-usages session list                             # 项目与会话清单
+npx github:liruohrh/agent-usages price                                    # 价格表（含峰谷与节假日规则）
 ```
+
+首次安装会跑一次 `prepare`：编译 CLI + 构建仪表盘（约 20 秒到 1 分钟，取决于机器与网络），
+之后由 npm 缓存。要求 **Node ≥ 22.18**。
+
+> 另外两条路：**npm registry**（包已整理好，只等能注册时打 tag 发布，见文末「发布」）与
+> **本地源码**（下面那条；checkout 里不需要编译 CLI，Node 直接跑 `.ts`）。
 
 ### 从源码跑（开发）
 
@@ -339,13 +345,20 @@ feature-x (~/ws/apps/demo-app/feature-x)  ← ~/ws/apps/demo-app 的 worktree
 
 | 方式 | 命令 | 需要什么 |
 | --- | --- | --- |
-| **npx（推荐给使用者）** | `npx @agent/usages ui` | Node ≥ 22.6；零 clone、零构建——**前端已随包**（`web/dist`，约 930 KB） |
-| 全局安装 | `npm i -g @agent/usages && agent-usages ui` | 同上 |
-| 从源码 | 见下 | Node ≥ 22.6 + pnpm；web 要先 `pnpm web:build` |
+| **GitHub 直装（推荐给使用者）** | `npx github:liruohrh/agent-usages ui` | Node ≥ 22.18；安装时自动编译 CLI + 构建前端 |
+| 全局安装 | `npm i -g github:liruohrh/agent-usages` | 同上 |
+| npm registry（待能注册） | `npx @agent/usages ui` | 包已整理好：`files` 带 `dist/` 与 `web/dist`，`prepare` 在打包时构建 |
+| 从源码（开发） | 见下 | Node ≥ 22.6 + pnpm；web 要先 `pnpm web:build` |
 
-包直接用 Node 运行 TypeScript（22.6+ 原生类型剥离），所以**运行时没有构建步骤**：
-`bin/agent-usages.js` 在 22.6–22.17 上加 `--experimental-strip-types`，更新的版本上这个开关是空操作。
-唯一的构建产物是前端，它在 `prepack` 里构建并随包发布，使用者不需要碰 vite。
+**一份源码，两种运行形态**：checkout 里 `src/*.ts` 就是程序（Node 原生类型擦除，无构建步骤）；
+装进 `node_modules` 的那份必须是编译好的 JS——Node 明确拒绝在 `node_modules` 里擦类型，
+实测会抛 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`。`bin/agent-usages.js` 先找
+`dist/cli.js`、找不到才回落到源码，两种形态共用一个入口。
+
+```bash
+pnpm build          # = build:cli（tsc → dist/）+ build:web（vite → web/dist）
+pnpm clean          # 删掉 dist/
+```
 
 ### 从源码
 
@@ -364,9 +377,13 @@ pnpm pack:check        # 只列 tarball 内容（测试也用它守着：config/
 git tag v0.2.1 && git push origin v0.2.1
 ```
 
-打 tag 后 `.github/workflows/publish.yml` 会跑测试 + 冒烟，然后 `npm publish --provenance`
-（需要仓库 secret `NPM_TOKEN`）。`prepack` 钩子在打包时构建前端，所以 npm 上的 tarball 永远带着
-与源码同一次构建的 `web/dist`。本地发布就 `npm publish`，效果相同。
+打 tag 后 `.github/workflows/publish.yml` 会跑构建 + 测试 + 冒烟，然后 `npm publish --provenance`
+（需要仓库 secret `NPM_TOKEN`）。`prepare` 在打包时编译 CLI 并构建前端，所以 npm 上的 tarball 永远
+带着与源码同一次构建的 `dist/` 与 `web/dist`；本地发布就 `npm publish`，效果相同。
+
+`.github/workflows/install-check.yml` 守着**用户的安装路径**：把本仓库当 git 依赖装进
+`node_modules`，跑 `--version` / `price` / `check-config`，并确认 `serve` 真的返回页面——
+"在 checkout 里能跑"与"装完能跑"是两回事，这条 CI 专门盯后者。
 
 包名现在是 `@agent/usages`（scoped，需要对应的 npm 组织）；要换成别的名字，改 `package.json`
 的 `name` 与本文里的 `npx` 行即可——仓库 URL、更新用的 GitHub raw 地址都与包名无关。

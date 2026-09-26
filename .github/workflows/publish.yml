@@ -26,6 +26,8 @@ jobs:
       # The published package carries `web/dist` (see `files` in package.json),
       # so the web UI needs no build on the user's machine — but the tarball must
       # not ship a stale bundle, hence a build here and `prepack` as the belt.
+      # Both halves of the package: the compiled CLI (`dist/`) and the dashboard.
+      - run: pnpm build
       - run: pnpm test
       - run: pnpm --filter web typecheck
       - run: pnpm web:smoke

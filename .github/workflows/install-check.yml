@@ -1,0 +1,42 @@
+# The install path a user actually takes, tested the way they take it.
+#
+# `npm install <this repo>` clones the sources, runs `prepare` (which compiles the
+# CLI and builds the dashboard) and installs the result into `node_modules` — a
+# place where Node refuses to strip TypeScript types. That is the difference
+# between "works in a checkout" and "works after installing", and nothing else in
+# this repository exercises it.
+name: install-check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  from-git:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+      - name: Install the repository the way a user does
+        run: |
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "git+file://${GITHUB_WORKSPACE}"
+      - name: The installed copy runs, prices and serves
+        run: |
+          cd /tmp/consumer
+          bin=./node_modules/.bin/agent-usages
+          $bin --version
+          $bin price > /dev/null
+          $bin check-config
+          test -f node_modules/@agent/usages/web/dist/index.html
+          $bin serve --port 4611 --quiet &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4611/api/health > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4611/ | grep -qi '<!doctype html>'
+          curl -sf http://127.0.0.1:4611/api/settings > /dev/null

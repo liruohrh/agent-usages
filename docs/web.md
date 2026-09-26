@@ -96,12 +96,17 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 
 ## 1. 启动
 
-从 npm 装的话，一条命令就够（包里带着构建好的前端，`prepack` 保证它是同一次构建的产物）：
+从 GitHub 直装的话（当前没有 npm registry 可用），一条命令就够：
 
 ```sh
-npx @agent/usages ui            # = serve --open，起平台并打开浏览器
-npx @agent/usages usage --range month --open   # 不起服务：生成 HTML 报告并用浏览器打开
+npx github:liruohrh/agent-usages ui            # = serve --open，起平台并打开浏览器
+npx github:liruohrh/agent-usages usage --range month --open   # 不起服务：生成 HTML 报告并用浏览器打开
 ```
+
+安装时 npm 会跑 `prepare`（`scripts/prepare.mjs`）：编译 CLI 到 `dist/`（`node_modules` 里 Node
+拒绝擦 TypeScript 类型，那份必须是 JS）+ 构建前端到 `web/dist`。失败只打印一行、不让安装失败——
+CLI 不依赖前端，`serve` 会提示怎么构建。`.github/workflows/install-check.yml` 在 CI 里把这条
+路径完整跑一遍（装进 `node_modules` → `--version`/`price`/`check-config` → `serve` 返回页面）。
 
 仓库里跑则要先装依赖、构建前端（约 930 KB）：
 
@@ -124,9 +129,9 @@ pnpm serve                               # = node src/serve/main.ts，不经过 
 构建产物不存在时，服务仍然可用：非 API 路径会返回一段提示页，告诉你先跑
 `pnpm --filter web build` 或改用 `--dev`，而 `/api/*` 一直是通的。
 
-`web/dist` 已列进 `package.json` 的 `files`，并且 `prepack` 会在打包前构建它，所以 npm 上的
-tarball 一定带着仪表盘（2026-09-26 实测：577.9 kB 打包 / 1.9 MB 解包，`npm pack --dry-run` 有
-测试守着 `web/dist/index.html` 与 assets）；仓库里忘了构建也能起服务，只是首页只有那张提示页。
+`web/dist` 与 `dist/`（编译后的 CLI）都列进 `package.json` 的 `files`，`prepare` 在打包前构建它们，
+所以发布物一定带着仪表盘（`npm pack --dry-run` 有测试守着 `web/dist/index.html` 与 assets）；
+仓库里忘了构建也能起服务，只是首页只有那张提示页。
 
 ### 参数
 
