@@ -12,7 +12,7 @@
  * lets a provider quote in any currency it likes.
  */
 
-import { shippedRates, type RatesConfig } from '../config/rates.ts';
+import { shippedRates, type RatesConfig } from './rates.ts';
 import { UserError, renderDiagnostic } from '../i18n/errors.ts';
 import { MONEY_SCALE_DIGITS, divideDecimal, formatDecimal, multiplyDecimal, parseDecimal, trimDecimal } from '../core/money.ts';
 import type { PricePeriod, PricingProvider, RateComponent } from './contract.ts';

@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { dshAgent, resolveDshHome } from '../../src/agents/dsh/loader.ts';
 import { locateSessionLogs, readSessionLog } from '../../src/agents/dsh/sessionlog.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
-import { shippedProviders } from '../../src/config/pricing.ts';
+import { shippedProviders } from '../../src/pricing/catalog.ts';
 
 /** The vendor's yuan list, which the fixture's expectations were written from. */
 const deepseekPricing = shippedProviders()[0]!;

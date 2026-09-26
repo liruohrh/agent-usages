@@ -39,7 +39,7 @@ describe('npm pack', () => {
   it('ships the entry points and the sources they import', () => {
     expect(paths).toContain('bin/agent-usages.js');
     expect(paths).toContain('src/cli.ts');
-    expect(paths).toContain('src/config/pricing.ts');
+    expect(paths).toContain('src/pricing/catalog.ts');
   });
 
   it('ships the built front end, so `serve` needs no build on the user’s machine', () => {

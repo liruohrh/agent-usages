@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 
 import { parseDecimal } from '../core/money.ts';
-import { ConfigError } from './pricing.ts';
+import { ConfigError } from '../i18n/errors.ts';
 
 /** Where the shipped rate configuration lives, relative to this module. */
 const SHIPPED_PATH = new URL('../../config/rates.json', import.meta.url);

@@ -20,8 +20,8 @@
 import { renderDiagnostic } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
 import { parseHolidaysConfig } from './holidays.ts';
-import { parsePricingConfig } from './pricing.ts';
-import { parseRatesConfig, shippedRates } from './rates.ts';
+import { parsePricingConfig } from '../pricing/catalog.ts';
+import { parseRatesConfig, shippedRates } from '../pricing/rates.ts';
 import { cachePath, statePath } from './paths.ts';
 import { readJson, writeJsonQuietly } from './store.ts';
 

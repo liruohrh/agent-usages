@@ -8,7 +8,7 @@
  */
 
 import { UserError } from '../i18n/errors.ts';
-import { shippedProviders } from '../config/pricing.ts';
+import { shippedProviders } from './catalog.ts';
 import type { PricingProvider } from './contract.ts';
 
 /** Every pricing provider this build knows about, in display order. */

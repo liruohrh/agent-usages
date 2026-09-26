@@ -10,13 +10,14 @@
 
 import { UserError, renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import type { Language } from '../i18n/index.ts';
-import { readHolidays, type HolidayCalendar } from './holidays.ts';
+import { readHolidays } from './holidays.ts';
+import type { HolidayCalendar } from '../core/calendar.ts';
 import type { ProjectGroup } from '../core/merge.ts';
 import type { PricingProvider } from '../pricing/contract.ts';
 import type { RateTable } from '../pricing/currency.ts';
 import { mergeProviders, readUserConfig, type RateMode, type UpdateSettings } from './user.ts';
-import { parsePricingConfig, providerFromConfig, shippedPricingText, validateProviders, type ProviderConfig } from './pricing.ts';
-import { parseRatesConfig, shippedRatesText, type RatesConfig } from './rates.ts';
+import { parsePricingConfig, providerFromConfig, shippedPricingText, validateProviders, type ProviderConfig } from '../pricing/catalog.ts';
+import { parseRatesConfig, shippedRatesText, type RatesConfig } from '../pricing/rates.ts';
 import { cachedConfigText, runUpdates, type UpdateKind } from './update.ts';
 
 /** Everything a command needs from the configuration. */

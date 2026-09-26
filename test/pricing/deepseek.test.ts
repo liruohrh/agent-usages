@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import { createPricingEngine, isPeak, type PricePeriod } from '../../src/pricing/index.ts';
-import { shippedProviders } from '../../src/config/pricing.ts';
+import { shippedProviders } from '../../src/pricing/catalog.ts';
 
 /**
  * The yuan list, which these assertions were written against: the engine prices

@@ -1,6 +1,5 @@
-import { CALENDAR_IDS, type CalendarId } from './holidays.ts';
 /**
- * The pricing configuration file.
+ * The vendor price list: shipped, cached, and overridden by the user.
  *
  * Price lists live in `config/pricing.json` in this repository rather than in
  * TypeScript, so a vendor's new prices can go live by committing one file — no
@@ -11,13 +10,18 @@ import { CALENDAR_IDS, type CalendarId } from './holidays.ts';
  *
  * The schema mirrors the pricing contract one-to-one — nothing is inferred — so a
  * reader can diff the file against a vendor's page without knowing this code.
+ *
+ * This module lives in `pricing/` rather than in `config/`: the price list is what
+ * the pricing layer is *about*, while `config/` owns the user's own settings and
+ * reads this one. That is what keeps `config → pricing` a one-way edge.
  */
 
 import { readFileSync } from 'node:fs';
 
+import { CALENDAR_IDS, type CalendarId } from '../core/calendar.ts';
 import { MONEY_SCALE, parseDecimal } from '../core/money.ts';
-import { UserError, renderDiagnostic, type ErrorCode, type ErrorParams } from '../i18n/errors.ts';
 import { CACHE_WRITE_TTLS, type CacheWriteTtl } from '../core/types.ts';
+import { ConfigError } from '../i18n/errors.ts';
 import type {
   AboveThreshold,
   BillingBasis,
@@ -26,27 +30,10 @@ import type {
   PricePeriod,
   PricingProvider,
   RateComponent,
-} from '../pricing/contract.ts';
+} from './contract.ts';
 
 /** Where the shipped configuration lives, relative to this module. */
 const SHIPPED_PATH = new URL('../../config/pricing.json', import.meta.url);
-
-/** A problem found while reading a configuration file. */
-export class ConfigError<C extends ErrorCode = ErrorCode> extends UserError<C> {
-  /** Dotted path to the offending field, e.g. `providers[0].models[1]`. */
-  readonly path: string;
-
-  constructor(path: string, code: C, params: ErrorParams<C>) {
-    super(code, params);
-    this.name = 'ConfigError';
-    this.path = path;
-  }
-
-  /** `path: sentence` — the path first, so a reader can jump straight to the field. */
-  override get message(): string {
-    return `${this.path}: ${renderDiagnostic(this.code, this.params)}`;
-  }
-}
 
 /** The bases a rate component may charge. */
 const BASES: readonly BillingBasis[] = ['input', 'inputAndCacheWrite', 'cacheRead', 'cacheWrite', 'output'];

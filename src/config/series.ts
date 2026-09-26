@@ -15,7 +15,7 @@
 import { renderDiagnostic } from '../i18n/errors.ts';
 import { readJson, writeJsonQuietly } from './store.ts';
 import { seriesPath } from './paths.ts';
-import { shippedRates } from './rates.ts';
+import { shippedRates } from '../pricing/rates.ts';
 
 /** How far back a series is fetched, so any realistic report is covered. */
 const LOOKBACK_DAYS = 400;

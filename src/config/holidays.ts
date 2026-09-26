@@ -22,35 +22,13 @@
 
 import { readFileSync } from 'node:fs';
 
-import type { Warning } from '../i18n/errors.ts';
-import { UserError } from '../i18n/errors.ts';
+import { CALENDAR_IDS, type CalendarId, type HolidayCalendar } from '../core/calendar.ts';
+import { ConfigError, UserError, type Warning } from '../i18n/errors.ts';
 import { cachePath } from './paths.ts';
-import { ConfigError } from './pricing.ts';
 import { cachedConfigText } from './update.ts';
 
 /** Where the shipped calendar lives, relative to this module. */
 const SHIPPED_PATH = new URL('../../config/holidays.json', import.meta.url);
-
-/** A calendar id a period may name. Only China is shipped today. */
-export type CalendarId = 'cn';
-
-/** Every calendar this build knows. */
-export const CALENDAR_IDS: readonly CalendarId[] = ['cn'];
-
-/** The parsed calendar, ready to answer "is this date a holiday?". */
-export interface HolidayCalendar {
-  /** Which calendar this is. */
-  id: CalendarId;
-  /** The clock its dates are written in, e.g. `Asia/Shanghai`. */
-  zone: string;
-  /** `YYYY-MM-DD` → the holiday's name. */
-  days: ReadonlyMap<string, string>;
-  /** First and last date the calendar covers, both inclusive. */
-  from: string;
-  to: string;
-  /** Where the dates came from, for the report's provenance line. */
-  source: string;
-}
 
 /** The shape every calendar document parses into. */
 interface HolidaysConfig {

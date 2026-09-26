@@ -11,8 +11,9 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { ConfigError, parsePricingConfig, providerFromConfig, shippedProviders } from '../../src/config/pricing.ts';
-import { parseRatesConfig, shippedRates } from '../../src/config/rates.ts';
+import { ConfigError } from '../../src/i18n/errors.ts';
+import { parsePricingConfig, providerFromConfig, shippedProviders } from '../../src/pricing/catalog.ts';
+import { parseRatesConfig, shippedRates } from '../../src/pricing/rates.ts';
 import { createPricingEngine, rateFrom, seedTable } from '../../src/pricing/index.ts';
 
 /** The shipped configuration, as a mutable copy a test can break. */

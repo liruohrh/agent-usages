@@ -34,7 +34,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { flattenWarning, localizeDashboard, openStore, type DashboardQuery, type DashboardStore } from './data.ts';
 import { openInBrowser } from '../open.ts';
 import { LANGUAGES, language, messagesFor, parseLanguage, setLanguage, t, type Language } from '../i18n/index.ts';
-import { renderDiagnostic } from '../i18n/errors.ts';
+import { ConfigError, UserError, renderDiagnostic } from '../i18n/errors.ts';
 import {
   readUserConfig,
   readUserConfigDocument,
@@ -42,9 +42,7 @@ import {
   validateUserPatch,
   type UserConfigPatch,
 } from '../config/user.ts';
-import { ConfigError } from '../config/pricing.ts';
 import { userConfigPath } from '../config/paths.ts';
-import { UserError } from '../i18n/errors.ts';
 import type {
   ConfigPayload,
   SettingsPayload,

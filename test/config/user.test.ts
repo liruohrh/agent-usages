@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { parsePricingConfig, providerFromConfig, shippedProviders } from '../../src/config/pricing.ts';
+import { parsePricingConfig, providerFromConfig, shippedProviders } from '../../src/pricing/catalog.ts';
 import { readFileSync } from 'node:fs';
 import { mergePeriods, mergeProviders, readUserConfig, updateUserConfig, validateUserPatch } from '../../src/config/user.ts';
 import { userConfigPath as userConfigPathOf } from '../../src/config/paths.ts';

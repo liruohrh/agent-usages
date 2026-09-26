@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import { parseHolidaysConfig, shippedHolidays } from '../../src/config/holidays.ts';
-import { providerFromConfig, shippedPricingText, parsePricingConfig } from '../../src/config/pricing.ts';
+import { providerFromConfig, shippedPricingText, parsePricingConfig } from '../../src/pricing/catalog.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { perMillion, TEST_CURRENCY } from '../support/stub-pricing.ts';
 import { record } from '../support/dataset.ts';

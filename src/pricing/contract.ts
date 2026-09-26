@@ -19,7 +19,7 @@
  *   component; a vendor that does not bill cache writes simply omits one.
  */
 
-import type { CalendarId, HolidayCalendar } from '../config/holidays.ts';
+import type { CalendarId, HolidayCalendar } from '../core/calendar.ts';
 import type { CacheWriteTtl, CostTotals, TokenBuckets, UsageRecord } from '../core/types.ts';
 
 /** A billable quantity: which tokens a rate applies to. */

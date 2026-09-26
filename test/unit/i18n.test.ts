@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_LANGUAGE, LANGUAGES, language, languageOf, resolveLanguage, setLanguage, t } from '../../src/i18n/index.ts';
-import { ConfigError } from '../../src/config/pricing.ts';
+import { ConfigError } from '../../src/i18n/errors.ts';
 import { UserError } from '../../src/i18n/errors.ts';
 import { zh } from '../../src/i18n/zh.ts';
 import { en } from '../../src/i18n/en.ts';

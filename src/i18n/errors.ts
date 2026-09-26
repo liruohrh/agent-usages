@@ -84,3 +84,26 @@ export class UserError<C extends ErrorCode = ErrorCode> extends Error {
     return renderDiagnostic(this.code, this.params);
   }
 }
+
+/**
+ * A problem found while reading a configuration file.
+ *
+ * Same as {@link UserError} plus the dotted path to the offending field, and the
+ * path leads the message — `providers[0].models[1]: ...` — so a reader can jump
+ * straight to it and `--json` can carry it on its own.
+ */
+export class ConfigError<C extends ErrorCode = ErrorCode> extends UserError<C> {
+  /** Dotted path to the offending field, e.g. `providers[0].models[1]`. */
+  readonly path: string;
+
+  constructor(path: string, code: C, params: ErrorParams<C>) {
+    super(code, params);
+    this.name = 'ConfigError';
+    this.path = path;
+  }
+
+  /** `path: sentence` — the path first, so a reader can jump straight to the field. */
+  override get message(): string {
+    return `${this.path}: ${renderDiagnostic(this.code, this.params)}`;
+  }
+}
