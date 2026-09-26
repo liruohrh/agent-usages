@@ -1,0 +1,29 @@
+# The suite, on every push.
+#
+# Until this existed, `pnpm test` only ran inside `release.yml` — on a tag. So a
+# failing test was first discovered while cutting a release: v0.0.2's tag run died
+# on an assertion that had been passing locally for weeks because the developer's
+# timezone was east of Greenwich and the runner's is UTC (2026-09-26).
+name: test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter web typecheck
+      # The smoke test drives a real server, so the dashboard has to be built first.
+      - run: pnpm build
+      - run: pnpm web:smoke

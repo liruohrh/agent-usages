@@ -12,7 +12,7 @@ import stringWidth from 'string-width';
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import type { CostTotals, TokenTotals } from '../../src/core/types.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
-import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type FormatOptions, type ReportSection } from '../../src/render/format.ts';
+import { dayLabel, formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type FormatOptions, type ReportSection } from '../../src/render/format.ts';
 import { UserError } from '../../src/i18n/errors.ts';
 import type { ProjectReport, RateInfo, RepoGroup, ScopeTotals, SessionListResult, SessionReport, UsageResult } from '../../src/report/index.ts';
 import { stubProvider, TEST_CURRENCY } from '../support/stub-pricing.ts';
@@ -577,9 +577,11 @@ describe('git repositories', () => {
     const text = render(report({ requests: 5, tokens: SMALL, cost: cost('0.5000'), projects: [worktree], repos: [group] }));
 
     // One project needs no repository row above it — but the badge still says
-    // which repository it belongs to.
+    // which repository it belongs to. The date is read in the *local* zone (that is
+    // what a report does), so the expectation is computed with the same helper
+    // rather than pinned to a string that only holds east of Greenwich.
     expect(text).not.toContain('仓库 ·');
-    expect(text).toContain('lynx-rewrite 2026-08-17 · git worktree · lynx-rewrite');
+    expect(text).toContain(`lynx-rewrite ${dayLabel(1_786_896_000_000)} · git worktree · lynx-rewrite`);
   });
 });
 
