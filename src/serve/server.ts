@@ -102,6 +102,28 @@ export function defaultWebRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
 }
 
+/**
+ * The page a browser gets when there is no built front end to hand it.
+ *
+ * Two ways in: nothing was built at startup, or the shell was there and could not
+ * be sent later. Both mean "this install has no dashboard", and neither is an API
+ * error — so neither should come back as JSON.
+ */
+function sendWebNotBuilt(response: Response, webRoot: string): void {
+  response
+    .status(503)
+    .type('html')
+    .send(
+      `<!doctype html><meta charset="utf-8"><title>agent-usages serve</title>` +
+        `<body style="font:14px/1.6 system-ui;background:#0b1017;color:#e6edf3;padding:2rem">` +
+        `<h1>${t().serve.webNotBuilt}</h1><p>${t().serve.webNotBuiltHint(
+          '<code>pnpm --filter web build</code>',
+          '<code>agent-usages serve --dev</code>',
+        )} <a style="color:#7cc4ff" href="/api/summary">/api/summary</a></p>` +
+        `<p>${t().serve.webNotBuiltLooking(`<code>${webRoot}</code>`)}</p></body>`,
+    );
+}
+
 /** The provenance block every answer carries. */
 function metaOf(dashboard: Dashboard): DashboardMeta {
   return {
@@ -574,7 +596,14 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
         return;
       }
       response.setHeader('Cache-Control', 'no-store');
-      response.sendFile(index);
+      // `dotfiles: 'allow'` is not about serving hidden files: `send` splits the whole
+      // **absolute** path into segments and refuses any that starts with a dot, so an
+      // install under `~/.local/share/mise/…`, `~/.nvm/…` or `~/.asdf/…` answered 404
+      // "Not Found" for every client-side route. The shell is ours wherever npm put it.
+      response.sendFile(index, { dotfiles: 'allow' }, (error?: Error | null) => {
+        if (error == null || response.headersSent) return;
+        sendWebNotBuilt(response, webRoot);
+      });
     });
     app.use(onError);
     return app;
@@ -585,18 +614,7 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
       next();
       return;
     }
-    response
-      .status(503)
-      .type('html')
-      .send(
-        `<!doctype html><meta charset="utf-8"><title>agent-usages serve</title>` +
-          `<body style="font:14px/1.6 system-ui;background:#0b1017;color:#e6edf3;padding:2rem">` +
-          `<h1>${t().serve.webNotBuilt}</h1><p>${t().serve.webNotBuiltHint(
-            '<code>pnpm --filter web build</code>',
-            '<code>agent-usages serve --dev</code>',
-          )} <a style="color:#7cc4ff" href="/api/summary">/api/summary</a></p>` +
-          `<p>${t().serve.webNotBuiltLooking(`<code>${webRoot}</code>`)}</p></body>`,
-      );
+    sendWebNotBuilt(response, webRoot);
   });
   app.use(onError);
   return app;

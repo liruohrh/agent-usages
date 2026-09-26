@@ -835,7 +835,7 @@ export function buildProgram(): Command {
   program
     .name('agent-usages')
     .description(t().help.program)
-    .version('0.0.1');
+    .version('0.0.2');
   commonOptions(program);
 
   commonOptions(

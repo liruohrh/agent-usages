@@ -27,14 +27,14 @@ DeepSeek 只是**目前唯一支持的计价来源**。两者互不知情：agen
 **装发布包**（推荐；用户机上不构建任何东西——tarball 里已经带了编译好的 CLI 与构建好的前端）：
 
 ```bash
-# 装好（实测 12 秒；换个版本就改 URL 里的 v0.0.1）
-npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.1/agent-usages-0.0.1.tgz
+# 装好（实测 12 秒；换个版本就改 URL 里的 v0.0.2）
+npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.2/agent-usages-0.0.2.tgz
 
 # 想要常驻的分析平台（项目树 + 榜单 + 图表），一条命令起来
 agent-usages ui
 
 # 不装也能跑：让 npx 直接从这个 tarball 起
-npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.1/agent-usages-0.0.1.tgz agent-usages usage --range month --open
+npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.2/agent-usages-0.0.2.tgz agent-usages usage --range month --open
 ```
 
 `ui` 就是 `serve --open`。报告也可以存成文件或进管道：

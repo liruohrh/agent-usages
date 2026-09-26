@@ -100,12 +100,12 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 （`web/dist/`）；npm 对 tarball **不跑任何构建脚本**，所以用户机上不编译、不构建，实测 12 秒装完。
 
 ```sh
-npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.1/agent-usages-0.0.1.tgz
+npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.2/agent-usages-0.0.2.tgz
 agent-usages ui                                # = serve --open，起平台并打开浏览器
 agent-usages usage --range month --open        # 不起服务：生成 HTML 报告并用浏览器打开
 
 # 不装也可以
-npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.1/agent-usages-0.0.1.tgz agent-usages ui
+npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.2/agent-usages-0.0.2.tgz agent-usages ui
 ```
 
 **从 GitHub 直装**（想跟 `master`、或该版本没有资产）则会在**你的机器上**构建：npm 跑

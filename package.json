@@ -1,6 +1,6 @@
 {
   "name": "@agent/usages",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "packageManager": "pnpm@11.3.0",
   "description": "统计 coding agent 的 token 消耗与费用：agent 与模型价格两个维度均可扩展，支持项目/会话/子代理维度、时间范围与分时段峰谷定价",
   "keywords": [
@@ -50,7 +50,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
-    "release:pack": "pnpm build && mkdir -p release && npm pack --ignore-scripts --pack-destination release",
+    "release:pack": "pnpm build && rm -rf release && mkdir -p release && npm pack --ignore-scripts --pack-destination release",
     "release:verify": "node scripts/verify-tarball.mjs",
     "prepare": "node scripts/prepare.mjs",
     "serve": "node src/serve/main.ts",

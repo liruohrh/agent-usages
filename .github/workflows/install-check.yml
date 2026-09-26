@@ -22,12 +22,16 @@ jobs:
           node-version: '22.18'
       - name: Install the repository the way a user does
         run: |
-          mkdir -p /tmp/consumer && cd /tmp/consumer
+          # `.consumer`, not `consumer`: global installs land under dot-directories all
+          # the time (`~/.local/share/mise`, `~/.nvm`, `~/.asdf`), and a dot segment in
+          # the path is what used to break the SPA fallback — see the `dotfiles` note in
+          # `src/serve/server.ts`.
+          mkdir -p /tmp/.consumer && cd /tmp/.consumer
           npm init -y > /dev/null
           npm install --no-audit --no-fund "git+file://${GITHUB_WORKSPACE}"
       - name: The installed copy runs, prices and serves
         run: |
-          cd /tmp/consumer
+          cd /tmp/.consumer
           bin=./node_modules/.bin/agent-usages
           $bin --version
           $bin price > /dev/null
@@ -39,4 +43,6 @@ jobs:
             sleep 1
           done
           curl -sf http://127.0.0.1:4611/ | grep -qi '<!doctype html>'
+          # A client-side route (`/p/<id>`) goes through the SPA fallback, not static.
+          curl -sf http://127.0.0.1:4611/p/anything | grep -qi '<!doctype html>'
           curl -sf http://127.0.0.1:4611/api/settings > /dev/null
