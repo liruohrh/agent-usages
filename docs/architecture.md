@@ -110,7 +110,7 @@ agent-usages usage --provider deepseek
 
 ```bash
 pnpm install
-pnpm test        # vitest，520 个用例
+pnpm test        # vitest，525 个用例
 pnpm typecheck   # tsc --noEmit
 pnpm --filter web build   # 前端（serve 要用；改了 web/ 就跑）
 pnpm web:smoke            # 服务端端到端冒烟（加 --live 连真实数据）
@@ -136,6 +136,7 @@ pnpm web:e2e              # 浏览器端到端（Playwright：切项目/切会�
 | `test/cli-agents.test.ts` | 端到端（多 agent）：DSH + Claude Code 双份数据、`--agent all`/逗号/重复、`--html` 到 stdout、配置项目并入与非法配置提示 |
 | `web/scripts/smoke.mjs` | 服务端端到端：起真实 HTTP 服务打每个接口，断言加性恒等式与 404/409 语义 |
 | `web/e2e/dashboard.spec.ts` | 浏览器端到端（Playwright）：切项目/切会话后明细表与页面自己取到的 API 数据逐项一致、明细表纵向排列、任意宽度页面不横滚 |
+| `test/architecture.test.ts` | 结构：层间依赖方向单向、内层零第三方依赖、`web/` 不 import 服务端、相对 import 不落空、公开 API 快照 |
 
 `test/support/` 提供合成数据集与**合成价格表**（`stub-pricing.ts`），因此机制类测试不依赖任何真实厂商或 agent 的文件格式。
 

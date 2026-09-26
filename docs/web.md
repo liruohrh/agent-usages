@@ -444,7 +444,7 @@ pnpm web:smoke                                      # 离线快照，56 项断�
 node web/scripts/smoke.mjs --live                   # 再加上真实扫描，共 95 项
 pnpm web:e2e                                        # 真浏览器：30 条，起服务 + 切标签/项目/会话 + 排序 + 口径与布局 + 缩写口径 + 中英切换 + 配置页
 CI=true pnpm typecheck                              # 根 tsconfig 覆盖 src/serve/**
-CI=true pnpm test                                   # 488 个用例
+CI=true pnpm test                                   # 525 个用例
 ```
 
 `pnpm web:e2e`（Playwright）跑的是**真实页面**：点项目树切范围，然后把 模型明细 /
