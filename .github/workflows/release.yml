@@ -38,9 +38,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.18'
+      # No `version:` here: `packageManager` in package.json already names the exact
+      # pnpm, and passing one too makes the action refuse to run ("Multiple versions
+      # of pnpm specified").
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
       - run: pnpm install --frozen-lockfile
       # The asset must be a commit that passed the suite: same gates as publish.yml.
       - run: pnpm build

@@ -18,9 +18,9 @@ jobs:
         with:
           node-version: '22.18'
           registry-url: https://registry.npmjs.org
+      # No `version:`: `packageManager` in package.json pins the exact pnpm, and the
+      # action refuses to run when both are given.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
       - run: pnpm install --frozen-lockfile
       # The published package carries `web/dist` (see `files` in package.json),
       # so the web UI needs no build on the user's machine — but the tarball must

@@ -27,7 +27,9 @@ jobs:
           # the path is what used to break the SPA fallback — see the `dotfiles` note in
           # `src/serve/server.ts`.
           mkdir -p /tmp/.consumer && cd /tmp/.consumer
-          npm init -y > /dev/null
+          # Written by hand: `npm init -y` derives the name from the directory, and
+          # `.consumer` is not a valid package name.
+          printf '{"name":"consumer","private":true,"version":"0.0.0"}\n' > package.json
           npm install --no-audit --no-fund "git+file://${GITHUB_WORKSPACE}"
       - name: The installed copy runs, prices and serves
         run: |
