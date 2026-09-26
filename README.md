@@ -46,8 +46,9 @@ npx github:liruohrh/agent-usages session list                             # 项�
 npx github:liruohrh/agent-usages price                                    # 价格表（含峰谷与节假日规则）
 ```
 
-首次安装会跑一次 `prepare`：编译 CLI + 构建仪表盘（约 20 秒到 1 分钟，取决于机器与网络），
-之后由 npm 缓存。要求 **Node ≥ 22.18**。
+首次安装会跑一次 `prepare`：装前端依赖、编译 CLI、构建仪表盘。实测（2026-09-26，本机）——
+npm 缓存热时 **24 秒**；冷缓存要下 vite/react/echarts 那一整套，**808 秒（13 分半）**。
+所以第一次装请留出时间，之后由 npm 缓存接管。要求 **Node ≥ 22.18**。
 
 > 另外两条路：**npm registry**（包已整理好，只等能注册这个包名，见文末「发布」）与
 > **本地源码**（下面那条；checkout 里不需要编译 CLI，Node 直接跑 `.ts`）。
