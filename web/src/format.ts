@@ -87,7 +87,7 @@ function addMoney(left: string, right: string): string {
 /**
  * The metric line the CLI prints, as data.
  *
- * Same vocabulary and same order as `src/format.ts` on the CLI side, because the
+ * Same vocabulary and same order as `src/render/format.ts` on the CLI side, because the
  * two are the same report: `I/M` `I/W` `I/C` `I/T` `O` `R` `O/T` `T` `Q`, then the
  * total. `I/W` and `R` appear only when the provider reported them — a row of
  * zeroes is noise — and `T` carries no money of its own, since the total at the

@@ -88,7 +88,7 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 - 不写任何 agent 的数据目录：唯一的文件写操作是显式的 `--write-snapshot`，以及页面上右上角
   切换语言时写本工具自己的 `config.json`（见 §6）。
 - 默认只绑 `127.0.0.1`，不加载任何 CDN 资源。
-- 数据来自 CLI 已经信任的同一批模块（适配器、`src/core/merge.ts` 合并层、`src/report.ts`
+- 数据来自 CLI 已经信任的同一批模块（适配器、`src/core/merge.ts` 合并层、`src/report/index.ts`
   的 `runQuery`），所以 Web 上的数字与 `agent-usages usage` 是同一套口径；`自身 + 子代理 = 总`
   这类恒等式由服务端算好，浏览器只排版、不重算钱。
 
@@ -115,7 +115,7 @@ pnpm install                # 仓库根，装 Web 与服务端依赖
 pnpm --filter web build     # 构建前端 → web/dist（见 §2 目录结构）
 
 agent-usages serve --port 7788 --open    # 一等公民命令，参数由 commander 解析
-pnpm cli ui                              # 不想装到 PATH 时，pnpm cli = node src/cli.ts
+pnpm cli ui                              # 不想装到 PATH 时，pnpm cli = node src/cli/index.ts
 pnpm serve                               # = node src/serve/main.ts，不经过 CLI 的独立入口
 ```
 
@@ -182,7 +182,7 @@ src/serve/                 # 服务端（属于根包，没有独立 package.jso
   server.ts                #   Express 应用与 startServer(options)
   main.ts                  #   `serve` 子命令的独立入口（解析 --port 等）
   types.ts                 #   仪表盘契约（API 与快照的字段定义）
-  index.ts                 #   对 src/cli.ts 暴露的唯一入口
+  index.ts                 #   对 src/cli/index.ts 暴露的唯一入口
 
 web/                       # 前端 workspace 包（package.json name = "web"）
   index.html
@@ -273,7 +273,7 @@ CLI 的 `bin` / `files` / `version` 未改动。
 `dsh:session-d8c3109e-…`），`/api/sessions/:id` 也接受裸 id（取第一个命中）。
 
 `startServer(options)` 的返回值是 `{ url, port, store, close() }`，`close()` 会关掉监听与
-`--refresh` 定时器；`src/cli.ts` 只需要 `await startServer({...})` 再在退出时 `close()`。
+`--refresh` 定时器；`src/cli/index.ts` 只需要 `await startServer({...})` 再在退出时 `close()`。
 
 ---
 
@@ -376,7 +376,7 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 
 - **切换会写配置文件**，这是这个功能的一半：`PUT /api/settings` 把 `language` 合并进
   `~/.config/agent-usages/config.json`（其它键原样保留；文件解析不了就报错、不覆盖），
-  于是**CLI 下一次运行也说这个语言**——`node src/cli.ts --help` 立刻变英文，因为它读的是同一个值。
+  于是**CLI 下一次运行也说这个语言**——`node src/cli/index.ts --help` 立刻变英文，因为它读的是同一个值。
 - **数字也跟着换**：`Intl` 的 locale 一起切，所以 `9.7亿` 会变成 `970M`、`2026年9月26日` 变成
   `9/26/2026`。指标缩写（`I/M`、`T`、`Q`）和钱（`¥12.34`）两种语言下都一样。
 - **服务端只渲染"散文"**：告警句子与时间范围标签按请求的 `?lang=` 现渲染（`code` + `params`
@@ -485,7 +485,7 @@ google-chrome-stable --headless --disable-gpu --hide-scrollbars \
 | 明细表纵向排列 | 模型明细 6 列、计价区间明细 7 列，并排时半宽放不下只能横滚；纵向各占整宽后 1440px 下不再需要滚动（Playwright 每条都量） |
 | 一行一个 (agent, 项目, 模型) / (agent, 项目, 模型, 区间, 档位) | 表格的行身份就是 React 的 key：按会话出数会给出重复 key，切范围时旧行不会被卸载（真实缺陷）。服务端在 `mergeModelRows` / `mergeBandRows` 里把同一身份的行相加，一行一条后再交给前端 |
 | 一个问题一屏（标签页） | 原来把十余张卡片堆成一条长滚动，最重要的费用和几乎恒为 0 的 `I/W` 一样是 11px 小字；现在四个标签各答一个问题，数字有大小之分，明细在折叠里 |
-| 大数字 + 构成条，而不是数字长行 | 一行 150 字符的 `I/M … ¥…` 是终端的排版；网页用四张 KPI 卡定调、用堆叠条表示构成，完整十项仍以**每项一列**的表格给出（默认折叠），口径与 `src/format.ts` 相同，数来自服务端 `own`/`spawned`，前端不重算钱 |
+| 大数字 + 构成条，而不是数字长行 | 一行 150 字符的 `I/M … ¥…` 是终端的排版；网页用四张 KPI 卡定调、用堆叠条表示构成，完整十项仍以**每项一列**的表格给出（默认折叠），口径与 `src/render/format.ts` 相同，数来自服务端 `own`/`spawned`，前端不重算钱 |
 | Playwright | 只有真浏览器能发现"key 不唯一 → 切项目留旧行"和"并排太窄"这类问题；断言直接与页面自己拿到的 API 数据比对 |
 
 ---

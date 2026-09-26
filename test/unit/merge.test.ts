@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { mergeDatasets } from '../../src/core/merge.ts';
-import { resolveProjectSelectors } from '../../src/report.ts';
+import { resolveProjectSelectors } from '../../src/report/index.ts';
 import { dataset, project, record, session } from '../support/dataset.ts';
 
 let root: string;

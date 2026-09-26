@@ -19,8 +19,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const compiled = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
-const source = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
+const compiled = fileURLToPath(new URL('../dist/cli/index.js', import.meta.url));
+const source = fileURLToPath(new URL('../src/cli/index.ts', import.meta.url));
 const entry = existsSync(compiled) ? compiled : source;
 
 const flags =

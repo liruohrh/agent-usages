@@ -36,11 +36,11 @@ jobs:
 
       # 拉最新汇率并写回仓库里的配置文件；任一源都失败时命令返回非零，任务失败。
       - name: 更新 config/rates.json
-        run: node src/cli.ts update rates --force --write-config
+        run: node src/cli/index.ts update rates --force --write-config
 
       # 写回的必须是合法配置，测试也必须仍然通过，否则不提交。
       - name: 校验配置
-        run: node src/cli.ts check-config
+        run: node src/cli/index.ts check-config
 
       - name: 跑测试
         run: CI=true pnpm test

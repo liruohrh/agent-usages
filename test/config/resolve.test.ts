@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { renderRounded } from '../../src/accounting.ts';
+import { renderRounded } from '../../src/report/accounting.ts';
 import { resolveConfig } from '../../src/config/resolve.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { buckets, record } from '../support/dataset.ts';

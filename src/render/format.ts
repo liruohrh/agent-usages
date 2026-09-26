@@ -10,11 +10,11 @@
 
 import stringWidth from 'string-width';
 
-import { moneyBreakdown, type MoneyBreakdown } from './accounting.ts';
-import { t } from './i18n/index.ts';
-import { displayRate } from './pricing/index.ts';
-import { tokenBreakdown } from './core/buckets.ts';
-import type { CostTotals, RepoInfo, TokenTotals } from './core/types.ts';
+import { moneyBreakdown, type MoneyBreakdown } from '../report/accounting.ts';
+import { t } from '../i18n/index.ts';
+import { displayRate } from '../pricing/index.ts';
+import { tokenBreakdown } from '../core/buckets.ts';
+import type { CostTotals, RepoInfo, TokenTotals } from '../core/types.ts';
 import type {
   AgentTotals,
   BandSummary,
@@ -25,8 +25,8 @@ import type {
   SessionListResult,
   SessionReport,
   UsageResult,
-} from './report.ts';
-import type { TimeRange } from './timerange.ts';
+} from '../report/index.ts';
+import type { TimeRange } from '../report/timerange.ts';
 
 /**
  * Display width of a string, in terminal cells.
@@ -1067,7 +1067,7 @@ export function usageToJson(sections: readonly ReportSection[]): unknown {
 }
 
 /** One scope row as JSON, with the token roll-up included. */
-function scopeToJson(scope: import('./report.ts').ScopeTotals): Record<string, unknown> {
+function scopeToJson(scope: import('../report/index.ts').ScopeTotals): Record<string, unknown> {
   return {
     sessions: scope.sessions,
     requests: scope.requests,

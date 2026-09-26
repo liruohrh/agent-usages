@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
-import type { RateInfo } from '../../src/report.ts';
+import type { RateInfo } from '../../src/report/index.ts';
 import {
   expandWithDescendants,
   listSessions,
@@ -19,7 +19,7 @@ import {
   resolveSessionSelectors,
   runQuery,
   type UsageQuery,
-} from '../../src/report.ts';
+} from '../../src/report/index.ts';
 import { buckets, dataset, project, record, session } from '../support/dataset.ts';
 import { CONTEXT_AT, STUB_AT, contextProvider, stubProvider } from '../support/stub-pricing.ts';
 

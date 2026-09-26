@@ -1,7 +1,7 @@
 /**
  * The Web analysis platform's entry point.
  *
- * `src/cli.ts` wires `agent-usages serve` to {@link startServer} with nothing but
+ * `src/cli/index.ts` wires `agent-usages serve` to {@link startServer} with nothing but
  * this module, which keeps the CLI file free of server details:
  *
  * ```ts

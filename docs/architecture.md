@@ -66,7 +66,7 @@ export interface AgentAdapter {
 ## 新增一个计价来源
 
 加厂商就是往仓库的 `config/pricing.json` 里加一条（`src/pricing/registry.ts` 启动时读它，
-`src/config/pricing.ts` 负责解析与校验）：
+`src/pricing/catalog.ts` 负责解析与校验）：
 
 ```jsonc
 { "id": "deepseek", "label": "DeepSeek", "defaultModel": "deepseek-flash",
@@ -110,7 +110,7 @@ agent-usages usage --provider deepseek
 
 ```bash
 pnpm install
-pnpm test        # vitest，488 个用例
+pnpm test        # vitest，520 个用例
 pnpm typecheck   # tsc --noEmit
 pnpm --filter web build   # 前端（serve 要用；改了 web/ 就跑）
 pnpm web:smoke            # 服务端端到端冒烟（加 --live 连真实数据）
@@ -139,7 +139,7 @@ pnpm web:e2e              # 浏览器端到端（Playwright：切项目/切会�
 
 `test/support/` 提供合成数据集与**合成价格表**（`stub-pricing.ts`），因此机制类测试不依赖任何真实厂商或 agent 的文件格式。
 
-代码不引入构建步骤：`bin/agent-usages.js` 直接用 Node 的类型擦除执行 `src/cli.ts`，因此源码即产物，不存在构建产物与源码不一致的问题。
+代码不引入构建步骤：`bin/agent-usages.js` 直接用 Node 的类型擦除执行 `src/cli/index.ts`，因此源码即产物，不存在构建产物与源码不一致的问题。
 
 ## 目录
 
@@ -147,8 +147,8 @@ pnpm web:e2e              # 浏览器端到端（Playwright：切项目/切会�
 src/
 ├── core/                  中立模型与基础设施（不认识任何 agent / 厂商）
 │   ├── types.ts           UsageRecord / SessionRecord / ProjectRecord / UsageDataset / CostTotals
+│   ├── calendar.ts        节假日日历的「形状」（CalendarId / HolidayCalendar / CALENDAR_IDS）
 │   ├── money.ts           十进制精确算术
-│   ├── holidays.ts        节假日表：随包 + 缓存 + 校验，供按工作日历定价的区间使用
 │   ├── git.ts             项目目录 → git 仓库（主工作区 / worktree / 子模块），只读 `.git`，不调用 git
 │   ├── paths.ts           工作区路径身份：realpath + 规范化比较键（适配器与合并层共用）
 │   ├── merge.ts           多 agent 数据集 → 一份：按工作区/仓库/配置归项目、按 agent+id 认会话
@@ -161,31 +161,45 @@ src/
 │   │   └── sessionlog.ts    会话日志（多帧 zstd）→ 委派树与逐请求用量
 │   └── pi/                pi 适配器
 │       └── loader.ts        会话 JSONL → 逐请求用量；子 agent 按目录识别委派
-├── pricing/               维度二：怎么算钱
+├── pricing/               维度二：怎么算钱（价目表与汇率表本身也归这一层）
 │   ├── contract.ts        PricingProvider / PricePeriod / RateComponent
 │   ├── engine.ts          与厂商无关的区间选取、峰谷判定、按组件计费
 │   ├── currency.ts        显示货币、汇率表、把发布价折算到显示币种
-│   └── registry.ts        启动时读 config/pricing.json 建出各厂商
-├── config/                仓库里的配置（价格表、汇率表）+ 用户覆盖 + 每日更新的缓存
-│   ├── pricing.ts         解析/校验 config/pricing.json（也是 check-config 的引擎）
+│   ├── catalog.ts         解析/校验 config/pricing.json（也是 check-config 的引擎）
 │   ├── rates.ts           解析/校验 config/rates.json（含在线源清单）
+│   └── registry.ts        启动时读 config/pricing.json 建出各厂商
+├── config/                用户自己的设置、节假日数据与更新的缓存
+│   ├── holidays.ts        读/校验 config/holidays.json（形状在 core/calendar.ts）
 │   ├── user.ts            ~/.config/agent-usages/config.json：价格覆盖 + `projects` 项目声明，按时间合并到默认表之上
+│   ├── series.ts          按日汇率序列（历史汇率模式）
+│   ├── store.ts           缓存文件的读写
+│   ├── paths.ts           配置与缓存路径
 │   ├── update.ts          ETag 条件请求、按来源定间隔（价格表 3 周 / 汇率 1 周）、多源重试、失败即回退
 │   └── resolve.ts         三层数据合成一次运行实际使用的配置
-├── accounting.ts          逐条计费、按「模型×区间×峰谷」精确累加并取整、聚合只是相加
-├── report.ts              筛选、每个会话计价一次、向上全部相加（含按 agent 分列）、会话清单
-├── timerange.ts           时间范围解析
-├── format.ts              纯排版：token 树、计价区间、JSON 序列化（不读价格表）
-├── html.ts                纯排版：单文件 HTML 报告（内联样式与 SVG，无脚本）
+├── report/                报表层：查询与聚合（serve 只依赖这一层）
+│   ├── index.ts           筛选、每个会话计价一次、向上全部相加（含按 agent 分列）、会话清单
+│   ├── accounting.ts      逐条计费、按「模型×区间×峰谷」精确累加并取整、聚合只是相加
+│   └── timerange.ts       时间范围解析
+├── render/                呈现层：把报表变成字
+│   ├── format.ts          纯排版：token 树、计价区间、JSON 序列化（不读价格表）
+│   └── html.ts            纯排版：单文件 HTML 报告（内联样式与 SVG，无脚本）
 ├── i18n/                  文案目录（zh 是源、en 按类型对齐）与带 code 的诊断
 │                          （网页自己那一份在 web/src/i18n/，同一个套路）
 ├── serve/                 本地 Web 分析平台的服务端（HTTP + 前端静态托管；唯一的写是语言设置）
 │   ├── data.ts            逐 adapter 读盘 → merge.ts 合并 → runQuery → 仪表盘 JSON
 │   ├── server.ts          Express 应用、startServer()、`--dev` 代理
+│   ├── open.ts            把文件/URL 交给桌面浏览器（CLI 的 --open 也用它）
 │   ├── types.ts           API 与快照的字段契约
 │   └── main.ts            不经过 CLI 的裸入口（`node src/serve/main.ts`）
-└── cli.ts                 命令行入口（`serve` 子命令在这一层接线）
+├── cli/                   命令行入口（`serve` 子命令在这一层接线）
+│   └── index.ts           commander 程序、各子命令与输出
+└── index.ts               库入口：公开 API 的 re-export
 ```
+
+依赖方向是**单向**的，自下而上：`core`/`i18n` → `agents`/`pricing` → `config` → `report` → `render` →
+`cli`/`serve`。三条容易踩的规矩：`pricing` 自带价目表与汇率表，不反过来依赖 `config`；`serve` 只用
+`report` 的类型与查询，不 import `render`/`cli`；只有 `cli` 能 import `render`。这条规则由
+`test/architecture.test.ts` 守着（它读 import 图，而不是靠约定）。
 
 `web/` 是唯一的工作区包（Vite + React + Tailwind + ECharts），只依赖 `src/serve/types.ts`
 的 HTTP 契约，不 import 服务端代码；构建产物 `web/dist` 由 `serve` 静态托管。设计、API 与

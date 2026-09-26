@@ -15,11 +15,11 @@
  *   the rows displayed beside it, so the number a reader checks always matches.
  */
 
-import { emptyBuckets, tokenBreakdown } from './core/buckets.ts';
-import { UserError, renderDiagnostic } from './i18n/errors.ts';
-import { t } from './i18n/index.ts';
-import { formatDecimal, MONEY_SCALE_DIGITS, parseDecimal, trimDecimal } from './core/money.ts';
-import type { CacheWriteTtl, CostTotals, TokenBuckets, TokenTotals, UsageRecord } from './core/types.ts';
+import { emptyBuckets, tokenBreakdown } from '../core/buckets.ts';
+import { UserError, renderDiagnostic } from '../i18n/errors.ts';
+import { t } from '../i18n/index.ts';
+import { formatDecimal, MONEY_SCALE_DIGITS, parseDecimal, trimDecimal } from '../core/money.ts';
+import type { CacheWriteTtl, CostTotals, TokenBuckets, TokenTotals, UsageRecord } from '../core/types.ts';
 import {
   counterForBasis,
   type ComponentCharge,
@@ -28,7 +28,7 @@ import {
   type PricingEngine,
   type RateComponent,
   type RecordCost,
-} from './pricing/index.ts';
+} from '../pricing/index.ts';
 
 /** Digits kept for money in the output: finer than any real per-request cost. */
 export const COST_DIGITS = 4;

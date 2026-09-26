@@ -5,7 +5,7 @@
  * HTTP layer hands out. It does that by reusing the modules the CLI already
  * trusts — the adapters (`src/agents/registry.ts`) read the data, the merge layer
  * (`src/core/merge.ts`) makes one dataset of several agents, and `runQuery`
- * (`src/report.ts`) prices it and builds the per-project / per-session rows — and
+ * (`src/report/index.ts`) prices it and builds the per-project / per-session rows — and
  * adds only what a browser needs on top: an explicit workspace level, usage over
  * time, and a session tree.
  *
@@ -54,7 +54,7 @@ import { basename, resolve as resolvePath, sep } from 'node:path';
 
 import { AGENT_ADAPTERS, findAgent } from '../agents/registry.ts';
 import type { AgentAdapter } from '../agents/contract.ts';
-import { addCostTotals, costOf, zeroCostTotals } from '../accounting.ts';
+import { addCostTotals, costOf, zeroCostTotals } from '../report/accounting.ts';
 import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
 import type { CostTotals, TokenBuckets, UsageDataset, UsageRecord } from '../core/types.ts';
@@ -78,8 +78,8 @@ import {
   type RepoGroup,
   type SessionReport,
   type UsageResult,
-} from '../report.ts';
-import { inRange, resolveRange, type TimeRange } from '../timerange.ts';
+} from '../report/index.ts';
+import { inRange, resolveRange, type TimeRange } from '../report/timerange.ts';
 
 import type {
   AgentTotals,

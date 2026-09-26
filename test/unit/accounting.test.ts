@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { costOf, moneyBreakdown } from '../../src/accounting.ts';
+import { costOf, moneyBreakdown } from '../../src/report/accounting.ts';
 import type { CostTotals, TokenBuckets, UsageRecord } from '../../src/core/types.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { record } from '../support/dataset.ts';

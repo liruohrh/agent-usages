@@ -9,7 +9,7 @@
  * the rows displayed beside it.
  */
 
-import { addBuckets, emptyBuckets } from './core/buckets.ts';
+import { addBuckets, emptyBuckets } from '../core/buckets.ts';
 import type {
   CacheWriteTtl,
   CostTotals,
@@ -19,11 +19,11 @@ import type {
   TokenTotals,
   UsageDataset,
   UsageRecord,
-} from './core/types.ts';
+} from '../core/types.ts';
 import { addCostTotals, addSummaries, costOf, zeroCostTotals, type CostSummary } from './accounting.ts';
-import { UserError, renderDiagnostic, type Warning } from './i18n/errors.ts';
-import { t } from './i18n/index.ts';
-import type { PricingEngine, DisplayReason } from './pricing/index.ts';
+import { UserError, renderDiagnostic, type Warning } from '../i18n/errors.ts';
+import { t } from '../i18n/index.ts';
+import type { PricingEngine, DisplayReason } from '../pricing/index.ts';
 import { inRange, type TimeRange } from './timerange.ts';
 
 /** How money was converted for one report, for the provenance line. */

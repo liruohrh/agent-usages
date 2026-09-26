@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { costOf } from '../../src/accounting.ts';
+import { costOf } from '../../src/report/accounting.ts';
 import {
   seedDate,
   convertProvider,

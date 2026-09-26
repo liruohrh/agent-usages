@@ -28,7 +28,7 @@ const args = ['serve', '--port', port, '--no-update'];
 if (existsSync(snapshot)) args.push('--snapshot', snapshot);
 else process.stdout.write(`e2e: no snapshot at ${snapshot}, scanning live data\n`);
 
-const child = spawn(process.execPath, [join(repo, 'src', 'cli.ts'), ...args], { stdio: 'inherit' });
+const child = spawn(process.execPath, [join(repo, 'src', 'cli', 'index.ts'), ...args], { stdio: 'inherit' });
 const stop = () => {
   child.kill('SIGINT');
 };

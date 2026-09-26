@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { mergeDatasets } from '../../src/core/merge.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
-import { runQuery, type UsageQuery, type UsageResult } from '../../src/report.ts';
+import { runQuery, type UsageQuery, type UsageResult } from '../../src/report/index.ts';
 import { buckets, dataset, project, record, session } from '../support/dataset.ts';
 import { STUB_AT, stubProvider } from '../support/stub-pricing.ts';
 

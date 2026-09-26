@@ -32,7 +32,7 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import { flattenWarning, localizeDashboard, openStore, type DashboardQuery, type DashboardStore } from './data.ts';
-import { openInBrowser } from '../open.ts';
+import { openInBrowser } from './open.ts';
 import { LANGUAGES, language, messagesFor, parseLanguage, setLanguage, t, type Language } from '../i18n/index.ts';
 import { ConfigError, UserError, renderDiagnostic } from '../i18n/errors.ts';
 import {

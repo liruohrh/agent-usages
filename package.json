@@ -45,7 +45,7 @@
     "./pricing": "./dist/pricing/index.js"
   },
   "scripts": {
-    "cli": "node src/cli.ts",
+    "cli": "node src/cli/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

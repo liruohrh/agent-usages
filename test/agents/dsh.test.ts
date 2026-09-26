@@ -20,7 +20,7 @@ import { shippedProviders } from '../../src/pricing/catalog.ts';
 
 /** The vendor's yuan list, which the fixture's expectations were written from. */
 const deepseekPricing = shippedProviders()[0]!;
-import { listSessions, resolveSessionSelectors, runQuery, type UsageQuery } from '../../src/report.ts';
+import { listSessions, resolveSessionSelectors, runQuery, type UsageQuery } from '../../src/report/index.ts';
 
 const SID = {
   /** Spans the 2026-09-10 price change and both tiers. */

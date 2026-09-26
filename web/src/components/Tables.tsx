@@ -817,7 +817,7 @@ export function ModelTable({
  *
  * The provider's component id is what makes the mapping possible; an id we do not
  * know keeps the rate card's own wording, which is the best name available. This
- * mirrors `COMPONENT_METRICS` in `src/format.ts`, so a band's `I/C` here is the
+ * mirrors `COMPONENT_METRICS` in `src/render/format.ts`, so a band's `I/C` here is the
  * `I/C` the terminal prints for the same card item.
  */
 const COMPONENT_METRICS: Readonly<Record<string, string>> = {

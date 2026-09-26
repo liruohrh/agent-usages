@@ -17,35 +17,35 @@
 
 import { Command, InvalidArgumentError } from 'commander';
 
-import { AGENT_ADAPTERS, detectAgents, requireAgent, type AgentAdapter } from './agents/index.ts';
+import { AGENT_ADAPTERS, detectAgents, requireAgent, type AgentAdapter } from '../agents/index.ts';
 import {
   PRICING_PROVIDERS,
   createPricingEngine,
   resolvePricingProvider,
   type PricingEngine,
   type RateComponent,
-} from './pricing/index.ts';
-import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from './report.ts';
-import { resolveRange } from './timerange.ts';
-import { resolveLanguage, setLanguage, t } from './i18n/index.ts';
-import { openInBrowser } from './open.ts';
-import { renderDiagnostic, UserError, type Warning } from './i18n/errors.ts';
-import { mergeDatasets } from './core/merge.ts';
+} from '../pricing/index.ts';
+import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from '../report/index.ts';
+import { resolveRange } from '../report/timerange.ts';
+import { resolveLanguage, setLanguage, t } from '../i18n/index.ts';
+import { openInBrowser } from '../serve/open.ts';
+import { renderDiagnostic, UserError, type Warning } from '../i18n/errors.ts';
+import { mergeDatasets } from '../core/merge.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resolveConfig, type ResolvedConfig } from './config/resolve.ts';
-import { loadRateSeries, rateOn, type LoadedRateSeries } from './config/series.ts';
-import type { RateMode } from './config/user.ts';
-import { cachedConfigText, runUpdates, type UpdateKind } from './config/update.ts';
-import { parsePricingConfig, shippedPricingText } from './pricing/catalog.ts';
-import { parseRatesConfig, shippedRatesText } from './pricing/rates.ts';
-import { parseHolidaysConfig, shippedHolidaysText } from './config/holidays.ts';
-import { readUserConfig } from './config/user.ts';
-import { userConfigPath } from './config/paths.ts';
+import { resolveConfig, type ResolvedConfig } from '../config/resolve.ts';
+import { loadRateSeries, rateOn, type LoadedRateSeries } from '../config/series.ts';
+import type { RateMode } from '../config/user.ts';
+import { cachedConfigText, runUpdates, type UpdateKind } from '../config/update.ts';
+import { parsePricingConfig, shippedPricingText } from '../pricing/catalog.ts';
+import { parseRatesConfig, shippedRatesText } from '../pricing/rates.ts';
+import { parseHolidaysConfig, shippedHolidaysText } from '../config/holidays.ts';
+import { readUserConfig } from '../config/user.ts';
+import { userConfigPath } from '../config/paths.ts';
 import {
   chooseDisplay,
   convertProvider,
@@ -54,10 +54,10 @@ import {
   rateFor,
   selectCurrency,
   type DisplayResolution,
-} from './pricing/currency.ts';
-import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type ReportSection } from './format.ts';
-import { renderHtmlReport } from './html.ts';
-import type { UsageDataset } from './core/types.ts';
+} from '../pricing/currency.ts';
+import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type ReportSection } from '../render/format.ts';
+import { renderHtmlReport } from '../render/html.ts';
+import type { UsageDataset } from '../core/types.ts';
 
 const EXIT_OK = 0;
 const EXIT_ERROR = 1;
@@ -751,7 +751,7 @@ async function runServe(options: ServeOptions): Promise<void> {
   if (options.provider !== undefined) throw new UserError('serveOptionUnsupported', { option: '--provider' });
   if (options.json === true) throw new UserError('serveOptionUnsupported', { option: '--json' });
 
-  const { openStore, startServer } = await import('./serve/index.ts');
+  const { openStore, startServer } = await import('../serve/index.ts');
   const scan = {
     ...(options.agent === undefined ? {} : { agent: options.agent.join(',') }),
     ...(options.home === undefined ? {} : { home: options.home }),

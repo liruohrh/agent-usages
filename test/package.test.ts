@@ -38,7 +38,7 @@ describe('npm pack', () => {
 
   it('ships the entry points and the sources they import', () => {
     expect(paths).toContain('bin/agent-usages.js');
-    expect(paths).toContain('src/cli.ts');
+    expect(paths).toContain('src/cli/index.ts');
     expect(paths).toContain('src/pricing/catalog.ts');
   });
 

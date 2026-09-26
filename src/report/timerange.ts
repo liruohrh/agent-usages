@@ -11,8 +11,8 @@
  * an explicit offset is honoured exactly as written.
  */
 
-import { UserError } from './i18n/errors.ts';
-import { t } from './i18n/index.ts';
+import { UserError } from '../i18n/errors.ts';
+import { t } from '../i18n/index.ts';
 
 /** Resolved half-open instant range. */
 export interface TimeRange {

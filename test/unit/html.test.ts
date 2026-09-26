@@ -11,11 +11,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import type { CostTotals, TokenTotals } from '../../src/core/types.ts';
-import { renderHtmlReport, type HtmlOptions } from '../../src/html.ts';
+import { renderHtmlReport, type HtmlOptions } from '../../src/render/html.ts';
 import { UserError } from '../../src/i18n/errors.ts';
 import { DEFAULT_LANGUAGE, setLanguage } from '../../src/i18n/index.ts';
-import type { ProjectReport, RateInfo, ScopeTotals, SessionReport, UsageResult } from '../../src/report.ts';
-import type { ReportSection } from '../../src/format.ts';
+import type { ProjectReport, RateInfo, ScopeTotals, SessionReport, UsageResult } from '../../src/report/index.ts';
+import type { ReportSection } from '../../src/render/format.ts';
 
 afterEach(() => {
   setLanguage(DEFAULT_LANGUAGE);

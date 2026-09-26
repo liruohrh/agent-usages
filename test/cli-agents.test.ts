@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { formatDecimal, parseDecimal, sumAmounts } from '../src/core/money.ts';
 
 const run = promisify(execFile);
-const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'cli.ts');
+const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'cli', 'index.ts');
 
 const CWD = '/home/user/ws/shared';
 const DSH_SESSION = 'session-aaaaaaaa-0000-4000-8000-00000000000a';

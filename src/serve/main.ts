@@ -1,7 +1,7 @@
 /**
  * `agent-usages serve` — the standalone entry point.
  *
- * `src/cli.ts` gains the subcommand through `src/serve/index.ts`; this file exists
+ * `src/cli/index.ts` gains the subcommand through `src/serve/index.ts`; this file exists
  * so the server can also be run (and tested) on its own:
  *
  * ```sh

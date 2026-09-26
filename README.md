@@ -57,7 +57,7 @@ npx github:liruohrh/agent-usages price                                    # 价�
 ```bash
 git clone https://github.com/liruohrh/agent-usages && cd agent-usages
 pnpm install
-pnpm cli usage --range month       # 等价于 node src/cli.ts usage --range month
+pnpm cli usage --range month       # 等价于 node src/cli/index.ts usage --range month
 pnpm cli ui                        # Web 平台；前端要先 pnpm web:build 一次
 pnpm link --global                 # 装到 PATH 后用 agent-usages …
 ```
@@ -353,7 +353,7 @@ feature-x (~/ws/apps/demo-app/feature-x)  ← ~/ws/apps/demo-app 的 worktree
 **一份源码，两种运行形态**：checkout 里 `src/*.ts` 就是程序（Node 原生类型擦除，无构建步骤）；
 装进 `node_modules` 的那份必须是编译好的 JS——Node 明确拒绝在 `node_modules` 里擦类型，
 实测会抛 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`。`bin/agent-usages.js` 先找
-`dist/cli.js`、找不到才回落到源码，两种形态共用一个入口。
+`dist/cli/index.js`、找不到才回落到源码，两种形态共用一个入口。
 
 ```bash
 pnpm build          # = build:cli（tsc → dist/）+ build:web（vite → web/dist）
@@ -365,7 +365,7 @@ pnpm clean          # 删掉 dist/
 ```bash
 git clone https://github.com/liruohrh/agent-usages && cd agent-usages
 pnpm install
-pnpm cli usage --range month      # 等价于 node src/cli.ts usage --range month
+pnpm cli usage --range month      # 等价于 node src/cli/index.ts usage --range month
 pnpm web:build && pnpm cli ui     # Web 平台（仓库路径下前端要先构建）
 pnpm link --global                # 装到 PATH 后用 agent-usages …
 ```

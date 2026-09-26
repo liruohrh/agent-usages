@@ -21,7 +21,7 @@ export {
   resolveProjectSelectors,
   resolveSessionSelectors,
   runQuery,
-} from './report.ts';
+} from './report/index.ts';
 export type {
   BandComponent,
   BandSummary,
@@ -39,7 +39,7 @@ export type {
   UsageDimension,
   UsageQuery,
   UsageResult,
-} from './report.ts';
+} from './report/index.ts';
 export {
   COST_DIGITS,
   costOf,
@@ -51,10 +51,10 @@ export {
   renderRounded,
   sumTokens,
   summarize,
-} from './accounting.ts';
-export type { ComponentUsage, CostGroup, CostSummary, ExactCost, MoneyBreakdown, UsageCost } from './accounting.ts';
-export { formatSessionList, formatUsageReport, sessionListToJson, usageToJson } from './format.ts';
-export { renderHtmlReport } from './html.ts';
-export type { HtmlOptions } from './html.ts';
-export { inRange, parseInstant, presetRange, resolveRange } from './timerange.ts';
-export type { RangePreset, TimeRange } from './timerange.ts';
+} from './report/accounting.ts';
+export type { ComponentUsage, CostGroup, CostSummary, ExactCost, MoneyBreakdown, UsageCost } from './report/accounting.ts';
+export { formatSessionList, formatUsageReport, sessionListToJson, usageToJson } from './render/format.ts';
+export { renderHtmlReport } from './render/html.ts';
+export type { HtmlOptions } from './render/html.ts';
+export { inRange, parseInstant, presetRange, resolveRange } from './report/timerange.ts';
+export type { RangePreset, TimeRange } from './report/timerange.ts';

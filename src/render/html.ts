@@ -11,8 +11,8 @@
  * all. It opens from a filesystem, survives being mailed, and needs no network.
  */
 
-import { tokenBreakdown, type TokenBreakdown } from './core/buckets.ts';
-import type { TokenTotals } from './core/types.ts';
+import { tokenBreakdown, type TokenBreakdown } from '../core/buckets.ts';
+import type { TokenTotals } from '../core/types.ts';
 import {
   bandTitle,
   bandWindow,
@@ -24,10 +24,10 @@ import {
   spanText,
   type ReportSection,
 } from './format.ts';
-import { language, t } from './i18n/index.ts';
-import type { Warning } from './i18n/errors.ts';
-import { displayRate } from './pricing/index.ts';
-import type { BandSummary, ModelBreakdown, ProjectReport, ScopeTotals, SessionReport, UsageResult } from './report.ts';
+import { language, t } from '../i18n/index.ts';
+import type { Warning } from '../i18n/errors.ts';
+import { displayRate } from '../pricing/index.ts';
+import type { BandSummary, ModelBreakdown, ProjectReport, ScopeTotals, SessionReport, UsageResult } from '../report/index.ts';
 
 /** What the HTML renderer prints beyond the default report. */
 export interface HtmlOptions {

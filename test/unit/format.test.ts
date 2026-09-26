@@ -12,9 +12,9 @@ import stringWidth from 'string-width';
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import type { CostTotals, TokenTotals } from '../../src/core/types.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
-import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type FormatOptions, type ReportSection } from '../../src/format.ts';
+import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type FormatOptions, type ReportSection } from '../../src/render/format.ts';
 import { UserError } from '../../src/i18n/errors.ts';
-import type { ProjectReport, RateInfo, RepoGroup, ScopeTotals, SessionListResult, SessionReport, UsageResult } from '../../src/report.ts';
+import type { ProjectReport, RateInfo, RepoGroup, ScopeTotals, SessionListResult, SessionReport, UsageResult } from '../../src/report/index.ts';
 import { stubProvider, TEST_CURRENCY } from '../support/stub-pricing.ts';
 
 const engine = createPricingEngine(stubProvider());
