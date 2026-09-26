@@ -23,6 +23,7 @@
     "url": "https://github.com/liruohrh/agent-usages/issues"
   },
   "files": [
+    "scripts",
     "bin",
     "src",
     "config",
@@ -48,7 +49,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
-    "prepack": "pnpm --filter web build",
+    "prepare": "node scripts/prepare.mjs",
     "serve": "node src/serve/main.ts",
     "web:dev": "pnpm --filter web dev",
     "web:build": "pnpm --filter web build",
