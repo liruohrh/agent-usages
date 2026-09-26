@@ -404,13 +404,13 @@ pnpm link --global && agent-usages usage
 agent-usages update                  # 价格表 + 汇率（默认两个都更新）
 agent-usages update prices           # 只更新价格表
 agent-usages update rates            # 只更新汇率
-agent-usages update --force          # 忽略"今天已经检查过"
+agent-usages update --force          # 忽略检查间隔，立即检查
 agent-usages update rates --write-config   # 把拉到的汇率写回 config/rates.json，review 后提交
 agent-usages usage --no-update       # 本次完全不联网
 agent-usages check-config            # 改完配置提交前跑一次
 ```
 
-- **日常运行时自动更新**：价格表默认开、汇率默认关，各自**每天最多检查一次**（检查过就不重复请求，失败也算检查过），失败静默用本地数据——命令宁可显示略旧的价格，也不会因为网络挂掉。
+- **日常运行时自动更新**：价格表默认开、汇率默认关，**价格表每 3 周检查一次、汇率每周一次**（检查过就不重复请求，失败也算检查过），失败静默用本地数据——命令宁可显示略旧的价格，也不会因为网络挂掉。
 - 价格表从本仓库 raw 地址按 ETag 条件请求：文件没变就是一个 304。
 - 汇率按 `config/rates.json` 里的源**顺序尝试、每个源重试两次**，第一个成功即止；写回时会保留源未报价的币种（并告知数量）。
 - `check-config` 校验两份文件（区间连续、峰谷规则、来源 URL、币种代码等），也可以 `--json`。

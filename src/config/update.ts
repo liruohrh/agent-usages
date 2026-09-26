@@ -18,6 +18,7 @@
  */
 
 import { renderDiagnostic } from '../i18n/errors.ts';
+import { t } from '../i18n/index.ts';
 import { parsePricingConfig } from './pricing.ts';
 import { parseRatesConfig, shippedRates } from './rates.ts';
 import { cachePath, statePath } from './paths.ts';
@@ -77,12 +78,6 @@ export interface UpdateOptions {
   fetchImpl?: typeof fetch | undefined;
 }
 
-/** Local calendar day, so "today" means the user's day. */
-function dayOf(instant: number): string {
-  const date = new Date(instant);
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-}
-
 /** Read the bookkeeping file, or a fresh one. */
 function readState(env: NodeJS.ProcessEnv, now: Date): UpdateState {
   const { value } = readJson<UpdateState>(statePath(env));
@@ -92,11 +87,38 @@ function readState(env: NodeJS.ProcessEnv, now: Date): UpdateState {
   return { version: 1, firstRunAt: value.firstRunAt, checkedAt: value.checkedAt ?? {} };
 }
 
-/** Whether a check is due, given the once-a-day rule. */
+/**
+ * How long one kind of update waits between checks.
+ *
+ * The two sources change at very different speeds: the vendor's rate table moves
+ * every day but a weekly check is plenty for a report about the past, while the
+ * price list is a hand-maintained file that changes when a vendor changes its
+ * pricing — three weeks apart is often enough to be current and rare enough not
+ * to nag GitHub. `--force` ignores both.
+ */
+const CHECK_EVERY_DAYS: Readonly<Record<UpdateKind, number>> = { pricing: 21, rates: 7 };
+
+/** The `every …` phrase an outcome line uses: whole weeks once the wait is a week. */
+function everyText(days: number): string {
+  return days % 7 === 0 && days >= 7
+    ? t().update.everyWeeks(String(days / 7))
+    : t().update.everyDays(String(days));
+}
+
+/** How long ago a check was, in words: `今天` reads better than `0 天前`. */
+function agoText(last: number, now: number): string {
+  const days = String(Math.max(0, Math.round((now - last) / 86_400_000)));
+  return days === '0' ? t().update.agoToday : t().update.agoDays(days);
+}
+
+/** Whether a check is due, given that kind's interval. */
 function isDue(state: UpdateState, kind: UpdateKind, now: Date, force: boolean): boolean {
   if (force) return true;
   const last = state.checkedAt[kind];
-  return last === undefined || dayOf(last) !== dayOf(now.getTime());
+  // A clock that moved backwards is also a reason to look again: the alternative
+  // is a machine that never checks anything until the date catches up.
+  if (last === undefined || now.getTime() < last) return true;
+  return now.getTime() - last >= CHECK_EVERY_DAYS[kind] * 86_400_000;
 }
 
 /** Fetch with a timeout, returning the response or `undefined`. */
@@ -123,7 +145,14 @@ export async function updatePricing(options: UpdateOptions = {}): Promise<Update
   const fetchImpl = options.fetchImpl ?? fetch;
   const state = readState(env, now);
   if (!isDue(state, 'pricing', now, options.force === true)) {
-    return { kind: 'pricing', status: 'skipped', detail: renderDiagnostic('updatePricesChecked', {}) };
+    return {
+      kind: 'pricing',
+      status: 'skipped',
+      detail: renderDiagnostic('updatePricesChecked', {
+        ago: agoText(state.checkedAt.pricing ?? now.getTime(), now.getTime()),
+        every: everyText(CHECK_EVERY_DAYS.pricing),
+      }),
+    };
   }
   state.checkedAt.pricing = now.getTime();
   const cached = readJson<CacheEntry>(cachePath('pricing', env)).value;
@@ -245,7 +274,14 @@ export async function updateRates(options: UpdateOptions = {}): Promise<UpdateOu
   const now = options.now ?? new Date();
   const state = readState(env, now);
   if (!isDue(state, 'rates', now, options.force === true)) {
-    return { kind: 'rates', status: 'skipped', detail: renderDiagnostic('updateRatesChecked', {}) };
+    return {
+      kind: 'rates',
+      status: 'skipped',
+      detail: renderDiagnostic('updateRatesChecked', {
+        ago: agoText(state.checkedAt.rates ?? now.getTime(), now.getTime()),
+        every: everyText(CHECK_EVERY_DAYS.rates),
+      }),
+    };
   }
   state.checkedAt.rates = now.getTime();
   const fetched = await fetchRates(options);

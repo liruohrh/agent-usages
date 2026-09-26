@@ -126,6 +126,10 @@ export const en: Messages = {
     wroteBack: (path: string, currencies: string, date: string, held: string) =>
       `wrote ${path} (${currencies} currencies, rates dated ${date}${held}); commit it once check-config passes`,
     heldCurrencies: (count: number) => `, kept the previous value for ${count} the source does not quote`,
+    everyWeeks: (weeks: string) => (weeks === '1' ? 'weekly' : `every ${weeks} weeks`),
+    everyDays: (days: string) => (days === '1' ? 'daily' : `every ${days} days`),
+    agoToday: 'today',
+    agoDays: (days: string) => `${days} day(s) ago`,
   },
   check: {
     passed: 'ok',
@@ -182,7 +186,7 @@ export const en: Messages = {
     agents: 'list the supported agents and pricing providers',
     update: 'refresh the price list and the rates (both by default)',
     updateTarget: 'what to refresh: all (default), prices or rates',
-    updateForce: 'ignore "already checked today" and check now',
+    updateForce: 'ignore the check interval and check now',
     updateWrite: 'write the fetched rates back to config/rates.json, for review and commit',
     checkConfig: 'validate the price and rate files under config/ (run before committing)',
     serve:
@@ -307,8 +311,9 @@ export const en: Messages = {
       `${p.count} records have no usable price and are not counted in the cost (see \`price\` for the models on file)`,
     projectionMismatch: (p: { diffs: string }) => `session usage disagrees with the projection cache: ${p.diffs}`,
     /* ---- update status ---- */
-    updatePricesChecked: 'already checked the price list today',
-    updateRatesChecked: 'already checked the rates today',
+    updatePricesChecked: (p: { ago: string; every: string }) =>
+      `the price list was checked ${p.ago} (${p.every})`,
+    updateRatesChecked: (p: { ago: string; every: string }) => `the rates were checked ${p.ago} (${p.every})`,
     updatePricesUnchanged: 'the price list has not changed',
     updatePricesUpdated: (p: { date: string }) => `price list updated (file dated ${p.date})`,
     updatePricesOffline: 'could not fetch the price list (offline or timed out); keeping what we have',

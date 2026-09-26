@@ -169,7 +169,7 @@ src/
 │   ├── pricing.ts         解析/校验 config/pricing.json（也是 check-config 的引擎）
 │   ├── rates.ts           解析/校验 config/rates.json（含在线源清单）
 │   ├── user.ts            ~/.config/agent-usages/config.json：价格覆盖 + `projects` 项目声明，按时间合并到默认表之上
-│   ├── update.ts          ETag 条件请求、每天最多一次、多源重试、失败即回退
+│   ├── update.ts          ETag 条件请求、按来源定间隔（价格表 3 周 / 汇率 1 周）、多源重试、失败即回退
 │   └── resolve.ts         三层数据合成一次运行实际使用的配置
 ├── accounting.ts          逐条计费、按「模型×区间×峰谷」精确累加并取整、聚合只是相加
 ├── report.ts              筛选、每个会话计价一次、向上全部相加（含按 agent 分列）、会话清单

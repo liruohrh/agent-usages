@@ -2,7 +2,7 @@
  * Update tests.
  *
  * Three promises are pinned here, because each is easy to break and expensive
- * when broken: a check happens at most once a day, a failed check never damages
+ * when broken: a check happens at most once per kind's interval, a failed check never damages
  * what is already cached, and a broken payload never replaces a good one.
  *
  * No test touches the network: `fetch` is injected.
@@ -51,15 +51,37 @@ describe('updatePricing', () => {
     expect(cachedConfigText('pricing', directory)).toBe(text);
   });
 
-  it('checks at most once a day', async () => {
+  it('checks at most once every three weeks', async () => {
     const directory = env();
     const { impl, calls } = stubFetch(() => new Response(shippedPricingText(), { status: 200 }));
-    const morning = new Date('2026-09-21T08:00:00');
-    expect((await updatePricing({ env: directory, now: morning, fetchImpl: impl })).status).toBe('updated');
+    const first = new Date('2026-09-21T08:00:00');
+    expect((await updatePricing({ env: directory, now: first, fetchImpl: impl })).status).toBe('updated');
+    // The same day, and every day after it, is too soon.
     expect((await updatePricing({ env: directory, now: new Date('2026-09-21T20:00:00'), fetchImpl: impl })).status).toBe('skipped');
+    expect((await updatePricing({ env: directory, now: new Date('2026-10-01T09:00:00'), fetchImpl: impl })).status).toBe('skipped');
     expect(calls).toHaveLength(1);
-    // The next day it tries again.
-    expect((await updatePricing({ env: directory, now: new Date('2026-09-22T09:00:00'), fetchImpl: impl })).status).toBe('updated');
+    // Twenty-one days later it looks again — the price list is hand-maintained, so
+    // this is about noticing a vendor's change, not about polling.
+    expect((await updatePricing({ env: directory, now: new Date('2026-10-12T09:00:00'), fetchImpl: impl })).status).toBe('updated');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('says how long ago it looked, and how often it does', async () => {
+    const directory = env();
+    const { impl } = stubFetch(() => new Response(shippedPricingText(), { status: 200 }));
+    await updatePricing({ env: directory, now: new Date('2026-09-21T08:00:00'), fetchImpl: impl });
+    const skipped = await updatePricing({ env: directory, now: new Date('2026-09-26T08:00:00'), fetchImpl: impl });
+    expect(skipped.status).toBe('skipped');
+    expect(skipped.detail).toContain('5 天前检查过');
+    expect(skipped.detail).toContain('3 周');
+  });
+
+  it('looks again when the clock moved backwards', async () => {
+    const directory = env();
+    const { impl, calls } = stubFetch(() => new Response(shippedPricingText(), { status: 200 }));
+    await updatePricing({ env: directory, now: new Date('2026-09-21T08:00:00'), fetchImpl: impl });
+    // A machine whose clock jumped back must not stop checking until it catches up.
+    expect((await updatePricing({ env: directory, now: new Date('2026-01-01T08:00:00'), fetchImpl: impl })).status).toBe('updated');
     expect(calls).toHaveLength(2);
   });
 

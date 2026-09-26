@@ -164,6 +164,12 @@ export const zh = {
     wroteBack: (path: string, currencies: string, date: string, held: string) =>
       `已写回 ${path}（${currencies} 个币种，汇率日期 ${date}${held}）；check-config 通过后提交即可`,
     heldCurrencies: (count: number) => `，另有 ${count} 个源未报价的币种沿用原值`,
+    /** `每 3 周一次` / `每周一次` — how long one kind of update waits between checks. */
+    everyWeeks: (weeks: string) => (weeks === '1' ? '每周一次' : `每 ${weeks} 周一次`),
+    everyDays: (days: string) => (days === '1' ? '每天一次' : `每 ${days} 天一次`),
+    /** `1 天前` / `今天` — how long ago the last check was. */
+    agoToday: '今天',
+    agoDays: (days: string) => `${days} 天前`,
   },
   /** `check-config`. */
   check: {
@@ -229,7 +235,7 @@ export const zh = {
     agents: '列出支持的 agent 与计价来源',
     update: '更新价格表与汇率（默认两者都更新）',
     updateTarget: '要更新的内容：all（默认）/ prices / rates',
-    updateForce: '忽略"今天已经检查过"，立即检查',
+    updateForce: '忽略检查间隔，立即检查',
     updateWrite: '把拉到的汇率写回仓库的 config/rates.json，供 review 后提交',
     checkConfig: '校验 config/ 下的价格表与汇率表（改完提交前跑一次）',
     serve: '起本地 Web 分析平台：项目/工作区/会话/子代理树，按 agent 分列与总计，时间序列与计价明细（只读）',
@@ -370,8 +376,8 @@ export const zh = {
     unpricedRecords: (p: { count: string }) => `有 ${p.count} 条记录没有可用价格，未计入费用（可用 \`price\` 查看已收录的模型）`,
     projectionMismatch: (p: { diffs: string }) => `会话用量与投影缓存不一致：${p.diffs}`,
     /* ---- update status ---- */
-    updatePricesChecked: '今天已经检查过价格表',
-    updateRatesChecked: '今天已经检查过汇率',
+    updatePricesChecked: (p: { ago: string; every: string }) => `价格表 ${p.ago}检查过（${p.every}）`,
+    updateRatesChecked: (p: { ago: string; every: string }) => `汇率 ${p.ago}检查过（${p.every}）`,
     updatePricesUnchanged: '价格表没有变化',
     updatePricesUpdated: (p: { date: string }) => `价格表已更新（文件日期 ${p.date}）`,
     updatePricesOffline: '取价格表失败（离线或超时），沿用现有数据',

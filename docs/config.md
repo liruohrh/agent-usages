@@ -114,7 +114,9 @@ CLI 侧没有写回：`config.json` 仍然是"你想让它说什么就写什么"
 update [all|prices|rates] [--force] [--write-config]
 ```
 
-- **每天最多一次**：`state.json` 记下 `checkedAt`（成功失败都记），所以离线一周也只是一天试一次；`--force` 跳过这条规则。
+- **间隔按来源定**：`state.json` 记下 `checkedAt`（成功失败都记），**价格表每 3 周一次、汇率每周一次**
+  （厂商改价的频率是"偶尔"，汇率是"每个交易日"；每天都问一次 GitHub 太频繁，也没有新信息）。
+  时钟往回跳时视为到期——否则机器要等日期追上来才会再检查。`--force` 跳过间隔。
 - **价格表**：`raw.githubusercontent.com/liruohrh/agent-usages/master/config/pricing.json`，带 `If-None-Match`，304 即“没变化”。
 - **汇率**：按 `config/rates.json` 的 `sources` 顺序试，每个源重试 2 次，第一个成功的即采用；写回配置时保留源未报价的币种。
 - **校验后才落盘**：拉到的内容先过 `parsePricingConfig` / `parseRatesConfig`，不合法就丢弃并保留原缓存。
@@ -126,7 +128,7 @@ update [all|prices|rates] [--force] [--write-config]
 | --- | --- |
 | `agent-usages update` | 价格表 + 汇率，默认两个都更新 |
 | `agent-usages update prices` / `rates` | 只更新其一 |
-| `agent-usages update --force` | 立即检查，忽略“今天已经检查过” |
+| `agent-usages update --force` | 立即检查，忽略检查间隔 |
 | `agent-usages update rates --write-config` | 把缓存里的汇率写回 `config/rates.json`，供 review 后提交 |
 | `agent-usages check-config [--json]` | 校验两份配置（含用户配置文件） |
 | `agent-usages usage --no-update` | 本次完全不联网 |
