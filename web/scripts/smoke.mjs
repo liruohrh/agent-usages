@@ -295,9 +295,14 @@ async function exercise(base, { live }) {
   check('Σ 区间行请求 === 已计价请求', requestSum(bands) === priced, `${requestSum(bands)} vs ${priced}`);
   // The dual-currency view: every (price list, currency) the run billed under,
   // with the published amount beside the converted one. The converted column is
-  // summed from the same bands the total is, so it reconciles exactly.
+  // summed from the same bands the total is, so it reconciles exactly, and the
+  // rows cover every priced request.
   const subtotals = dashboard.body?.subtotals ?? [];
-  check('按表小计是数组', Array.isArray(dashboard.body?.subtotals));
+  check(
+    '按表小计非空（有已计价请求时）',
+    subtotals.length > 0 || priced === 0,
+    `${subtotals.length} rows for ${priced} priced requests`,
+  );
   check(
     '每条小计都带原币与显示币',
     subtotals.every(
@@ -305,22 +310,32 @@ async function exercise(base, { live }) {
         typeof row?.money?.original?.currency === 'string' &&
         typeof row?.money?.original?.amount === 'string' &&
         typeof row?.money?.display?.currency === 'string' &&
-        typeof row?.money?.display?.amount === 'string',
+        typeof row?.money?.display?.amount === 'string' &&
+        row.money.display.currency === dashboard.body?.currency,
     ),
   );
-  // An older synthetic fixture predates the field; an empty list is a pass, not
-  // a wrong sum.
   check(
     'Σ 小计(显示币) === 总计',
-    subtotals.length === 0 ||
-      subtotals
+    subtotals
       .reduce((sum, row) => sum + Number(row?.money?.display?.amount ?? 0), 0)
       .toFixed(4) === Number(summary.body?.totals?.cost?.total ?? 0).toFixed(4),
     `${subtotals.map((row) => row?.money?.display?.amount).join(' + ')} vs ${summary.body?.totals?.cost?.total}`,
   );
   check(
-    '小计只出现在已计价的范围里',
-    subtotals.length === 0 || subtotals.every((row) => (row?.requests ?? 0) > 0),
+    'Σ 小计请求 === 已计价请求',
+    requestSum(subtotals) === priced,
+    `${requestSum(subtotals)} vs ${priced}`,
+  );
+  // Two sides of one sum: a list already quoted in the display currency must
+  // print the identical number, and a converted row must be in the dashboard's
+  // currency — never a third one the page would have no symbol for.
+  check(
+    '小计的原币与显示币自洽',
+    subtotals.every((row) =>
+      row?.money?.original?.currency === row?.money?.display?.currency
+        ? row.money.original.amount === row.money.display.amount
+        : row?.money?.display?.currency === dashboard.body?.currency,
+    ),
   );
   // JSON always carries both sides (a consumer must not have to infer from a
   // missing field); the *text* views are what drop the duplicate number.

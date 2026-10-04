@@ -1,14 +1,14 @@
 {
-  "generatedAt": 1790407826685,
+  "generatedAt": 1791120463235,
   "mode": "live",
-  "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
-  "scannedAt": 1790407826681,
-  "scanMs": 17,
+  "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
+  "scannedAt": 1791120463229,
+  "scanMs": 19,
   "loadedAgents": [
     {
       "id": "claude",
       "label": "Claude Code",
-      "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude"
+      "source": "/home/demo/agent-usages/web/mock/fixtures/claude"
     }
   ],
   "currency": "CNY",
@@ -22,12 +22,12 @@
     {
       "id": "claude",
       "label": "Claude Code",
-      "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+      "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
       "sessions": 3,
       "subagentSessions": 1,
       "activeSessions": 3,
       "requests": 6,
-      "unpriced": 0,
+      "unpriced": 1,
       "firstUsage": 1790128801000,
       "lastUsage": 1790320800000,
       "tokens": {
@@ -38,16 +38,16 @@
         "reasoning": 3110
       },
       "cost": {
-        "cacheHitInputTokens": 3450000,
-        "cacheMissInputTokens": 655000,
-        "outputTokens": 8800,
+        "cacheHitInputTokens": 3150000,
+        "cacheMissInputTokens": 556000,
+        "outputTokens": 4800,
         "cacheWriteTokens": 0,
-        "cacheHitInputCost": "0.1380",
-        "cacheMissInputCost": "1.3100",
-        "outputCost": "0.0704",
+        "cacheHitInputCost": "0.1206",
+        "cacheMissInputCost": "1.0200",
+        "outputCost": "0.0340",
         "cacheWriteInputCost": "0.0000",
-        "reasoningCost": "0.0249",
-        "total": "1.5184"
+        "reasoningCost": "0.0115",
+        "total": "1.1746"
       }
     }
   ],
@@ -58,7 +58,7 @@
     "projects": 2,
     "workspaces": 2,
     "requests": 6,
-    "unpriced": 0,
+    "unpriced": 1,
     "firstUsage": 1790128801000,
     "lastUsage": 1790320800000,
     "tokens": {
@@ -72,17 +72,17 @@
       "input": {
         "tokens": 593000,
         "share": 0.1441489620302397,
-        "cost": "1.3100"
+        "cost": "1.0200"
       },
       "output": {
         "tokens": 8800,
         "share": 0.0021391414264183965,
-        "cost": "0.0704"
+        "cost": "0.0340"
       },
       "cacheRead": {
         "tokens": 3450000,
         "share": 0.8386406728572123,
-        "cost": "0.1380"
+        "cost": "0.1206"
       },
       "cacheWrite": {
         "tokens": 62000,
@@ -92,20 +92,20 @@
       "reasoning": {
         "tokens": 3110,
         "share": 0.0007559920268365015,
-        "cost": "0.0249"
+        "cost": "0.0115"
       }
     },
     "cost": {
-      "cacheHitInputTokens": 3450000,
-      "cacheMissInputTokens": 655000,
-      "outputTokens": 8800,
+      "cacheHitInputTokens": 3150000,
+      "cacheMissInputTokens": 556000,
+      "outputTokens": 4800,
       "cacheWriteTokens": 0,
-      "cacheHitInputCost": "0.1380",
-      "cacheMissInputCost": "1.3100",
-      "outputCost": "0.0704",
+      "cacheHitInputCost": "0.1206",
+      "cacheMissInputCost": "1.0200",
+      "outputCost": "0.0340",
       "cacheWriteInputCost": "0.0000",
-      "reasoningCost": "0.0249",
-      "total": "1.5184"
+      "reasoningCost": "0.0115",
+      "total": "1.1746"
     },
     "own": {
       "sessions": 2,
@@ -118,16 +118,16 @@
         "reasoning": 2850
       },
       "cost": {
-        "cacheHitInputTokens": 3050000,
-        "cacheMissInputTokens": 587000,
-        "outputTokens": 8100,
+        "cacheHitInputTokens": 2750000,
+        "cacheMissInputTokens": 488000,
+        "outputTokens": 4100,
         "cacheWriteTokens": 0,
-        "cacheHitInputCost": "0.1220",
-        "cacheMissInputCost": "1.1740",
-        "outputCost": "0.0648",
+        "cacheHitInputCost": "0.1046",
+        "cacheMissInputCost": "0.8840",
+        "outputCost": "0.0284",
         "cacheWriteInputCost": "0.0000",
-        "reasoningCost": "0.0228",
-        "total": "1.3608"
+        "reasoningCost": "0.0094",
+        "total": "1.0170"
       }
     },
     "spawned": {
@@ -183,17 +183,17 @@
         "input": {
           "tokens": 83000,
           "share": 0.2285871660699532,
-          "cost": "0.1840"
+          "cost": "0.0920"
         },
         "output": {
           "tokens": 1100,
           "share": 0.003029468465987331,
-          "cost": "0.0088"
+          "cost": "0.0044"
         },
         "cacheRead": {
           "tokens": 270000,
           "share": 0.7435968052877995,
-          "cost": "0.0108"
+          "cost": "0.0054"
         },
         "cacheWrite": {
           "tokens": 9000,
@@ -203,7 +203,7 @@
         "reasoning": {
           "tokens": 350,
           "share": 0.0009639217846323327,
-          "cost": "0.0028"
+          "cost": "0.0014"
         }
       },
       "cost": {
@@ -211,18 +211,18 @@
         "cacheMissInputTokens": 92000,
         "outputTokens": 1100,
         "cacheWriteTokens": 0,
-        "cacheHitInputCost": "0.0108",
-        "cacheMissInputCost": "0.1840",
-        "outputCost": "0.0088",
+        "cacheHitInputCost": "0.0054",
+        "cacheMissInputCost": "0.0920",
+        "outputCost": "0.0044",
         "cacheWriteInputCost": "0.0000",
-        "reasoningCost": "0.0028",
-        "total": "0.2036"
+        "reasoningCost": "0.0014",
+        "total": "0.1018"
       },
       "agentTotals": [
         {
           "id": "claude",
           "label": "Claude Code",
-          "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+          "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
           "sessions": 1,
           "subagentSessions": 0,
           "activeSessions": 1,
@@ -242,12 +242,12 @@
             "cacheMissInputTokens": 92000,
             "outputTokens": 1100,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.0108",
-            "cacheMissInputCost": "0.1840",
-            "outputCost": "0.0088",
+            "cacheHitInputCost": "0.0054",
+            "cacheMissInputCost": "0.0920",
+            "outputCost": "0.0044",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0028",
-            "total": "0.2036"
+            "reasoningCost": "0.0014",
+            "total": "0.1018"
           }
         }
       ],
@@ -266,12 +266,12 @@
           "cacheMissInputTokens": 92000,
           "outputTokens": 1100,
           "cacheWriteTokens": 0,
-          "cacheHitInputCost": "0.0108",
-          "cacheMissInputCost": "0.1840",
-          "outputCost": "0.0088",
+          "cacheHitInputCost": "0.0054",
+          "cacheMissInputCost": "0.0920",
+          "outputCost": "0.0044",
           "cacheWriteInputCost": "0.0000",
-          "reasoningCost": "0.0028",
-          "total": "0.2036"
+          "reasoningCost": "0.0014",
+          "total": "0.1018"
         }
       },
       "spawned": {
@@ -320,18 +320,18 @@
             "cacheMissInputTokens": 92000,
             "outputTokens": 1100,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.0108",
-            "cacheMissInputCost": "0.1840",
-            "outputCost": "0.0088",
+            "cacheHitInputCost": "0.0054",
+            "cacheMissInputCost": "0.0920",
+            "outputCost": "0.0044",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0028",
-            "total": "0.2036"
+            "reasoningCost": "0.0014",
+            "total": "0.1018"
           },
           "agentTotals": [
             {
               "id": "claude",
               "label": "Claude Code",
-              "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+              "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
               "sessions": 1,
               "subagentSessions": 0,
               "activeSessions": 1,
@@ -351,12 +351,12 @@
                 "cacheMissInputTokens": 92000,
                 "outputTokens": 1100,
                 "cacheWriteTokens": 0,
-                "cacheHitInputCost": "0.0108",
-                "cacheMissInputCost": "0.1840",
-                "outputCost": "0.0088",
+                "cacheHitInputCost": "0.0054",
+                "cacheMissInputCost": "0.0920",
+                "outputCost": "0.0044",
                 "cacheWriteInputCost": "0.0000",
-                "reasoningCost": "0.0028",
-                "total": "0.2036"
+                "reasoningCost": "0.0014",
+                "total": "0.1018"
               }
             }
           ],
@@ -375,12 +375,12 @@
               "cacheMissInputTokens": 92000,
               "outputTokens": 1100,
               "cacheWriteTokens": 0,
-              "cacheHitInputCost": "0.0108",
-              "cacheMissInputCost": "0.1840",
-              "outputCost": "0.0088",
+              "cacheHitInputCost": "0.0054",
+              "cacheMissInputCost": "0.0920",
+              "outputCost": "0.0044",
               "cacheWriteInputCost": "0.0000",
-              "reasoningCost": "0.0028",
-              "total": "0.2036"
+              "reasoningCost": "0.0014",
+              "total": "0.1018"
             }
           },
           "spawned": {
@@ -414,6 +414,7 @@
               "projectId": "-ws-other",
               "projectName": "other",
               "workspace": "/ws/other",
+              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-other/22222222-2222-4222-8222-222222222222.jsonl",
               "title": null,
               "cwd": "/ws/other",
               "createdAt": 1790316005000,
@@ -432,12 +433,12 @@
                 "cacheMissInputTokens": 92000,
                 "outputTokens": 1100,
                 "cacheWriteTokens": 0,
-                "cacheHitInputCost": "0.0108",
-                "cacheMissInputCost": "0.1840",
-                "outputCost": "0.0088",
+                "cacheHitInputCost": "0.0054",
+                "cacheMissInputCost": "0.0920",
+                "outputCost": "0.0044",
                 "cacheWriteInputCost": "0.0000",
-                "reasoningCost": "0.0028",
-                "total": "0.2036"
+                "reasoningCost": "0.0014",
+                "total": "0.1018"
               },
               "isSubagent": false,
               "depth": 0,
@@ -459,12 +460,12 @@
                   "cacheMissInputTokens": 92000,
                   "outputTokens": 1100,
                   "cacheWriteTokens": 0,
-                  "cacheHitInputCost": "0.0108",
-                  "cacheMissInputCost": "0.1840",
-                  "outputCost": "0.0088",
+                  "cacheHitInputCost": "0.0054",
+                  "cacheMissInputCost": "0.0920",
+                  "outputCost": "0.0044",
                   "cacheWriteInputCost": "0.0000",
-                  "reasoningCost": "0.0028",
-                  "total": "0.2036"
+                  "reasoningCost": "0.0014",
+                  "total": "0.1018"
                 }
               },
               "spawned": {
@@ -505,12 +506,12 @@
                   "cacheMissInputTokens": 92000,
                   "outputTokens": 1100,
                   "cacheWriteTokens": 0,
-                  "cacheHitInputCost": "0.0108",
-                  "cacheMissInputCost": "0.1840",
-                  "outputCost": "0.0088",
+                  "cacheHitInputCost": "0.0054",
+                  "cacheMissInputCost": "0.0920",
+                  "outputCost": "0.0044",
                   "cacheWriteInputCost": "0.0000",
-                  "reasoningCost": "0.0028",
-                  "total": "0.2036"
+                  "reasoningCost": "0.0014",
+                  "total": "0.1018"
                 }
               }
             }
@@ -525,6 +526,7 @@
           "projectId": "-ws-other",
           "projectName": "other",
           "workspace": "/ws/other",
+          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-other/22222222-2222-4222-8222-222222222222.jsonl",
           "title": null,
           "cwd": "/ws/other",
           "createdAt": 1790316005000,
@@ -543,12 +545,12 @@
             "cacheMissInputTokens": 92000,
             "outputTokens": 1100,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.0108",
-            "cacheMissInputCost": "0.1840",
-            "outputCost": "0.0088",
+            "cacheHitInputCost": "0.0054",
+            "cacheMissInputCost": "0.0920",
+            "outputCost": "0.0044",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0028",
-            "total": "0.2036"
+            "reasoningCost": "0.0014",
+            "total": "0.1018"
           },
           "isSubagent": false,
           "depth": 0,
@@ -570,12 +572,12 @@
               "cacheMissInputTokens": 92000,
               "outputTokens": 1100,
               "cacheWriteTokens": 0,
-              "cacheHitInputCost": "0.0108",
-              "cacheMissInputCost": "0.1840",
-              "outputCost": "0.0088",
+              "cacheHitInputCost": "0.0054",
+              "cacheMissInputCost": "0.0920",
+              "outputCost": "0.0044",
               "cacheWriteInputCost": "0.0000",
-              "reasoningCost": "0.0028",
-              "total": "0.2036"
+              "reasoningCost": "0.0014",
+              "total": "0.1018"
             }
           },
           "spawned": {
@@ -616,12 +618,12 @@
               "cacheMissInputTokens": 92000,
               "outputTokens": 1100,
               "cacheWriteTokens": 0,
-              "cacheHitInputCost": "0.0108",
-              "cacheMissInputCost": "0.1840",
-              "outputCost": "0.0088",
+              "cacheHitInputCost": "0.0054",
+              "cacheMissInputCost": "0.0920",
+              "outputCost": "0.0044",
               "cacheWriteInputCost": "0.0000",
-              "reasoningCost": "0.0028",
-              "total": "0.2036"
+              "reasoningCost": "0.0014",
+              "total": "0.1018"
             }
           }
         }
@@ -644,12 +646,22 @@
             "cacheMissInputTokens": 0,
             "outputTokens": 0,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.0108",
-            "cacheMissInputCost": "0.1840",
-            "outputCost": "0.0088",
+            "cacheHitInputCost": "0.0054",
+            "cacheMissInputCost": "0.0920",
+            "outputCost": "0.0044",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0028",
-            "total": "0.2036"
+            "reasoningCost": "0.0014",
+            "total": "0.1018"
+          },
+          "money": {
+            "original": {
+              "currency": "CNY",
+              "amount": "0.1018"
+            },
+            "display": {
+              "currency": "CNY",
+              "amount": "0.1018"
+            }
           }
         }
       ],
@@ -661,7 +673,7 @@
           "periodId": "2026-09-10",
           "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
           "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
-          "tier": "peak",
+          "tier": "off-peak",
           "resolution": "exact",
           "requests": 2,
           "tokens": {
@@ -676,37 +688,58 @@
             "cacheMissInputTokens": 0,
             "outputTokens": 0,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.0108",
-            "cacheMissInputCost": "0.1840",
-            "outputCost": "0.0088",
+            "cacheHitInputCost": "0.0054",
+            "cacheMissInputCost": "0.0920",
+            "outputCost": "0.0044",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0028",
-            "total": "0.2036"
+            "reasoningCost": "0.0014",
+            "total": "0.1018"
+          },
+          "money": {
+            "original": {
+              "currency": "CNY",
+              "amount": "0.1018"
+            },
+            "display": {
+              "currency": "CNY",
+              "amount": "0.1018"
+            }
+          },
+          "original": {
+            "currency": "CNY",
+            "table": "deepseek",
+            "tableLabel": "DeepSeek",
+            "amounts": {
+              "input-hit": "0.0054",
+              "input-miss": "0.0920",
+              "output": "0.0044"
+            },
+            "total": "0.1018"
           },
           "components": [
             {
               "id": "input-hit",
               "label": "缓存命中输入",
-              "rate": "0.04",
+              "rate": "0.02",
               "per": 1000000,
               "tokens": 270000,
-              "amount": "0.0108"
+              "amount": "0.0054"
             },
             {
               "id": "input-miss",
               "label": "缓存未命中输入",
-              "rate": "2",
+              "rate": "1",
               "per": 1000000,
               "tokens": 92000,
-              "amount": "0.1840"
+              "amount": "0.0920"
             },
             {
               "id": "output",
               "label": "输出",
-              "rate": "8",
+              "rate": "4",
               "per": 1000000,
               "tokens": 1100,
-              "amount": "0.0088"
+              "amount": "0.0044"
             }
           ]
         }
@@ -726,7 +759,7 @@
       "subagentSessions": 1,
       "activeSessions": 2,
       "requests": 4,
-      "unpriced": 0,
+      "unpriced": 1,
       "firstUsage": 1790128801000,
       "lastUsage": 1790211900000,
       "tokens": {
@@ -740,17 +773,17 @@
         "input": {
           "tokens": 510000,
           "share": 0.13597461807129335,
-          "cost": "1.1260"
+          "cost": "0.9280"
         },
         "output": {
           "tokens": 7700,
           "share": 0.0020529501159783506,
-          "cost": "0.0616"
+          "cost": "0.0296"
         },
         "cacheRead": {
           "tokens": 3180000,
           "share": 0.847841736209241,
-          "cost": "0.1272"
+          "cost": "0.1152"
         },
         "cacheWrite": {
           "tokens": 53000,
@@ -760,31 +793,31 @@
         "reasoning": {
           "tokens": 2760,
           "share": 0.0007358626389740581,
-          "cost": "0.0221"
+          "cost": "0.0101"
         }
       },
       "cost": {
-        "cacheHitInputTokens": 3180000,
-        "cacheMissInputTokens": 563000,
-        "outputTokens": 7700,
+        "cacheHitInputTokens": 2880000,
+        "cacheMissInputTokens": 464000,
+        "outputTokens": 3700,
         "cacheWriteTokens": 0,
-        "cacheHitInputCost": "0.1272",
-        "cacheMissInputCost": "1.1260",
-        "outputCost": "0.0616",
+        "cacheHitInputCost": "0.1152",
+        "cacheMissInputCost": "0.9280",
+        "outputCost": "0.0296",
         "cacheWriteInputCost": "0.0000",
-        "reasoningCost": "0.0221",
-        "total": "1.3148"
+        "reasoningCost": "0.0101",
+        "total": "1.0728"
       },
       "agentTotals": [
         {
           "id": "claude",
           "label": "Claude Code",
-          "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+          "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
           "sessions": 2,
           "subagentSessions": 1,
           "activeSessions": 2,
           "requests": 4,
-          "unpriced": 0,
+          "unpriced": 1,
           "firstUsage": 1790128801000,
           "lastUsage": 1790320800000,
           "tokens": {
@@ -795,16 +828,16 @@
             "reasoning": 2760
           },
           "cost": {
-            "cacheHitInputTokens": 3180000,
-            "cacheMissInputTokens": 563000,
-            "outputTokens": 7700,
+            "cacheHitInputTokens": 2880000,
+            "cacheMissInputTokens": 464000,
+            "outputTokens": 3700,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.1272",
-            "cacheMissInputCost": "1.1260",
-            "outputCost": "0.0616",
+            "cacheHitInputCost": "0.1152",
+            "cacheMissInputCost": "0.9280",
+            "outputCost": "0.0296",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0221",
-            "total": "1.3148"
+            "reasoningCost": "0.0101",
+            "total": "1.0728"
           }
         }
       ],
@@ -819,16 +852,16 @@
           "reasoning": 2500
         },
         "cost": {
-          "cacheHitInputTokens": 2780000,
-          "cacheMissInputTokens": 495000,
-          "outputTokens": 7000,
+          "cacheHitInputTokens": 2480000,
+          "cacheMissInputTokens": 396000,
+          "outputTokens": 3000,
           "cacheWriteTokens": 0,
-          "cacheHitInputCost": "0.1112",
-          "cacheMissInputCost": "0.9900",
-          "outputCost": "0.0560",
+          "cacheHitInputCost": "0.0992",
+          "cacheMissInputCost": "0.7920",
+          "outputCost": "0.0240",
           "cacheWriteInputCost": "0.0000",
-          "reasoningCost": "0.0200",
-          "total": "1.1572"
+          "reasoningCost": "0.0080",
+          "total": "0.9152"
         }
       },
       "spawned": {
@@ -873,27 +906,27 @@
             "reasoning": 3020
           },
           "cost": {
-            "cacheHitInputTokens": 3580000,
-            "cacheMissInputTokens": 631000,
-            "outputTokens": 8400,
+            "cacheHitInputTokens": 3280000,
+            "cacheMissInputTokens": 532000,
+            "outputTokens": 4400,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.1432",
-            "cacheMissInputCost": "1.2620",
-            "outputCost": "0.0672",
+            "cacheHitInputCost": "0.1312",
+            "cacheMissInputCost": "1.0640",
+            "outputCost": "0.0352",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0242",
-            "total": "1.4724"
+            "reasoningCost": "0.0122",
+            "total": "1.2304"
           },
           "agentTotals": [
             {
               "id": "claude",
               "label": "Claude Code",
-              "source": "/home/liruohrh/ws/agents/agent-usages/web/mock/fixtures/claude",
+              "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
               "sessions": 2,
               "subagentSessions": 1,
               "activeSessions": 2,
               "requests": 4,
-              "unpriced": 0,
+              "unpriced": 1,
               "firstUsage": 1790128801000,
               "lastUsage": 1790320800000,
               "tokens": {
@@ -904,16 +937,16 @@
                 "reasoning": 2760
               },
               "cost": {
-                "cacheHitInputTokens": 3180000,
-                "cacheMissInputTokens": 563000,
-                "outputTokens": 7700,
+                "cacheHitInputTokens": 2880000,
+                "cacheMissInputTokens": 464000,
+                "outputTokens": 3700,
                 "cacheWriteTokens": 0,
-                "cacheHitInputCost": "0.1272",
-                "cacheMissInputCost": "1.1260",
-                "outputCost": "0.0616",
+                "cacheHitInputCost": "0.1152",
+                "cacheMissInputCost": "0.9280",
+                "outputCost": "0.0296",
                 "cacheWriteInputCost": "0.0000",
-                "reasoningCost": "0.0221",
-                "total": "1.3148"
+                "reasoningCost": "0.0101",
+                "total": "1.0728"
               }
             }
           ],
@@ -928,16 +961,16 @@
               "reasoning": 2500
             },
             "cost": {
-              "cacheHitInputTokens": 2780000,
-              "cacheMissInputTokens": 495000,
-              "outputTokens": 7000,
+              "cacheHitInputTokens": 2480000,
+              "cacheMissInputTokens": 396000,
+              "outputTokens": 3000,
               "cacheWriteTokens": 0,
-              "cacheHitInputCost": "0.1112",
-              "cacheMissInputCost": "0.9900",
-              "outputCost": "0.0560",
+              "cacheHitInputCost": "0.0992",
+              "cacheMissInputCost": "0.7920",
+              "outputCost": "0.0240",
               "cacheWriteInputCost": "0.0000",
-              "reasoningCost": "0.0200",
-              "total": "1.1572"
+              "reasoningCost": "0.0080",
+              "total": "0.9152"
             }
           },
           "spawned": {
@@ -971,6 +1004,7 @@
               "projectId": "-ws-demo-app",
               "projectName": "demo-app",
               "workspace": "/ws/demo-app",
+              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111.jsonl",
               "title": "demo work",
               "cwd": "/ws/demo-app",
               "createdAt": 1790128801000,
@@ -985,16 +1019,16 @@
                 "reasoning": 2760
               },
               "cost": {
-                "cacheHitInputTokens": 3180000,
-                "cacheMissInputTokens": 563000,
-                "outputTokens": 7700,
+                "cacheHitInputTokens": 2880000,
+                "cacheMissInputTokens": 464000,
+                "outputTokens": 3700,
                 "cacheWriteTokens": 0,
-                "cacheHitInputCost": "0.1272",
-                "cacheMissInputCost": "1.1260",
-                "outputCost": "0.0616",
+                "cacheHitInputCost": "0.1152",
+                "cacheMissInputCost": "0.9280",
+                "outputCost": "0.0296",
                 "cacheWriteInputCost": "0.0000",
-                "reasoningCost": "0.0221",
-                "total": "1.3148"
+                "reasoningCost": "0.0101",
+                "total": "1.0728"
               },
               "isSubagent": false,
               "depth": 0,
@@ -1012,16 +1046,16 @@
                   "reasoning": 2500
                 },
                 "cost": {
-                  "cacheHitInputTokens": 2780000,
-                  "cacheMissInputTokens": 495000,
-                  "outputTokens": 7000,
+                  "cacheHitInputTokens": 2480000,
+                  "cacheMissInputTokens": 396000,
+                  "outputTokens": 3000,
                   "cacheWriteTokens": 0,
-                  "cacheHitInputCost": "0.1112",
-                  "cacheMissInputCost": "0.9900",
-                  "outputCost": "0.0560",
+                  "cacheHitInputCost": "0.0992",
+                  "cacheMissInputCost": "0.7920",
+                  "outputCost": "0.0240",
                   "cacheWriteInputCost": "0.0000",
-                  "reasoningCost": "0.0200",
-                  "total": "1.1572"
+                  "reasoningCost": "0.0080",
+                  "total": "0.9152"
                 }
               },
               "spawned": {
@@ -1058,16 +1092,16 @@
                   "reasoning": 2760
                 },
                 "cost": {
-                  "cacheHitInputTokens": 3180000,
-                  "cacheMissInputTokens": 563000,
-                  "outputTokens": 7700,
+                  "cacheHitInputTokens": 2880000,
+                  "cacheMissInputTokens": 464000,
+                  "outputTokens": 3700,
                   "cacheWriteTokens": 0,
-                  "cacheHitInputCost": "0.1272",
-                  "cacheMissInputCost": "1.1260",
-                  "outputCost": "0.0616",
+                  "cacheHitInputCost": "0.1152",
+                  "cacheMissInputCost": "0.9280",
+                  "outputCost": "0.0296",
                   "cacheWriteInputCost": "0.0000",
-                  "reasoningCost": "0.0221",
-                  "total": "1.3148"
+                  "reasoningCost": "0.0101",
+                  "total": "1.0728"
                 }
               }
             },
@@ -1078,6 +1112,7 @@
               "projectId": "-ws-demo-app",
               "projectName": "demo-app",
               "workspace": "/ws/demo-app",
+              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111/subagents/agent-a1.jsonl",
               "title": "review the diff",
               "cwd": "/ws/demo-app",
               "createdAt": 1790129100000,
@@ -1189,6 +1224,7 @@
           "projectId": "-ws-demo-app",
           "projectName": "demo-app",
           "workspace": "/ws/demo-app",
+          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111.jsonl",
           "title": "demo work",
           "cwd": "/ws/demo-app",
           "createdAt": 1790128801000,
@@ -1203,16 +1239,16 @@
             "reasoning": 2760
           },
           "cost": {
-            "cacheHitInputTokens": 3180000,
-            "cacheMissInputTokens": 563000,
-            "outputTokens": 7700,
+            "cacheHitInputTokens": 2880000,
+            "cacheMissInputTokens": 464000,
+            "outputTokens": 3700,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.1272",
-            "cacheMissInputCost": "1.1260",
-            "outputCost": "0.0616",
+            "cacheHitInputCost": "0.1152",
+            "cacheMissInputCost": "0.9280",
+            "outputCost": "0.0296",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0221",
-            "total": "1.3148"
+            "reasoningCost": "0.0101",
+            "total": "1.0728"
           },
           "isSubagent": false,
           "depth": 0,
@@ -1230,16 +1266,16 @@
               "reasoning": 2500
             },
             "cost": {
-              "cacheHitInputTokens": 2780000,
-              "cacheMissInputTokens": 495000,
-              "outputTokens": 7000,
+              "cacheHitInputTokens": 2480000,
+              "cacheMissInputTokens": 396000,
+              "outputTokens": 3000,
               "cacheWriteTokens": 0,
-              "cacheHitInputCost": "0.1112",
-              "cacheMissInputCost": "0.9900",
-              "outputCost": "0.0560",
+              "cacheHitInputCost": "0.0992",
+              "cacheMissInputCost": "0.7920",
+              "outputCost": "0.0240",
               "cacheWriteInputCost": "0.0000",
-              "reasoningCost": "0.0200",
-              "total": "1.1572"
+              "reasoningCost": "0.0080",
+              "total": "0.9152"
             }
           },
           "spawned": {
@@ -1276,16 +1312,16 @@
               "reasoning": 2760
             },
             "cost": {
-              "cacheHitInputTokens": 3180000,
-              "cacheMissInputTokens": 563000,
-              "outputTokens": 7700,
+              "cacheHitInputTokens": 2880000,
+              "cacheMissInputTokens": 464000,
+              "outputTokens": 3700,
               "cacheWriteTokens": 0,
-              "cacheHitInputCost": "0.1272",
-              "cacheMissInputCost": "1.1260",
-              "outputCost": "0.0616",
+              "cacheHitInputCost": "0.1152",
+              "cacheMissInputCost": "0.9280",
+              "outputCost": "0.0296",
               "cacheWriteInputCost": "0.0000",
-              "reasoningCost": "0.0221",
-              "total": "1.3148"
+              "reasoningCost": "0.0101",
+              "total": "1.0728"
             }
           }
         },
@@ -1296,6 +1332,7 @@
           "projectId": "-ws-demo-app",
           "projectName": "demo-app",
           "workspace": "/ws/demo-app",
+          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111/subagents/agent-a1.jsonl",
           "title": "review the diff",
           "cwd": "/ws/demo-app",
           "createdAt": 1790129100000,
@@ -1421,6 +1458,16 @@
             "cacheWriteInputCost": "0.0000",
             "reasoningCost": "0.0101",
             "total": "1.0728"
+          },
+          "money": {
+            "original": {
+              "currency": "CNY",
+              "amount": "1.0728"
+            },
+            "display": {
+              "currency": "CNY",
+              "amount": "1.0728"
+            }
           }
         },
         {
@@ -1440,12 +1487,12 @@
             "cacheMissInputTokens": 0,
             "outputTokens": 0,
             "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.0120",
-            "cacheMissInputCost": "0.1980",
-            "outputCost": "0.0320",
+            "cacheHitInputCost": "0.0000",
+            "cacheMissInputCost": "0.0000",
+            "outputCost": "0.0000",
             "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0120",
-            "total": "0.2420"
+            "reasoningCost": "0.0000",
+            "total": "0.0000"
           }
         }
       ],
@@ -1479,6 +1526,27 @@
             "reasoningCost": "0.0101",
             "total": "1.0728"
           },
+          "money": {
+            "original": {
+              "currency": "CNY",
+              "amount": "1.0728"
+            },
+            "display": {
+              "currency": "CNY",
+              "amount": "1.0728"
+            }
+          },
+          "original": {
+            "currency": "CNY",
+            "table": "deepseek",
+            "tableLabel": "DeepSeek",
+            "amounts": {
+              "input-hit": "0.1152",
+              "input-miss": "0.9280",
+              "output": "0.0296"
+            },
+            "total": "1.0728"
+          },
           "components": [
             {
               "id": "input-hit",
@@ -1503,62 +1571,6 @@
               "per": 1000000,
               "tokens": 3700,
               "amount": "0.0296"
-            }
-          ]
-        },
-        {
-          "agent": "claude",
-          "projectId": "-ws-demo-app",
-          "model": "deepseek-pro",
-          "periodId": "2026-09-10",
-          "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
-          "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
-          "tier": "peak",
-          "resolution": "fallback-default",
-          "requests": 1,
-          "tokens": {
-            "input": 90000,
-            "output": 4000,
-            "cacheRead": 300000,
-            "cacheWrite": 9000,
-            "reasoning": 1500
-          },
-          "cost": {
-            "cacheHitInputTokens": 0,
-            "cacheMissInputTokens": 0,
-            "outputTokens": 0,
-            "cacheWriteTokens": 0,
-            "cacheHitInputCost": "0.0120",
-            "cacheMissInputCost": "0.1980",
-            "outputCost": "0.0320",
-            "cacheWriteInputCost": "0.0000",
-            "reasoningCost": "0.0120",
-            "total": "0.2420"
-          },
-          "components": [
-            {
-              "id": "input-hit",
-              "label": "缓存命中输入",
-              "rate": "0.04",
-              "per": 1000000,
-              "tokens": 300000,
-              "amount": "0.0120"
-            },
-            {
-              "id": "input-miss",
-              "label": "缓存未命中输入",
-              "rate": "2",
-              "per": 1000000,
-              "tokens": 99000,
-              "amount": "0.1980"
-            },
-            {
-              "id": "output",
-              "label": "输出",
-              "rate": "8",
-              "per": 1000000,
-              "tokens": 4000,
-              "amount": "0.0320"
             }
           ]
         }
@@ -1596,7 +1608,7 @@
           "cacheWrite": 9000,
           "reasoning": 1500
         },
-        "cost": "0.2420"
+        "cost": "0.0000"
       },
       {
         "t": 1790265600000,
@@ -1611,7 +1623,7 @@
           "cacheWrite": 9000,
           "reasoning": 350
         },
-        "cost": "0.2036"
+        "cost": "0.1018"
       }
     ],
     "hour": [
@@ -1643,7 +1655,7 @@
           "cacheWrite": 9000,
           "reasoning": 1500
         },
-        "cost": "0.2420"
+        "cost": "0.0000"
       },
       {
         "t": 1790316000000,
@@ -1658,7 +1670,7 @@
           "cacheWrite": 5000,
           "reasoning": 200
         },
-        "cost": "0.1108"
+        "cost": "0.0554"
       },
       {
         "t": 1790319600000,
@@ -1673,7 +1685,7 @@
           "cacheWrite": 4000,
           "reasoning": 150
         },
-        "cost": "0.0928"
+        "cost": "0.0464"
       }
     ]
   },
@@ -1701,6 +1713,16 @@
         "cacheWriteInputCost": "0.0000",
         "reasoningCost": "0.0101",
         "total": "1.0728"
+      },
+      "money": {
+        "original": {
+          "currency": "CNY",
+          "amount": "1.0728"
+        },
+        "display": {
+          "currency": "CNY",
+          "amount": "1.0728"
+        }
       }
     },
     {
@@ -1720,12 +1742,12 @@
         "cacheMissInputTokens": 0,
         "outputTokens": 0,
         "cacheWriteTokens": 0,
-        "cacheHitInputCost": "0.0120",
-        "cacheMissInputCost": "0.1980",
-        "outputCost": "0.0320",
+        "cacheHitInputCost": "0.0000",
+        "cacheMissInputCost": "0.0000",
+        "outputCost": "0.0000",
         "cacheWriteInputCost": "0.0000",
-        "reasoningCost": "0.0120",
-        "total": "0.2420"
+        "reasoningCost": "0.0000",
+        "total": "0.0000"
       }
     },
     {
@@ -1745,12 +1767,22 @@
         "cacheMissInputTokens": 0,
         "outputTokens": 0,
         "cacheWriteTokens": 0,
-        "cacheHitInputCost": "0.0108",
-        "cacheMissInputCost": "0.1840",
-        "outputCost": "0.0088",
+        "cacheHitInputCost": "0.0054",
+        "cacheMissInputCost": "0.0920",
+        "outputCost": "0.0044",
         "cacheWriteInputCost": "0.0000",
-        "reasoningCost": "0.0028",
-        "total": "0.2036"
+        "reasoningCost": "0.0014",
+        "total": "0.1018"
+      },
+      "money": {
+        "original": {
+          "currency": "CNY",
+          "amount": "0.1018"
+        },
+        "display": {
+          "currency": "CNY",
+          "amount": "0.1018"
+        }
       }
     }
   ],
@@ -1784,6 +1816,27 @@
         "reasoningCost": "0.0101",
         "total": "1.0728"
       },
+      "money": {
+        "original": {
+          "currency": "CNY",
+          "amount": "1.0728"
+        },
+        "display": {
+          "currency": "CNY",
+          "amount": "1.0728"
+        }
+      },
+      "original": {
+        "currency": "CNY",
+        "table": "deepseek",
+        "tableLabel": "DeepSeek",
+        "amounts": {
+          "input-hit": "0.1152",
+          "input-miss": "0.9280",
+          "output": "0.0296"
+        },
+        "total": "1.0728"
+      },
       "components": [
         {
           "id": "input-hit",
@@ -1813,68 +1866,12 @@
     },
     {
       "agent": "claude",
-      "projectId": "-ws-demo-app",
-      "model": "deepseek-pro",
-      "periodId": "2026-09-10",
-      "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
-      "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
-      "tier": "peak",
-      "resolution": "fallback-default",
-      "requests": 1,
-      "tokens": {
-        "input": 90000,
-        "output": 4000,
-        "cacheRead": 300000,
-        "cacheWrite": 9000,
-        "reasoning": 1500
-      },
-      "cost": {
-        "cacheHitInputTokens": 0,
-        "cacheMissInputTokens": 0,
-        "outputTokens": 0,
-        "cacheWriteTokens": 0,
-        "cacheHitInputCost": "0.0120",
-        "cacheMissInputCost": "0.1980",
-        "outputCost": "0.0320",
-        "cacheWriteInputCost": "0.0000",
-        "reasoningCost": "0.0120",
-        "total": "0.2420"
-      },
-      "components": [
-        {
-          "id": "input-hit",
-          "label": "缓存命中输入",
-          "rate": "0.04",
-          "per": 1000000,
-          "tokens": 300000,
-          "amount": "0.0120"
-        },
-        {
-          "id": "input-miss",
-          "label": "缓存未命中输入",
-          "rate": "2",
-          "per": 1000000,
-          "tokens": 99000,
-          "amount": "0.1980"
-        },
-        {
-          "id": "output",
-          "label": "输出",
-          "rate": "8",
-          "per": 1000000,
-          "tokens": 4000,
-          "amount": "0.0320"
-        }
-      ]
-    },
-    {
-      "agent": "claude",
       "projectId": "-ws-other",
       "model": "deepseek-flash",
       "periodId": "2026-09-10",
       "periodLabel": "V4.1-Flash（deepseek-flash）峰谷定价",
       "window": "2026-09-10 12:00 → 至今 (UTC+08:00)",
-      "tier": "peak",
+      "tier": "off-peak",
       "resolution": "exact",
       "requests": 2,
       "tokens": {
@@ -1889,40 +1886,89 @@
         "cacheMissInputTokens": 0,
         "outputTokens": 0,
         "cacheWriteTokens": 0,
-        "cacheHitInputCost": "0.0108",
-        "cacheMissInputCost": "0.1840",
-        "outputCost": "0.0088",
+        "cacheHitInputCost": "0.0054",
+        "cacheMissInputCost": "0.0920",
+        "outputCost": "0.0044",
         "cacheWriteInputCost": "0.0000",
-        "reasoningCost": "0.0028",
-        "total": "0.2036"
+        "reasoningCost": "0.0014",
+        "total": "0.1018"
+      },
+      "money": {
+        "original": {
+          "currency": "CNY",
+          "amount": "0.1018"
+        },
+        "display": {
+          "currency": "CNY",
+          "amount": "0.1018"
+        }
+      },
+      "original": {
+        "currency": "CNY",
+        "table": "deepseek",
+        "tableLabel": "DeepSeek",
+        "amounts": {
+          "input-hit": "0.0054",
+          "input-miss": "0.0920",
+          "output": "0.0044"
+        },
+        "total": "0.1018"
       },
       "components": [
         {
           "id": "input-hit",
           "label": "缓存命中输入",
-          "rate": "0.04",
+          "rate": "0.02",
           "per": 1000000,
           "tokens": 270000,
-          "amount": "0.0108"
+          "amount": "0.0054"
         },
         {
           "id": "input-miss",
           "label": "缓存未命中输入",
-          "rate": "2",
+          "rate": "1",
           "per": 1000000,
           "tokens": 92000,
-          "amount": "0.1840"
+          "amount": "0.0920"
         },
         {
           "id": "output",
           "label": "输出",
-          "rate": "8",
+          "rate": "4",
           "per": 1000000,
           "tokens": 1100,
-          "amount": "0.0088"
+          "amount": "0.0044"
         }
       ]
     }
   ],
-  "warnings": []
+  "subtotals": [
+    {
+      "table": "deepseek",
+      "tableLabel": "DeepSeek",
+      "currency": "CNY",
+      "requests": 5,
+      "original": "1.1746",
+      "display": "1.1746",
+      "money": {
+        "original": {
+          "currency": "CNY",
+          "amount": "1.1746"
+        },
+        "display": {
+          "currency": "CNY",
+          "amount": "1.1746"
+        }
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "unpricedRecords",
+      "message": "有 1 条记录没有可用价格，未计入费用（可用 `price` 查看已收录的模型）",
+      "params": {
+        "count": "1"
+      }
+    }
+  ]
 }
