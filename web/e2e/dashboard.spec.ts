@@ -876,6 +876,41 @@ test.describe('layout', () => {
   });
 });
 
+test.describe('the project tree', () => {
+  test('copies a session’s log path without selecting or expanding its row', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/');
+    // The tree starts folded: open the first project, then its first workspace.
+    await page.locator('aside button[aria-label="展开"]').first().click();
+    await page.locator('aside button[aria-label="展开"]').first().click();
+    test.skip(
+      (await page.locator('aside button[data-copy-path]').count()) === 0,
+      'no session in the tree reports a log file',
+    );
+    const button = page.locator('aside button[data-copy-path]').first();
+    const path = await button.getAttribute('data-copy-path');
+
+    // A 340px sidebar cannot afford a labelled button: the glyph stays invisible
+    // until the row is hovered or the button is reached from the keyboard.
+    await expect(button).toHaveCSS('opacity', '0');
+    await expect(button).toHaveAttribute('aria-label', '复制日志文件路径');
+    await button.hover();
+    await expect(button).toHaveCSS('opacity', '1');
+
+    // Copying is neither selecting the session nor expanding it: the row keeps the
+    // class it had (a click on the row itself adds `bg-accent-soft`), and the
+    // disclosure glyph does not change.
+    const row = button.locator('..');
+    const rowClass = await row.getAttribute('class');
+    const glyph = await row.locator('button').first().innerText();
+    await button.click();
+    await expect(button).toHaveAttribute('data-copy-state', 'copied');
+    expect(await clipboardOf(page)).toBe(path);
+    expect(await row.getAttribute('class')).toBe(rowClass);
+    expect(await row.locator('button').first().innerText()).toBe(glyph);
+  });
+});
+
 test.describe('the language switch', () => {
   const kpis = (page: Page): Locator => page.locator('main div.grid > div.rounded-xl');
 

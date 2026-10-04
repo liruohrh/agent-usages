@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import type { Dashboard, ProjectSummary, SessionNode, WorkspaceNode } from '../types';
 import { formatCost, formatInstant, formatTokens, metricText, shortenPath } from '../format';
 import { AgentBadge, Chip, MoneyTokens } from './Bits';
+import { CopyPathButton } from './CopyPath';
 import { useT } from '../i18n';
 
 /** The four billed buckets, which is what the compact tree row counts as `T`. */
@@ -311,7 +312,7 @@ function SessionRow({
   const title = session.title ?? t.tree.untitled(session.id.slice(0, 8));
   return (
     <div>
-      <div className={`flex items-start gap-1 rounded px-1.5 py-1 ${selected ? 'bg-accent-soft' : 'hover:bg-raised'}`}>
+      <div className={`group flex items-start gap-1 rounded px-1.5 py-1 ${selected ? 'bg-accent-soft' : 'hover:bg-raised'}`}>
         <button
           type="button"
           onClick={() => (children.length > 0 ? toggle(key) : onSelectSession(session.uid))}
@@ -337,6 +338,19 @@ function SessionRow({
             />
           </div>
         </button>
+        {/*
+          The log path of this session, one click away — the sidebar is 340px wide,
+          so the button is a bare glyph that only shows up on hover or when it is
+          focused: it never widens a row, and the space it reserves is smaller than
+          the title's own truncation.
+        */}
+        <CopyPathButton
+          value={session.sourceFile}
+          label={t.copy.logPath}
+          short={t.copy.logPathShort}
+          compact
+          className="mt-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+        />
       </div>
       {selected && session.spawned.requests > 0 && (
         <div className="ml-6 border-l border-line pl-3 pb-1 text-[12px] text-muted">
