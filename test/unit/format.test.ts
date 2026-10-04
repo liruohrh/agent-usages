@@ -97,6 +97,7 @@ function report(overrides: Partial<UsageResult> = {}): UsageResult {
     cost: cost('0.0000'),
     bands: [],
     models: [],
+    subtotals: [],
     projects: [],
     repos: [],
     warnings: [],
@@ -662,6 +663,107 @@ describe('date labels', () => {
     expect(text).toContain('demo 2026-07-09');
     expect(text).toContain('\n  A one\n');
     expect(text).not.toContain('A one 2026-07-09');
+  });
+});
+
+describe('the by-price-list block', () => {
+  const json = (result: UsageResult): Record<string, unknown> => usageToJson(one(result)) as Record<string, unknown>;
+
+  /** One subtotal row, in the shape the accounting layer produces. */
+  function subtotal(table: string, label: string, currency: string, original: string, display: string, displayCurrency: string) {
+    return {
+      table,
+      tableLabel: label,
+      currency,
+      requests: 1,
+      original,
+      display,
+      money: {
+        original: { currency, amount: original },
+        display: { currency: displayCurrency, amount: display },
+      },
+    };
+  }
+
+  it('prints one row per list, with the published amount first', () => {
+    const text = render(
+      report({
+        currency: 'CNY',
+        subtotals: [
+          subtotal('anthropic', 'Anthropic', 'USD', '3064.3751', '20545.4004', 'CNY'),
+          subtotal('deepseek', 'DeepSeek', 'CNY', '37.6474', '37.6474', 'CNY'),
+        ],
+      }),
+    );
+    expect(text).toContain('按表小计:');
+    // The display side carries the report's own symbol (`¤` in these fixtures).
+    expect(text).toContain('Anthropic（按 USD 价目发布）  $3,064.3751 → ¤20,545.4004');
+    // The list already prints the display currency, so the row says it once.
+    expect(text).toContain('DeepSeek（按 CNY 价目发布）  ¥37.6474');
+    expect(text).not.toContain('¥37.6474 →');
+  });
+
+  it('stays out of the way when it would only repeat the total', () => {
+    const text = render(
+      report({ currency: 'USD', subtotals: [subtotal('openai', 'OpenAI', 'USD', '5.0000', '5.0000', 'USD')] }),
+    );
+    expect(text).not.toContain('按表小计');
+  });
+
+  it('shows a model row in both currencies', () => {
+    const text = render(
+      report({
+        currency: 'CNY',
+        models: [
+          {
+            model: 'claude-opus-5',
+            requests: 1,
+            tokens: SMALL,
+            cost: cost('19184.9358'),
+            money: {
+              original: { currency: 'USD', amount: '2861.4597' },
+              display: { currency: 'CNY', amount: '19184.9358' },
+            },
+          },
+          { model: 'deepseek-flash', requests: 1, tokens: SMALL, cost: cost('33.4902') },
+        ],
+      }),
+      { models: true },
+    );
+    expect(text).toContain('¤19,184.9358 / $2,861.4597');
+    // The two-currency row is the only one that grows a suffix.
+    expect(text).toContain('[deepseek-flash]');
+    expect(text).not.toMatch(/deepseek-flash\][^\n]*\/ \$/);
+  });
+
+  it('carries both sides in JSON, whichever currency they are in', () => {
+    const body = json(
+      report({
+        currency: 'CNY',
+        subtotals: [subtotal('anthropic', 'Anthropic', 'USD', '3064.3751', '20545.4004', 'CNY')],
+        models: [
+          {
+            model: 'claude-opus-5',
+            requests: 1,
+            tokens: SMALL,
+            cost: cost('19184.9358'),
+            money: {
+              original: { currency: 'USD', amount: '2861.4597' },
+              display: { currency: 'CNY', amount: '19184.9358' },
+            },
+          },
+        ],
+      }),
+    ) as {
+      subtotals: { table: string; money: { original: { currency: string; amount: string }; display: { currency: string; amount: string } } }[];
+      models: { money?: { original: { currency: string; amount: string } } }[];
+    };
+    expect(body.subtotals[0]?.money).toEqual({
+      original: { currency: 'USD', amount: '3064.3751' },
+      display: { currency: 'CNY', amount: '20545.4004' },
+    });
+    // Structured consumers never have to infer from a missing field.
+    expect(body.models[0]?.money?.original).toEqual({ currency: 'USD', amount: '2861.4597' });
   });
 });
 

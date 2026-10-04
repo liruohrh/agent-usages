@@ -373,6 +373,16 @@ export const zh = {
     seriesRequests: 'Q',
     seriesTokens: 'T',
     chartTotal: '总计',
+    priceListsTitle: '按表小计',
+    priceListsNote: (currency: string) =>
+      `每张价格表本次命中的那套已发布价目：原币金额是厂商印的数，折算值按显示货币（${currency}）给出；各表折算值相加等于上面的总额。`,
+    priceListRow: (table: string, currency: string) => `${table}（按 ${currency} 价目发布）`,
+    priceListsTable: '价目表',
+    priceListsPublished: '原币',
+    priceListsConverted: '折算',
+    /** `原币 $3,064.38`: the secondary value under a display-currency amount. */
+    originalAmount: (amount: string) => `原币 ${amount}`,
+    noPriceLists: '当前范围没有已计价的价目表。',
   },
 };
 

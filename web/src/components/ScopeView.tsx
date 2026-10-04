@@ -19,7 +19,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
 import { Overview } from './Overview';
 import { UsageTab } from './Usage';
-import { BandTable, ModelTable } from './Tables';
+import { BandTable, ModelTable, PriceListTable } from './Tables';
 import { SessionLeaderboard } from './Sessions';
 import { AgentBoard, ProjectBoard } from './Ranked';
 import type { SeriesMetric } from '../charts';
@@ -134,6 +134,12 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
       {active === 'usage' && <UsageTab {...props} />}
       {active === 'models' && (
         <div className="space-y-4">
+          <PriceListTable
+            subtotals={project === null ? dashboard.subtotals : undefined}
+            symbol={symbol}
+            currency={dashboard.currency}
+            title={t.tables.priceListsTitle}
+          />
           <ModelTable
             models={project === null ? dashboard.models : project.models}
             symbol={symbol}

@@ -50,6 +50,14 @@ export const en: Messages = {
   },
   section: {
     bands: 'Pricing bands:',
+    /** The by-price-list block: one row per (table, published currency). */
+    tables: 'By price list:',
+    /** `Anthropic (published in USD)  $3064.38`: the list already quotes the display currency. */
+    tableRow: (table: string, currency: string, amount: string) =>
+      `${table} (published in ${currency})  ${amount}`,
+    /** `Anthropic (published in USD)  $3064.38 → ¥20545.40`: both currencies, published first. */
+    tableConverted: (table: string, currency: string, original: string, display: string) =>
+      `${table} (published in ${currency})  ${original} → ${display}`,
     tips: 'Notes:',
   },
   tier: {

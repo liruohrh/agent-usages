@@ -359,5 +359,15 @@ export const en: Messages = {
     seriesRequests: 'Q',
     seriesTokens: 'T',
     chartTotal: 'Total',
+    priceListsTitle: 'By price list',
+    priceListsNote: (currency: string) =>
+      `The published rate card each table billed under this time: the published amount is the vendor’s own number, and the converted one is in the display currency (${currency}); the converted rows add up to the total above.`,
+    priceListRow: (table: string, currency: string) => `${table} (published in ${currency})`,
+    priceListsTable: 'Price list',
+    priceListsPublished: 'Published',
+    priceListsConverted: 'Converted',
+    /** `original $3,064.38`: the secondary value under a display-currency amount. */
+    originalAmount: (amount: string) => `original ${amount}`,
+    noPriceLists: 'No priced rate card in this range.',
   },
 };

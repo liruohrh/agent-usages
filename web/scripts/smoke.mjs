@@ -289,10 +289,51 @@ async function exercise(base, { live }) {
     requestSum(models) === summary.body?.totals?.requests,
     `${requestSum(models)} vs ${summary.body?.totals?.requests}`,
   );
+  // Bands exist only for records a price list could price, while the totals and
+  // the model rows count every record: the difference is exactly `unpriced`.
+  const priced = (summary.body?.totals?.requests ?? 0) - (summary.body?.totals?.unpriced ?? 0);
+  check('Σ 区间行请求 === 已计价请求', requestSum(bands) === priced, `${requestSum(bands)} vs ${priced}`);
+  // The dual-currency view: every (price list, currency) the run billed under,
+  // with the published amount beside the converted one. The converted column is
+  // summed from the same bands the total is, so it reconciles exactly.
+  const subtotals = dashboard.body?.subtotals ?? [];
+  check('按表小计是数组', Array.isArray(dashboard.body?.subtotals));
   check(
-    'Σ 区间行请求 === 总计请求',
-    requestSum(bands) === summary.body?.totals?.requests,
-    `${requestSum(bands)} vs ${summary.body?.totals?.requests}`,
+    '每条小计都带原币与显示币',
+    subtotals.every(
+      (row) =>
+        typeof row?.money?.original?.currency === 'string' &&
+        typeof row?.money?.original?.amount === 'string' &&
+        typeof row?.money?.display?.currency === 'string' &&
+        typeof row?.money?.display?.amount === 'string',
+    ),
+  );
+  // An older synthetic fixture predates the field; an empty list is a pass, not
+  // a wrong sum.
+  check(
+    'Σ 小计(显示币) === 总计',
+    subtotals.length === 0 ||
+      subtotals
+      .reduce((sum, row) => sum + Number(row?.money?.display?.amount ?? 0), 0)
+      .toFixed(4) === Number(summary.body?.totals?.cost?.total ?? 0).toFixed(4),
+    `${subtotals.map((row) => row?.money?.display?.amount).join(' + ')} vs ${summary.body?.totals?.cost?.total}`,
+  );
+  check(
+    '小计只出现在已计价的范围里',
+    subtotals.length === 0 || subtotals.every((row) => (row?.requests ?? 0) > 0),
+  );
+  // JSON always carries both sides (a consumer must not have to infer from a
+  // missing field); the *text* views are what drop the duplicate number.
+  check(
+    '模型行双币形状一致',
+    models.every(
+      (row) =>
+        row?.money === undefined ||
+        (typeof row.money.original.amount === 'string' &&
+          typeof row.money.display.amount === 'string' &&
+          (row.money.original.currency === row.money.display.currency ||
+            row.money.original.currency.length === 3)),
+    ),
   );
   const short = (dashboard.body?.projects ?? []).filter((project) => requestSum(project.models) !== project.requests);
   check(

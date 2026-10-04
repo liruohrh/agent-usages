@@ -54,7 +54,7 @@ import { basename, resolve as resolvePath, sep } from 'node:path';
 
 import { AGENT_ADAPTERS, findAgent } from '../agents/registry.ts';
 import type { AgentAdapter } from '../agents/contract.ts';
-import { addCostTotals, costOf, zeroCostTotals } from '../report/accounting.ts';
+import { addCostTotals, costOf, zeroCostTotals, type CostSubtotal, type OriginalPricing } from '../report/accounting.ts';
 import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
 import type { CostTotals, TokenBuckets, UsageDataset, UsageRecord } from '../core/types.ts';
@@ -71,7 +71,7 @@ import {
   selectCurrency,
   type PricingEngine,
 } from '../pricing/index.ts';
-import type { PricingProvider } from '../pricing/contract.ts';
+import type { PricingProvider, DualMoney, OriginalAmounts, PricePeriod } from '../pricing/contract.ts';
 import {
   runQuery,
   type AgentTotals as ReportAgentTotals,
@@ -737,7 +737,33 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
         return createPricingEngine(convertProvider(list.provider, target, tableRate), holidays);
       },
     });
-    const context = { engine, pricingProvider: provider.id };
+    // The same tables, priced at the rates they published: the page shows the
+    // display currency as the headline and the vendor's own number beside it.
+    const originalEngines = new Map(
+      config.providers.map((table) => [table, (lists.get(table) ?? selectCurrency(table, currency)).provider]),
+    );
+    const tableOfPeriod = new WeakMap<PricePeriod, { id: string; label: string }>();
+    const originalRates = new Map<string, string>();
+    for (const table of config.providers) {
+      const list = originalEngines.get(table) as PricingProvider;
+      const quoted = (lists.get(table) ?? selectCurrency(table, currency)).currencies[0] ?? currency;
+      const { rate: tableRate } = rateFor({ base: quoted, target: currency, manualRate: undefined, table: config.rateTable });
+      for (const price of list.models()) {
+        for (const period of price.periods) {
+          tableOfPeriod.set(period, { id: table.id, label: table.label });
+          originalRates.set(`${table.id}\u0000${period.currency}`, tableRate);
+        }
+      }
+    }
+    const original: OriginalPricing = {
+      engine: createRoutingEngine(config.providers, {
+        engineFor: (table: PricingProvider) => createPricingEngine(originalEngines.get(table) ?? table, holidays),
+      }),
+      tableOf: (period: PricePeriod) => tableOfPeriod.get(period),
+      currency,
+      rates: originalRates,
+    };
+    const context = { engine, pricingProvider: provider.id, original };
     const rate: RateInfo = {
       base: currency,
       display: currency,
@@ -1058,6 +1084,7 @@ function buildDashboard(input: BuildInput): Dashboard {
     splitOfProjects(projects),
   );
 
+  const bands = mergeBandRows(drafts.projects.flatMap((draft) => draft.bands));
   const dashboard: Dashboard = {
     generatedAt: Date.now(),
     mode: 'live',
@@ -1078,7 +1105,8 @@ function buildDashboard(input: BuildInput): Dashboard {
     repos: drafts.repos,
     timeseries: { day: pricePoints(facts.day, engine), hour: pricePoints(facts.hour, engine) },
     models: mergeModelRows(drafts.projects.flatMap((draft) => draft.models)),
-    bands: mergeBandRows(drafts.projects.flatMap((draft) => draft.bands)),
+    bands,
+    subtotals: subtotalsOf(bands),
     warnings: [...input.warnings],
   };
   detailIndex.set(dashboard, drafts.reports);
@@ -1452,7 +1480,15 @@ function finishWorkspace(draft: WorkspaceDraft): WorkspaceNode {
 
 /** One model row. */
 function modelRow(agent: string, projectId: string, model: ModelBreakdown): ModelRow {
-  return { agent, projectId, model: model.model, requests: model.requests, tokens: model.tokens, cost: model.cost };
+  return {
+    agent,
+    projectId,
+    model: model.model,
+    requests: model.requests,
+    tokens: model.tokens,
+    cost: model.cost,
+    ...(model.money === undefined ? {} : { money: model.money }),
+  };
 }
 
 /** One price-band row, with the rate card that produced its money. */
@@ -1481,8 +1517,82 @@ function bandRow(agent: string, projectId: string, band: BandSummary): BandRow {
     requests: band.requests,
     tokens: band.tokens ?? emptyTokens(),
     cost: band.cost,
+    ...(band.money === undefined ? {} : { money: band.money }),
+    ...(band.original === undefined ? {} : { original: band.original }),
     components,
   };
+}
+
+/** A copy of a dual amount, so two rows never share one object. */
+function cloneMoney(money: DualMoney): DualMoney {
+  return { original: { ...money.original }, display: { ...money.display } };
+}
+
+/**
+ * Add two dual amounts, when both name the same two currencies.
+ *
+ * A model belongs to one price list, so its rows always agree on the pair; the
+ * guard keeps a hand-written snapshot from adding ¥ to $.
+ */
+function addMoney(left: DualMoney | undefined, right: DualMoney | undefined): DualMoney | undefined {
+  if (left === undefined) return right === undefined ? undefined : cloneMoney(right);
+  if (right === undefined || right.original.currency !== left.original.currency) return left;
+  return {
+    original: { currency: left.original.currency, amount: addAmounts(left.original.amount, right.original.amount) },
+    display: { currency: left.display.currency, amount: addAmounts(left.display.amount, right.display.amount) },
+  };
+}
+
+/** Add two bands' original-currency detail, when both carry one. */
+function addOriginal(left: OriginalAmounts | undefined, right: OriginalAmounts | undefined): OriginalAmounts | undefined {
+  if (left === undefined) return right === undefined ? undefined : { ...right, amounts: { ...right.amounts } };
+  if (right === undefined || right.currency !== left.currency || right.table !== left.table) return left;
+  const amounts: Record<string, string> = { ...left.amounts };
+  for (const [id, amount] of Object.entries(right.amounts)) {
+    amounts[id] = addAmounts(amounts[id] ?? '0.0000', amount);
+  }
+  return { ...left, amounts, total: addAmounts(left.total, right.total) };
+}
+
+/**
+ * The by-price-list block, summed from the bands the dashboard already carries.
+ *
+ * Summing the rows means the block follows whatever filters produced them — an
+ * agent filter narrows it exactly as it narrows the totals — and it adds up to
+ * the same total, because both are sums of the same rounded bands.
+ */
+function subtotalsOf(bands: readonly BandRow[]): CostSubtotal[] {
+  const rows = new Map<string, CostSubtotal>();
+  for (const band of bands) {
+    const original = band.original;
+    if (original === undefined || band.money === undefined || original.table.length === 0) continue;
+    const key = `${original.table}\u0000${original.currency}`;
+    const known = rows.get(key);
+    if (known === undefined) {
+      rows.set(key, {
+        table: original.table,
+        tableLabel: original.tableLabel,
+        currency: original.currency,
+        requests: band.requests,
+        original: original.total,
+        display: band.money.display.amount,
+        money: { original: { ...band.money.original }, display: { ...band.money.display } },
+      });
+      continue;
+    }
+    known.requests += band.requests;
+    known.original = addAmounts(known.original, original.total);
+    known.display = addAmounts(known.display, band.money.display.amount);
+    known.money = {
+      original: { currency: known.currency, amount: known.original },
+      display: { currency: band.money.display.currency, amount: known.display },
+    };
+  }
+  return [...rows.values()].sort(
+    (left, right) =>
+      Number(right.money.display.amount) - Number(left.money.display.amount) ||
+      left.tableLabel.localeCompare(right.tableLabel),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1507,12 +1617,18 @@ function mergeModelRows(rows: readonly ModelRow[]): ModelRow[] {
     const key = `${row.agent}\u0000${row.projectId}\u0000${row.model}`;
     const known = merged.get(key);
     if (known === undefined) {
-      merged.set(key, { ...row, tokens: { ...row.tokens }, cost: { ...row.cost } });
+      merged.set(key, {
+        ...row,
+        tokens: { ...row.tokens },
+        cost: { ...row.cost },
+        ...(row.money === undefined ? {} : { money: cloneMoney(row.money) }),
+      });
       continue;
     }
     known.requests += row.requests;
     known.tokens = addTokens(known.tokens, row.tokens);
     known.cost = addCostTotals(known.cost, row.cost);
+    known.money = addMoney(known.money, row.money);
   }
   return [...merged.values()];
 }
@@ -1555,7 +1671,14 @@ function mergeBandRows(rows: readonly BandRow[]): BandRow[] {
     const key = [row.agent, row.projectId, row.model, row.periodId, row.tier].join('\u0000');
     const known = merged.get(key);
     if (known === undefined) {
-      const copy: BandRow = { ...row, tokens: { ...row.tokens }, cost: { ...row.cost }, components: [] };
+      const copy: BandRow = {
+        ...row,
+        tokens: { ...row.tokens },
+        cost: { ...row.cost },
+        components: [],
+        ...(row.money === undefined ? {} : { money: cloneMoney(row.money) }),
+        ...(row.original === undefined ? {} : { original: { ...row.original, amounts: { ...row.original.amounts } } }),
+      };
       mergeBandComponents(copy.components, row.components);
       merged.set(key, copy);
       continue;
@@ -1563,6 +1686,8 @@ function mergeBandRows(rows: readonly BandRow[]): BandRow[] {
     known.requests += row.requests;
     known.tokens = addTokens(known.tokens, row.tokens);
     known.cost = addCostTotals(known.cost, row.cost);
+    known.money = addMoney(known.money, row.money);
+    known.original = addOriginal(known.original, row.original);
     mergeBandComponents(known.components, row.components);
   }
   return [...merged.values()];
@@ -1664,6 +1789,9 @@ export function filterDashboard(dashboard: Dashboard, query: DashboardQuery = {}
     },
     splitOfProjects(projects),
   );
+  const filteredBands = dashboard.bands.filter(
+    (row) => keptIds.has(row.projectId) && (agents.size === 0 || agents.has(row.agent)),
+  );
   const filtered: Dashboard = {
     ...dashboard,
     generatedAt: Date.now(),
@@ -1685,7 +1813,10 @@ export function filterDashboard(dashboard: Dashboard, query: DashboardQuery = {}
       ),
     },
     models: dashboard.models.filter((row) => keptIds.has(row.projectId) && (agents.size === 0 || agents.has(row.agent))),
-    bands: dashboard.bands.filter((row) => keptIds.has(row.projectId) && (agents.size === 0 || agents.has(row.agent))),
+    bands: filteredBands,
+    // Recomputed from the rows that survived, so the block describes the same
+    // scope as the totals beside it rather than the whole scan.
+    subtotals: subtotalsOf(filteredBands),
   };
   const index = detailIndex.get(dashboard);
   if (index !== undefined) detailIndex.set(filtered, index);
@@ -1715,6 +1846,7 @@ function emptyDashboard(dashboard: Dashboard): Dashboard {
     timeseries: { day: [], hour: [] },
     models: [],
     bands: [],
+    subtotals: [],
   };
 }
 
@@ -2116,6 +2248,17 @@ export function normalizeSnapshot(parsed: unknown, path: string): Dashboard {
       : [];
 
   const currency = typeof root['currency'] === 'string' ? root['currency'] : 'USD';
+  // The global lists are the projects' rows added up, exactly as in live mode,
+  // so a snapshot cannot disagree with its own projects. A file whose projects
+  // are missing still gets what its root lists say (merged, since a row per
+  // session would give the tables duplicate keys).
+  const snapshotBands = mergeBandRows(
+    projects.length > 0
+      ? projects.flatMap((project) => project.bands)
+      : Array.isArray(root['bands'])
+        ? (root['bands'] as unknown[]).map((item) => normalizeBandRow(item))
+        : [],
+  );
   const snapshot: Dashboard = {
     generatedAt: numberOr0(root['generatedAt']) || Date.now(),
     mode: 'snapshot',
@@ -2143,9 +2286,7 @@ export function normalizeSnapshot(parsed: unknown, path: string): Dashboard {
     repos: Array.isArray(root['repos']) ? (root['repos'] as unknown[]).map((item) => normalizeRepo(item)) : [],
     timeseries: { day: series(timeseriesRoot['day'], 'day'), hour: series(timeseriesRoot['hour'], 'hour') },
     // The global lists are the projects' rows added up, exactly as in live mode,
-    // so a snapshot cannot disagree with its own projects. A file whose projects
-    // are missing still gets what its root lists say (merged, since a row per
-    // session would give the tables duplicate keys).
+    // so a snapshot cannot disagree with its own projects.
     models: mergeModelRows(
       projects.length > 0
         ? projects.flatMap((project) => project.models)
@@ -2153,13 +2294,8 @@ export function normalizeSnapshot(parsed: unknown, path: string): Dashboard {
           ? (root['models'] as unknown[]).map((item) => normalizeModelRow(item))
           : [],
     ),
-    bands: mergeBandRows(
-      projects.length > 0
-        ? projects.flatMap((project) => project.bands)
-        : Array.isArray(root['bands'])
-          ? (root['bands'] as unknown[]).map((item) => normalizeBandRow(item))
-          : [],
-    ),
+    bands: snapshotBands,
+    subtotals: subtotalsOf(snapshotBands),
     warnings,
   };
   const reports = new Map<string, SessionReport>();
@@ -2419,6 +2555,42 @@ function normalizeModelRow(value: unknown): ModelRow {
     requests: numberOr0(entry['requests']),
     tokens: asTokens(entry['tokens']),
     cost: asCost(entry['cost']),
+    ...(asDualMoney(entry['money']) === undefined ? {} : { money: asDualMoney(entry['money']) as DualMoney }),
+  };
+}
+
+/** A dual amount read back from a snapshot, when it carries one. */
+function asDualMoney(value: unknown): DualMoney | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const entry = value as Record<string, unknown>;
+  const original = entry['original'] as { currency?: unknown; amount?: unknown } | undefined;
+  const display = entry['display'] as { currency?: unknown; amount?: unknown } | undefined;
+  if (original === undefined || display === undefined) return undefined;
+  if (typeof original.currency !== 'string' || typeof original.amount !== 'string') return undefined;
+  if (typeof display.currency !== 'string' || typeof display.amount !== 'string') return undefined;
+  return {
+    original: { currency: original.currency, amount: original.amount },
+    display: { currency: display.currency, amount: display.amount },
+  };
+}
+
+/** A band's original-currency detail read back from a snapshot. */
+function asOriginalAmounts(value: unknown): OriginalAmounts | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const entry = value as Record<string, unknown>;
+  const amounts = entry['amounts'];
+  if (typeof entry['currency'] !== 'string' || typeof entry['total'] !== 'string') return undefined;
+  if (typeof amounts !== 'object' || amounts === null) return undefined;
+  const parsed: Record<string, string> = {};
+  for (const [id, amount] of Object.entries(amounts as Record<string, unknown>)) {
+    if (typeof amount === 'string') parsed[id] = amount;
+  }
+  return {
+    currency: entry['currency'],
+    table: typeof entry['table'] === 'string' ? entry['table'] : '',
+    tableLabel: typeof entry['tableLabel'] === 'string' ? entry['tableLabel'] : '',
+    amounts: parsed,
+    total: entry['total'],
   };
 }
 
@@ -2456,6 +2628,10 @@ function normalizeBandRow(value: unknown): BandRow {
     requests: numberOr0(entry['requests']),
     tokens: asTokens(entry['tokens']),
     cost: asCost(entry['cost']),
+    ...(asDualMoney(entry['money']) === undefined ? {} : { money: asDualMoney(entry['money']) as DualMoney }),
+    ...(asOriginalAmounts(entry['original']) === undefined
+      ? {}
+      : { original: asOriginalAmounts(entry['original']) as OriginalAmounts }),
     components,
   };
 }

@@ -27,6 +27,8 @@ interface ApiRow {
   periodLabel?: string;
   requests: number;
   cost: { total: string };
+  /** The same money in the currency the price list published. */
+  money?: { original: { currency: string; amount: string }; display: { currency: string; amount: string } } | undefined;
 }
 
 interface ApiSession {
@@ -55,6 +57,16 @@ interface ApiDashboard {
   }[];
   models: ApiRow[];
   bands: ApiRow[];
+  currency: string;
+  subtotals?: {
+    table: string;
+    tableLabel: string;
+    currency: string;
+    requests: number;
+    original: string;
+    display: string;
+    money: { original: { currency: string; amount: string }; display: { currency: string; amount: string } };
+  }[];
   totals: ApiFigures & { own: ApiFigures; spawned: ApiFigures };
   loadedAgents: { id: string }[];
   projects: {
@@ -235,7 +247,8 @@ test.describe('the overview', () => {
     // column heading and no card label spell it out.
     expect(texts).not.toContain('费用');
     expect(texts).not.toContain('金额');
-    expect(texts).toContain(dashboard.totals.cost.total);
+    // The card groups thousands, so compare the digits rather than the spelling.
+    expect(texts.replace(/,/g, '')).toContain(dashboard.totals.cost.total);
 
     // Money, `T`, `I/C`, `Q` — and each card says one thing: the buckets and
     // their money belong to the composition card below, not to a card's hint.
@@ -254,8 +267,10 @@ test.describe('the overview', () => {
     );
     // Money has no label (2 lines: amount, currency); `T` and `I/C` have a label
     // and a number and nothing else — the buckets belong to the composition card
-    // below; `Q` keeps its session count.
-    expect(lines.map((card) => card.length)).toEqual([2, 2, 2, 3]);
+    // below; `Q` keeps its session count (and appends an unpriced note when the
+    // data has records no price list covers).
+    expect(lines.slice(0, 3).map((card) => card.length)).toEqual([2, 2, 2]);
+    expect(lines[3]?.length ?? 0).toBeGreaterThanOrEqual(3);
     expect(lines[1]?.[0]).toBe('T');
     expect(lines[1]?.[1]).toMatch(/[\d万亿KMB.,]/);
     expect(lines[2]?.[0]).toBe('I/C 缓存');
@@ -328,6 +343,59 @@ test.describe('scope switching', () => {
       const modelKeys = modelRows.map((row) => `${row[0]}|${row[1]}`);
       expect(new Set(modelKeys).size, 'model rows are unique').toBe(modelKeys.length);
     }
+  });
+
+  test('shows each price list beside the currency it published', async ({ page }) => {
+    await page.goto('/?view=models');
+    await expect(cardOf(page, '模型明细')).toBeVisible();
+    const dashboard = await apiDashboard(page);
+    const subtotals = dashboard.subtotals ?? [];
+    // The tracked synthetic fixture predates the field; the local snapshot has it.
+    test.skip(subtotals.length === 0, 'this snapshot carries no per-price-list rows');
+
+    const rows = await rowsOf(page, '按表小计');
+    expect(rows, 'one row per (price list, currency)').toHaveLength(subtotals.length);
+    for (const entry of subtotals) {
+      const row = rows.find((cells) => cells.some((cell) => cell.includes(entry.tableLabel)));
+      expect(row, `a row names ${entry.tableLabel}`).toBeDefined();
+      if (row === undefined) continue;
+      // The published column is the vendor's own number, to the cent.
+      expect(numberOf(row[1] ?? ''), `${entry.tableLabel} published`).toBeCloseTo(Number(entry.original), 2);
+      // The converted column is filled in only where the currencies differ.
+      if (entry.currency === dashboard.currency) expect(row[2] ?? '').toContain('—');
+      else expect(numberOf(row[2] ?? ''), `${entry.tableLabel} converted`).toBeCloseTo(Number(entry.display), 2);
+    }
+    // The converted column adds up to the total the header prints.
+    const converted = subtotals.reduce((sum, row) => sum + Number(row.money.display.amount), 0);
+    expect(converted.toFixed(4)).toBe(Number(dashboard.totals.cost.total).toFixed(4));
+
+    // A model row whose list is quoted in another currency carries the published
+    // amount as a secondary value; the API says which models those are. One model
+    // may have a row per project, so compare against the set of its rows.
+    const dual = dashboard.models.find(
+      (row) => row.money !== undefined && row.money.original.currency !== row.money.display.currency,
+    );
+    test.skip(dual === undefined, 'every model in this run is quoted in the display currency');
+    if (dual === undefined) return;
+    const money = dual.money as NonNullable<ApiRow['money']>;
+    const modelRows = await rowsOf(page, '模型明细');
+    const sameModel = modelRows.filter((cells) => cells[1] === dual.model);
+    expect(sameModel.length, `the rows for ${dual.model} exist`).toBeGreaterThan(0);
+    // The money cell now holds two amounts (display, then published), so read
+    // every number out of the cells rather than one per cell.
+    const shown = sameModel.flatMap((cells) =>
+      cells.flatMap((cell) => (cell.match(/[\d][\d,.]*/g) ?? []).map(numberOf)),
+    );
+    expect(shown.some((value) => Math.abs(value - Number(money.display.amount)) < 0.01), 'display amount').toBe(true);
+    // The published amount is the vendor's, printed as small print with the full
+    // text in its `title`.
+    const titled = await cardOf(page, '模型明细')
+      .locator('tbody tr')
+      .filter({ hasText: dual.model })
+      .locator('[title]')
+      .evaluateAll((nodes) => nodes.map((node) => (node.getAttribute('title') ?? '') + ' ' + (node.textContent ?? '')));
+    const published = titled.flatMap((text) => (text.match(/[\d][\d,.]*/g) ?? []).map(numberOf));
+    expect(published.some((value) => Math.abs(value - Number(money.original.amount)) < 0.01), 'published amount').toBe(true);
   });
 
   test('the session table follows the project and can show subagents', async ({ page }) => {

@@ -16,6 +16,8 @@
 
 import type { Language } from '../i18n/index.ts';
 import type { CostTotals, TokenBuckets } from '../core/types.ts';
+import type { CostSubtotal } from '../report/accounting.ts';
+import type { DualMoney, OriginalAmounts } from '../pricing/index.ts';
 
 export type { CostTotals, TokenBuckets };
 
@@ -276,6 +278,8 @@ export interface ModelRow {
   tokens: TokenBuckets;
   /** Cost totals. */
   cost: CostTotals;
+  /** The same money in the price list's own currency, when the run tracked it. */
+  money?: DualMoney | undefined;
 }
 
 /** One billed item inside a band: the published rate and what it charged. */
@@ -322,6 +326,10 @@ export interface BandRow {
   tokens: TokenBuckets;
   /** Cost totals. */
   cost: CostTotals;
+  /** The same money in the price list's own currency, when the run tracked it. */
+  money?: DualMoney | undefined;
+  /** The band's money per component, in that currency. */
+  original?: OriginalAmounts | undefined;
   /** The rate card that produced the money. */
   components: BandComponentRow[];
 }
@@ -420,6 +428,14 @@ export interface Dashboard extends DashboardMeta {
   models: ModelRow[];
   /** Every price band seen, per agent and project. */
   bands: BandRow[];
+  /**
+   * One row per (price list, published currency) the run billed under.
+   *
+   * The dashboard's own money is a single currency; this is the per-table view
+   * beside it, summed from {@link Dashboard.bands} so it follows the same
+   * agent/project filters and adds up to {@link Dashboard.totals}.
+   */
+  subtotals: CostSubtotal[];
   /** Non-fatal problems, from the adapters or from the scan itself. */
   warnings: DashboardWarning[];
 }

@@ -28,7 +28,14 @@ import {
   type PricingProvider,
   type RateComponent,
 } from '../pricing/index.ts';
-import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from '../report/index.ts';
+import {
+  listSessions,
+  runQuery,
+  type OriginalPricing,
+  type SessionListFilters,
+  type UsageDimension,
+  type UsageQuery,
+} from '../report/index.ts';
 import { resolveRange } from '../report/timerange.ts';
 import { resolveLanguage, setLanguage, t } from '../i18n/index.ts';
 import { openInBrowser } from '../serve/open.ts';
@@ -57,7 +64,9 @@ import {
   providerCurrencies,
   rateFor,
   selectCurrency,
+  type DisplayChoice,
   type DisplayResolution,
+  type RateTable,
 } from '../pricing/currency.ts';
 import {
   formatSessionList,
@@ -127,6 +136,13 @@ interface Loaded {
   /** The adapters that were read, in selection order. */
   adapters: AgentAdapter[];
   engine: PricingEngine;
+  /**
+   * The same tables priced at the rates they published, for the second view.
+   *
+   * Absent only when there is no display currency to convert into, which is the
+   * `--currency-rate`-without-`--currency` case.
+   */
+  original?: OriginalPricing | undefined;
   /** Currency to print amounts in, and where that choice came from. */
   display: DisplayResolution;
   /** Symbol to print, empty when the user named no currency. */
@@ -333,6 +349,11 @@ async function loadOrExit(
       ...(seriesByBase.size === 0 ? {} : { series: seriesByBase.get(base)?.detail }),
     };
     const holidays = config.holidays === undefined ? {} : { holidays: config.holidays };
+    /** The tables and the list each one prices from, with the reader's currency picked. */
+    const originalEngines = tables.map((table) => {
+      const entry = picked.find((candidate) => candidate.table === table);
+      return { table, list: entry?.list.provider ?? table, quoted: entry?.list.currencies[0] ?? base };
+    });
     const engine = createRoutingEngine(tables, {
       ...(pinned === undefined ? {} : { pinned }),
       engineFor: (table: PricingProvider) => {
@@ -356,10 +377,41 @@ async function loadOrExit(
         });
       },
     });
+    // The second view: the very same tables, priced at the rates they published.
+    // Nothing here converts, so these are the vendor's own numbers; the display
+    // engine above is untouched and still produces every aggregate the report
+    // sums. The period→table map is what lets a subtotal say whose money it is.
+    const tableOfPeriod = new WeakMap<PricePeriod, { id: string; label: string }>();
+    for (const { table, list } of originalEngines) {
+      for (const price of list.models()) {
+        for (const period of price.periods) tableOfPeriod.set(period, { id: table.id, label: table.label });
+      }
+    }
+    const original =
+      choice.currency === null
+        ? undefined
+        : {
+            engine: createRoutingEngine(tables, {
+              ...(pinned === undefined ? {} : { pinned }),
+              engineFor: (table: PricingProvider) =>
+                createPricingEngine(
+                  originalEngines.find((candidate) => candidate.table === table)?.list ?? table,
+                  holidays,
+                ),
+            }),
+            tableOf: (period: PricePeriod) => tableOfPeriod.get(period),
+            currency: choice.currency.code,
+            // Historical mode converts each record at its own date's rate, so there
+            // is no single rate a subtotal could be converted with.
+            ...(seriesByBase.size === 0
+              ? { rates: originalRateTable(originalEngines, choice, config.rateTable) }
+              : {}),
+          };
     return {
       dataset,
       adapters,
       engine,
+      ...(original === undefined ? {} : { original }),
       display,
       symbol: display.currency?.symbol ?? '',
       warnings: config.warnings,
@@ -481,7 +533,11 @@ async function runUsage(options: UsageOptions): Promise<void> {
       ...(options.sessionFilter === undefined ? {} : { sessions: options.sessionFilter }),
       ...(options.repoFilter === undefined ? {} : { repos: options.repoFilter }),
     };
-    const result = runQuery(dataset, query, { engine, pricingProvider: engine.provider.id });
+    const result = runQuery(dataset, query, {
+      engine,
+      pricingProvider: engine.provider.id,
+      ...(loaded.original === undefined ? {} : { original: loaded.original }),
+    });
     // Which tables priced this run is only known after it: the header names those,
     // and the single-valued provenance field follows the first of them.
     result.pricingProvider = primaryTableOf(engine).id;
@@ -582,6 +638,35 @@ interface PriceOptions extends GlobalOptions {
   all?: boolean;
   currency?: string;
   current?: boolean;
+}
+
+/**
+ * The rate that turns each (table, currency) subtotal into the display currency.
+ *
+ * One rate per published list, so a subtotal converts once from its exact sum in
+ * the currency the vendor printed. This is the same rate the display engine uses
+ * for that table, which is why the two views agree to the last displayed digit.
+ * @param entries - each table with the list it prices from.
+ * @param choice - the reader's currency and any rate they typed.
+ * @param table - the exchange-rate table to read.
+ * @returns rates keyed `${tableId}\u0000${currency}`.
+ */
+function originalRateTable(
+  entries: readonly { table: PricingProvider; list: PricingProvider; quoted: string }[],
+  choice: DisplayChoice,
+  table: RateTable,
+): Map<string, string> {
+  const rates = new Map<string, string>();
+  for (const entry of entries) {
+    const { rate } = rateFor({
+      base: entry.quoted,
+      target: choice.currency?.code ?? null,
+      manualRate: choice.manualRate,
+      table,
+    });
+    for (const currency of providerCurrencies(entry.list)) rates.set(`${entry.table.id}\u0000${currency}`, rate);
+  }
+  return rates;
 }
 
 /** The `price` command implementation. */

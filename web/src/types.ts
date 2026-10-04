@@ -123,6 +123,30 @@ export interface WorkspaceNode {
   sessionReports: SessionNode[];
 }
 
+export interface DualAmount {
+  currency: string;
+  amount: string;
+}
+
+/** One amount as the price list published it, and as the reader sees it. */
+export interface DualMoney {
+  original: DualAmount;
+  display: DualAmount;
+}
+
+/** One price list's share of the bill, in both currencies. */
+export interface CostSubtotal {
+  table: string;
+  tableLabel: string;
+  currency: string;
+  requests: number;
+  original: string;
+  display: string;
+  converted?: string | undefined;
+  perRecord?: string | undefined;
+  money: DualMoney;
+}
+
 export interface ModelRow {
   agent: string;
   projectId: string;
@@ -130,6 +154,8 @@ export interface ModelRow {
   requests: number;
   tokens: TokenBuckets;
   cost: CostTotals;
+  /** The same money in the currency the price list published, when the API sent it. */
+  money?: DualMoney | undefined;
 }
 
 export interface BandComponentRow {
@@ -155,6 +181,10 @@ export interface BandRow {
   requests: number;
   tokens: TokenBuckets;
   cost: CostTotals;
+  /** The same money in the currency the price list published, when the API sent it. */
+  money?: DualMoney | undefined;
+  /** The band's money per component, in that currency. */
+  original?: { currency: string; table: string; tableLabel: string; amounts: Record<string, string>; total: string } | undefined;
   components: BandComponentRow[];
 }
 
@@ -299,6 +329,8 @@ export interface Dashboard extends DashboardMeta {
   timeseries: { day: SeriesPoint[]; hour: SeriesPoint[] };
   models: ModelRow[];
   bands: BandRow[];
+  /** One row per (price list, published currency); sums to `totals.cost.total`. */
+  subtotals?: CostSubtotal[] | undefined;
   warnings: DashboardWarning[];
 }
 

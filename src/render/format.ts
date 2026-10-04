@@ -10,9 +10,9 @@
 
 import stringWidth from 'string-width';
 
-import { moneyBreakdown, type MoneyBreakdown } from '../report/accounting.ts';
+import { moneyBreakdown, type CostSubtotal, type MoneyBreakdown } from '../report/accounting.ts';
 import { t } from '../i18n/index.ts';
-import { displayRate } from '../pricing/index.ts';
+import { currencyOf, displayRate, type DualMoney } from '../pricing/index.ts';
 import { tokenBreakdown } from '../core/buckets.ts';
 import type { CostTotals, RepoInfo, TokenTotals } from '../core/types.ts';
 import type {
@@ -308,7 +308,9 @@ function bandBlocks(bands: readonly BandSummary[], symbol: string, historical = 
   for (const band of bands) {
     lines.push(`▸ ${bandTitle(band)}`);
     lines.push(`  ${bandWindow(band)}`);
-    lines.push(`  ${metricsLine(band.tokens, moneyBreakdown(band.cost, band.tokens), band.requests, symbol)}`);
+    lines.push(
+      `  ${metricsLine(band.tokens, moneyBreakdown(band.cost, band.tokens), band.requests, symbol)}${dualSuffix(band.money)}`,
+    );
     const rates = band.components
       .map((component) => {
         // An item a tranche or a TTL repriced says so beside its base rate, so
@@ -356,8 +358,53 @@ function modelLines(models: readonly ModelBreakdown[], level: number, symbol: st
         moneyBreakdown(model.cost, model.tokens),
         model.requests,
         symbol,
-      )}`,
+      )}${dualSuffix(model.money)}`,
   );
+}
+
+/**
+ * ` / ¥37.65`: the same row in the currency its price list published.
+ *
+ * Printed only when that is a different currency: a list already quoted in the
+ * reader's currency would repeat the number beside it, and a report that says
+ * everything twice is harder to read than one that says it once.
+ * @param dual - the row's two-currency view, when the report carries one.
+ * @returns the suffix, or an empty string when there is nothing to add.
+ */
+function dualSuffix(dual: DualMoney | undefined): string {
+  if (dual === undefined || dual.original.currency === dual.display.currency) return '';
+  return ` / ${money(dual.original.amount, currencyOf(dual.original.currency).symbol)}`;
+}
+
+/**
+ * The by-price-list block: which table's published rates produced which money.
+ *
+ * One row per (table, currency), because a vendor may publish more than one list
+ * and the records priced from each are two different vendor prices. The display
+ * side of these rows adds up to the total above them; the published side is the
+ * vendor's own number for the same requests.
+ *
+ * @param subtotals - the rows, largest first.
+ * @param symbol - symbol of the display currency.
+ * @returns the block's lines, or nothing when it would only repeat the header.
+ */
+function subtotalLines(subtotals: readonly CostSubtotal[], symbol: string): string[] {
+  if (subtotals.length === 0) return [];
+  const labels = t().section;
+  // A single table whose list already quotes the display currency is what the
+  // header and the total line have said; the block earns its place when there is
+  // more than one list, or when one list is quoted in another currency.
+  const first = subtotals[0] as CostSubtotal;
+  if (subtotals.length === 1 && first.currency === first.money.display.currency) return [];
+  return [
+    labels.tables,
+    ...subtotals.map((row) => {
+      const published = money(row.money.original.amount, currencyOf(row.currency).symbol);
+      return row.currency === row.money.display.currency
+        ? `  ${labels.tableRow(row.tableLabel, row.currency, published)}`
+        : `  ${labels.tableConverted(row.tableLabel, row.currency, published, money(row.money.display.amount, symbol))}`;
+    }),
+  ];
 }
 
 /** One time window of a report: its heading, its range, and its data. */
@@ -751,6 +798,11 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
     );
     if (options.models === true) lines.push(...modelLines(result.models, 1, symbol));
   }
+  // Which price list produced the money sits with the number it explains, before
+  // the per-project tree: a reader who wonders why the total is what it is finds
+  // the answer before scrolling.
+  const tables = subtotalLines(result.subtotals, symbol);
+  if (tables.length > 0) lines.push('', ...tables);
   for (const node of nodes) {
     lines.push(
       '',
@@ -984,6 +1036,9 @@ function resultToJson(result: UsageResult): Record<string, unknown> {
     // separate component list would be the same data projected twice.
     pricingBands: result.bands,
     models: result.models,
+    // One row per (table, currency): the vendor's own money beside the display
+    // currency's, so a script can check either without converting anything.
+    subtotals: result.subtotals,
     // Every repository any project belongs to, whether or not the text report
     // found it worth a line of its own.
     repos: result.repos.map((group) => ({

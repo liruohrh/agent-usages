@@ -10,6 +10,7 @@
  */
 
 import { addBuckets, emptyBuckets } from '../core/buckets.ts';
+import { formatDecimal, parseDecimal } from '../core/money.ts';
 import type {
   CacheWriteTtl,
   CostTotals,
@@ -20,11 +21,21 @@ import type {
   UsageDataset,
   UsageRecord,
 } from '../core/types.ts';
-import { addCostTotals, addSummaries, costOf, zeroCostTotals, type CostSummary } from './accounting.ts';
+import {
+  addCostTotals,
+  addSummaries,
+  COST_DIGITS,
+  costOf,
+  zeroCostTotals,
+  type CostSubtotal,
+  type CostSummary,
+  type OriginalPricing,
+} from './accounting.ts';
 import { UserError, renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
-import type { PricingEngine, DisplayReason } from '../pricing/index.ts';
+import type { DualMoney, OriginalAmounts, PricingEngine, DisplayReason } from '../pricing/index.ts';
 import { inRange, type TimeRange } from './timerange.ts';
+export type { OriginalPricing } from './accounting.ts';
 
 /** How money was converted for one report, for the provenance line. */
 export interface RateInfo {
@@ -98,6 +109,13 @@ export interface ModelBreakdown {
   tokens: TokenTotals;
   /** Cost totals. */
   cost: CostTotals;
+  /**
+   * The same money in both currencies, when the report tracks originals.
+   *
+   * A model belongs to one price list, so its original currency is a single one;
+   * the row prints both numbers when they are not the same currency.
+   */
+  money?: DualMoney | undefined;
 }
 
 /** One billed item inside a band: the rate, what it charged, and the money. */
@@ -159,6 +177,10 @@ export interface BandSummary {
   tokens: TokenTotals;
   /** Money this band produced, per billed component. */
   cost: CostTotals;
+  /** The same band in the price list's own currency, when the report tracks it. */
+  original?: OriginalAmounts | undefined;
+  /** The band's total in both currencies, for rows that print both. */
+  money?: DualMoney | undefined;
   /** The rate card that applied, with what each item charged. */
   components: BandComponent[];
 }
@@ -407,6 +429,15 @@ export interface UsageResult {
   rateInfo: RateInfo;
   /** Pricing provider that supplied the rates. */
   pricingProvider: string;
+  /**
+   * One row per (table, currency) its records were billed in.
+   *
+   * The tables are different vendors, so an "original currency" only exists per
+   * table: ¥ and $ cannot be added. Each row carries the exact sum the vendor
+   * published and the same money in the display currency, and the display side of
+   * these rows adds up to {@link UsageResult.cost}.
+   */
+  subtotals: CostSubtotal[];
   /** How subagents were treated. */
   subagentMode: SubagentMode;
   /** How many subagent sessions were in scope, and how many sessions spawned them. */
@@ -718,14 +749,30 @@ function modelsOf(records: readonly UsageRecord[], summary: CostSummary): ModelB
     requests.set(record.model, (requests.get(record.model) ?? 0) + 1);
   }
   const costs = new Map<string, CostTotals>();
+  const money = new Map<string, DualMoney>();
   for (const band of summary.breakdown) {
     costs.set(band.model, addCostTotals(costs.get(band.model) ?? zeroCostTotals(), bandCost(band.amounts, band.total, band.reasoningCost)));
+    // A model belongs to one price list, so every band of it names the same
+    // original currency; the guard keeps a hand-built summary from adding ¥ to $.
+    if (band.money === undefined) continue;
+    const known = money.get(band.model);
+    if (known === undefined) {
+      money.set(band.model, {
+        original: { currency: band.money.original.currency, amount: band.money.original.amount },
+        display: { ...band.money.display },
+      });
+      continue;
+    }
+    if (known.original.currency !== band.money.original.currency) continue;
+    known.original.amount = addAmountText(known.original.amount, band.money.original.amount);
+    known.display.amount = addAmountText(known.display.amount, band.money.display.amount);
   }
   const breakdown: ModelBreakdown[] = [...new Set([...tokens.keys(), ...costs.keys()])].map((model) => ({
     model,
     requests: requests.get(model) ?? 0,
     tokens: tokens.get(model) ?? emptyBuckets(),
     cost: costs.get(model) ?? zeroCostTotals(),
+    ...(money.get(model) === undefined ? {} : { money: money.get(model) as DualMoney }),
   }));
   breakdown.sort((left, right) => {
     const leftTotal = Number(left.cost.total);
@@ -746,6 +793,11 @@ function sumOf(records: readonly UsageRecord[]): TokenTotals {
     totals.reasoning += record.tokens.reasoning;
   }
   return totals;
+}
+
+/** Add two rounded amounts, exactly, as decimals. */
+function addAmountText(left: string, right: string): string {
+  return formatDecimal(parseDecimal(left) + parseDecimal(right), COST_DIGITS);
 }
 
 /** Cost totals carrying only the billed components a band knows about. */
@@ -821,6 +873,8 @@ function bandsOf(summary: CostSummary, engine: PricingEngine, records: readonly 
       requests: band.requests,
       tokens: entry?.tokens ?? emptyBuckets(),
       cost: bandCost(band.amounts, band.total, band.reasoningCost),
+      ...(band.original === undefined ? {} : { original: band.original }),
+      ...(band.money === undefined ? {} : { money: band.money }),
       components: (entry?.rateCard ?? []).map((component) => {
         const charge = band.charges?.[component.id];
         const priced: BandComponent = {
@@ -1060,6 +1114,13 @@ export interface ReportContext {
   engine: PricingEngine;
   /** Provider id, reported back for provenance. */
   pricingProvider: string;
+  /**
+   * The original-currency view, when the caller can name the tables.
+   *
+   * Optional: a report built without it is exactly the report this tool has
+   * always produced — one currency, no second column.
+   */
+  original?: OriginalPricing | undefined;
 }
 
 /**
@@ -1125,10 +1186,11 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
   // report shows above a session — its subtree, its project, the grand total —
   // is the sum of these summaries, so a row can never disagree with the rows
   // beneath it: there is only one place where money is computed at all.
+  const bill = (records: readonly UsageRecord[]): CostSummary => costOf(records, engine, 1, context.original);
   const summaryOf = new Map<string, CostSummary>();
-  for (const entry of inScope) summaryOf.set(sessionKey(entry.session), costOf(entry.records, engine));
+  for (const entry of inScope) summaryOf.set(sessionKey(entry.session), bill(entry.records));
   const summariesFor = (entries: readonly ScopedSession[]): CostSummary =>
-    addSummaries(entries.map((entry) => summaryOf.get(sessionKey(entry.session)) ?? costOf([], engine)));
+    addSummaries(entries.map((entry) => summaryOf.get(sessionKey(entry.session)) ?? bill([])));
 
   // Which sessions get a row of their own, and what each row covers.
   const scopedByProject = new Map<string, ScopedSession[]>();
@@ -1201,14 +1263,14 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
         // A row's own records are never its folded ones: the split has to stay
         // exact in both modes so `自身 + 子代理` always explains the node.
         const entry = rowById.get(sessionKey(session));
-        const ownSummary = summaryOf.get(sessionKey(session)) ?? costOf([], engine);
+        const ownSummary = summaryOf.get(sessionKey(session)) ?? bill([]);
         const ownRecords = entry?.records ?? records;
         // Only spawned sessions count as the row's 子代理: a fork keeps its own
         // row, so folding it in here would bill it twice.
         const descendants = entry === undefined ? [] : subagentDescendants(projectScope, entry);
         const spawnedRecords = descendants.flatMap((child) => child.records);
         const spawned = addSummaries(
-          descendants.map((child) => summaryOf.get(sessionKey(child.session)) ?? costOf([], engine)),
+          descendants.map((child) => summaryOf.get(sessionKey(child.session)) ?? bill([])),
         );
         // Everything the row reports — its cost, its bands, its model rows —
         // describes the whole subtree, so each of them agrees with the 总 line the
@@ -1283,6 +1345,7 @@ export function runQuery(dataset: UsageDataset, query: UsageQuery, context: Repo
     currencyRate: Number(query.rate.rate),
     rateInfo: query.rate,
     pricingProvider: context.pricingProvider,
+    subtotals: mergedAll.subtotals,
     subagentMode: mode,
     subagents: { sessions: subagentSessions.length, parents: parents.size },
     ...(scopeBreakdown === undefined ? {} : { scopeBreakdown }),

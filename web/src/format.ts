@@ -52,6 +52,32 @@ export function formatCost(amount: string, symbol = ''): string {
   return symbol.length === 0 ? text : `${symbol}${text}`;
 }
 
+/**
+ * The symbol of a currency a price list published in.
+ *
+ * The page's own currency comes from the payload (`dashboard.currencySymbol`).
+ * This covers the currencies a *list* may be quoted in, which is a short and
+ * slowly changing set; an unknown code prints as the code itself — plainly not
+ * the reader's currency, which is the point.
+ */
+const CURRENCY_SYMBOLS: Readonly<Record<string, string>> = {
+  USD: '$',
+  CNY: '¥',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+  KRW: '₩',
+  HKD: 'HK$',
+  TWD: 'NT$',
+  SGD: 'S$',
+  INR: '₹',
+};
+
+/** The symbol for a currency code, falling back to the code and a space. */
+export function currencySymbol(code: string): string {
+  return CURRENCY_SYMBOLS[code] ?? (code.length === 0 ? '' : `${code} `);
+}
+
 /** A ratio as a percentage. */
 export function formatShare(value: number): string {
   return Number.isFinite(value) ? numbers().percent.format(value) : '—';

@@ -67,6 +67,14 @@ export const zh = {
   /** Block headings. */
   section: {
     bands: '计价区间:',
+    /** The by-price-list block: one row per (table, published currency). */
+    tables: '按表小计:',
+    /** `Anthropic（按 USD 价目发布）  $3064.38`: the list already quotes the display currency. */
+    tableRow: (table: string, currency: string, amount: string) =>
+      `${table}（按 ${currency} 价目发布）  ${amount}`,
+    /** `Anthropic（按 USD 价目发布）  $3064.38 → ¥20545.40`: both currencies, published first. */
+    tableConverted: (table: string, currency: string, original: string, display: string) =>
+      `${table}（按 ${currency} 价目发布）  ${original} → ${display}`,
     tips: '提示:',
   },
   /** Peak / off-peak / flat. */

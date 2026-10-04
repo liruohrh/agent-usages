@@ -316,9 +316,57 @@ export interface CostBreakdown {
    * would count money twice.
    */
   charges?: Readonly<Record<string, CostCharge>> | undefined;
+  /**
+   * The same band's money in the currency its own price list published.
+   *
+   * Present when the caller asked for the original-currency view. It is the same
+   * money as {@link CostBreakdown.amounts} — rounded the same way — quoted in the
+   * currency the vendor printed, so a reader can see what the price list said and
+   * what their display currency makes of it. Absent when nothing tracked it.
+   */
+  original?: OriginalAmounts | undefined;
+  /** The band's total in both currencies, for rows that print both. */
+  money?: DualMoney | undefined;
   /** Part of the output amount attributable to this group's reasoning tokens. */
   reasoningCost: string;
   /** Sum of {@link CostBreakdown.amounts}. */
+  total: string;
+}
+
+/** One amount in one currency, at display precision. */
+export interface DualAmount {
+  /** ISO code of the currency. */
+  currency: string;
+  /** Amount, as a decimal string. */
+  amount: string;
+}
+
+/**
+ * One amount as the price list published it, and as the reader sees it.
+ *
+ * Both sides are the *same money*: `display` is `original` converted (or the
+ * identical amount when the price list already quotes the display currency).
+ * Neither is derived from the other at read time — the report carries both so a
+ * consumer never has to convert anything.
+ */
+export interface DualMoney {
+  /** The amount in the currency the price list published. */
+  original: DualAmount;
+  /** The amount in the reader's display currency. */
+  display: DualAmount;
+}
+
+/** A band's money per component, in the price list's own currency. */
+export interface OriginalAmounts {
+  /** ISO code of the currency the price list published. */
+  currency: string;
+  /** Provider id that published the list, e.g. `anthropic`. */
+  table: string;
+  /** Provider label, e.g. `Anthropic`. */
+  tableLabel: string;
+  /** Amount per component id, in {@link OriginalAmounts.currency}. */
+  amounts: Readonly<Record<string, string>>;
+  /** Sum of {@link OriginalAmounts.amounts}. */
   total: string;
 }
 

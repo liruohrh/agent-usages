@@ -310,6 +310,17 @@ CLI 的 `bin` / `files` / `version` 未改动。
   "tokens": { "…": 0 }, "tokenBreakdown": { "cacheRead": { "tokens": 0, "share": 0.512, "cost": "12.3456" } },
   "cost": { "total": "34.5678", "…": "…" } }
 
+// subtotals[]：按 (价格表, 它发布的货币) 分组的小计。原币金额是厂商印的数，
+// display 是同一笔钱在页面显示货币下的数（Σ display = totals.cost）；
+// converted / perRecord 是另外两种折算读数，见 docs/output.md。
+{ "table": "anthropic", "tableLabel": "Anthropic", "currency": "USD", "requests": 9922,
+  "original": "3064.3751", "display": "20545.4004",
+  "money": { "original": { "currency": "USD", "amount": "3064.3751" },
+             "display": { "currency": "CNY", "amount": "20545.4004" } } }
+
+// models[] / bands[] 的金额处：显示货币为主，原币作副标（两种形状见上）；
+// bands[] 还多一个 original，给的是该区间各计费项的原币金额与合计。
+
 // projects[]：kind 是 repo（一个 git 仓库，含各 worktree）或 path（没人认领的目录）
 { "id": "repo:/home/me/ws/apps/demo-app", "name": "demo-app", "kind": "repo",
   "workspaces": ["/home/me/ws/apps/demo-app", "/home/me/orca/.../feature-x"],
@@ -334,8 +345,12 @@ CLI 的 `bin` / `files` / `version` 未改动。
 | `Σ projects[].cost === totals.cost` | 项目之间互不重叠（同目录已按路径合并） |
 | `own + spawned === total` | 会话行的自身与子代理都是同一批会话摘要相加 |
 | 模型的金额之和 === 项目金额 | 模型行取自**有子代理的根会话**（子代理的用量已经在父行里，再加一次就重复了） |
+| `Σ subtotals[].money.display === totals.cost` | 小计取自与总额同一批已四舍五入的区间行，只是按 (表, 货币) 重新分组 |
 
 - 金额是**精确十进制字符串**，浏览器只做展示，从不在前端重新求和。
+- **原币**：顶部 KPI 卡与各聚合行只给显示货币（它们本来就可能混着几张表），
+  `模型与计价` 页顶部另有一张 `按表小计` 卡片（每张价格表本次命中的那套已发布价目），
+  模型行的金额下方以小字给出原币、`title` 里给全；两种货币相同时不重复显示。
 - `tokens` 的四个计费桶互不重叠：一次请求的 prompt = `input + cacheRead + cacheWrite`。
 - `reasoning` 已包含在 `output` 里，**不另外计费**；因此五桶占比以四个计费桶为分母，
   思考那一行的占比表示"占全部 token 的比例"。

@@ -14,7 +14,9 @@ import type {
   AgentTotals,
   BandComponentRow,
   BandRow,
+  CostSubtotal,
   CostTotals,
+  DualMoney,
   ModelRow,
   SessionNode,
   TokenBreakdown,
@@ -23,6 +25,7 @@ import type {
 import {
   agentColor,
   bucketLabel,
+  currencySymbol,
   formatCost,
   formatInstant,
   formatShare,
@@ -801,7 +804,14 @@ export function ModelTable({
                 </td>
                 <Num value={formatTokens(row.requests)} />
                 <Num value={formatTokens(billedTotal(row.tokens), true)} />
-                <Num value={formatCost(row.cost.total, symbol)} />
+                <td className="tnum px-2 py-1 text-right">
+                  <div>{formatCost(row.cost.total, symbol)}</div>
+                  {publishedOf(row.money) !== undefined && (
+                    <div className="text-[10px] text-faint" title={t.tables.originalAmount(publishedOf(row.money) as string)}>
+                      {publishedOf(row.money)}
+                    </div>
+                  )}
+                </td>
                 <td className="tnum px-2 py-1 text-right text-faint">
                   {total === 0 ? '—' : formatShare(Number(row.cost.total) / total)}
                 </td>
@@ -810,6 +820,88 @@ export function ModelTable({
           </tbody>
         </table>
       </div>
+    </Card>
+  );
+}
+
+
+/**
+ * The published-currency amount of a row, formatted — or `undefined` when the
+ * display currency *is* the currency the list printed, in which case a second
+ * number would only repeat the first.
+ */
+function publishedOf(money: DualMoney | undefined): string | undefined {
+  if (money === undefined || money.original.currency === money.display.currency) return undefined;
+  return formatCost(money.original.amount, currencySymbol(money.original.currency));
+}
+
+/**
+ * The by-price-list block: which table's published rates produced which money.
+ *
+ * One row per (price list, currency), because a vendor may publish more than one
+ * list and the records priced from each are two different vendor prices. The
+ * converted column adds up to the dashboard's own total; the published column is
+ * the number the vendor printed for the same requests.
+ *
+ * A single list already quoted in the display currency says nothing the total
+ * line has not, so the block stays away then.
+ */
+export function PriceListTable({
+  subtotals,
+  symbol,
+  currency,
+  title,
+}: {
+  subtotals: readonly CostSubtotal[] | undefined;
+  symbol: string;
+  currency: string;
+  title: string;
+}): React.ReactElement | null {
+  const t = useT();
+  const rows = subtotals ?? [];
+  if (rows.length === 0) return null;
+  if (rows.length === 1 && rows[0]!.currency === currency) return null;
+  return (
+    <Card title={title}>
+      <table className="w-full table-fixed border-collapse text-[12px]">
+        <colgroup>
+          <col />
+          <col style={{ width: '128px' }} />
+          <col style={{ width: '128px' }} />
+          <col style={{ width: '64px' }} />
+        </colgroup>
+        <thead>
+          <tr className="text-[11px] text-faint">
+            <th className="px-2 py-1 text-left font-medium">{t.tables.priceListsTable}</th>
+            <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.cost}>
+              {t.tables.priceListsPublished}
+            </th>
+            <th className="px-2 py-1 text-right font-medium" title={t.tables.priceListsConverted}>
+              {t.tables.priceListsConverted}
+            </th>
+            <th className="px-2 py-1 text-right font-medium" title={t.vocabulary.requests}>
+              Q
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.table}:${row.currency}`} className="border-t border-line hover:bg-raised">
+              <td className="truncate px-2 py-1" title={row.table}>
+                {t.tables.priceListRow(row.tableLabel, row.currency)}
+              </td>
+              <td className="tnum px-2 py-1 text-right">
+                {formatCost(row.original, currencySymbol(row.currency))}
+              </td>
+              <td className="tnum px-2 py-1 text-right">
+                {row.currency === currency ? '—' : formatCost(row.money.display.amount, symbol)}
+              </td>
+              <td className="tnum px-2 py-1 text-right text-faint">{formatTokens(row.requests)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-2 text-[11px] leading-relaxed text-faint">{t.tables.priceListsNote(currency)}</p>
     </Card>
   );
 }
