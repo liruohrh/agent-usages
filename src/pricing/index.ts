@@ -53,6 +53,7 @@ export {
   DEFAULT_PRICING_PROVIDER,
   PRICING_PROVIDERS,
   findPricingProvider,
+  mixedAgentPricingWarning,
   requirePricingProvider,
   resolvePricingProvider,
 } from './registry.ts';

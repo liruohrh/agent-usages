@@ -434,6 +434,8 @@ export const zh = {
     /* ---- agents and providers ---- */
     unknownAgent: (p: { id: string; known: string }) => `未知的 agent "${p.id}"；当前支持：${p.known}`,
     unknownProvider: (p: { id: string; known: string }) => `未知的计价来源 "${p.id}"；当前支持：${p.known}`,
+    pricingMixedAgents: (p: { agents: string; provider: string }) =>
+      `这次统计混了多个 agent（${p.agents}），却共用一张价格表（${p.provider}）；要按厂商分开算钱，请分别用 --agent 跑，或用 --provider 指定一张表`,
     multipleAgents: (p: { home: string; named: string }) => `在 ${p.home} 同时匹配到多个 agent（${p.named}），请用 --agent 指定`,
     noUsageData: (p: { home: string; known: string }) =>
       `在 ${p.home} 没有找到可统计的用量数据；可用 --agent / --home 指定（当前支持：${p.known}）`,

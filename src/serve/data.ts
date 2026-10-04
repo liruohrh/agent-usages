@@ -57,6 +57,7 @@ import type { AgentAdapter } from '../agents/contract.ts';
 import { addCostTotals, costOf, zeroCostTotals } from '../report/accounting.ts';
 import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
+import { mixedAgentPricingWarning } from '../pricing/index.ts';
 import type { CostTotals, TokenBuckets, UsageDataset, UsageRecord } from '../core/types.ts';
 import { renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import { language, t } from '../i18n/index.ts';
@@ -835,6 +836,10 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     // 实时模式只有这一条路：合并层把 N 份 dataset 合成一份（一份都没有时给空数据集）。
     // 它同时也是 CLI 用的那个函数，所以两个入口对"同一份数据属于哪个项目"只有一个答案。
     const dataset = await mergeDatasets(loaded, { projects: config.projects ?? [] });
+    // Same note as the CLI's: a dashboard that mixes vendors under one rate card must
+    // say so, or its totals read as "the cost" when they are one vendor's rates.
+    const mixedAgents = mixedAgentPricingWarning(dataset.agents, provider, undefined);
+    if (mixedAgents !== undefined) warnings.push(flattenWarning(mixedAgents));
     scan = { dataset, sources };
     scanWarnings = warnings;
     cache.clear();

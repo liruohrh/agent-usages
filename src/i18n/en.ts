@@ -368,6 +368,8 @@ export const en: Messages = {
     unknownAgent: (p: { id: string; known: string }) => `unknown agent "${p.id}"; currently supported: ${p.known}`,
     unknownProvider: (p: { id: string; known: string }) =>
       `unknown pricing provider "${p.id}"; currently supported: ${p.known}`,
+    pricingMixedAgents: (p: { agents: string; provider: string }) =>
+      `this run mixes several agents (${p.agents}) yet prices them all with one rate card (${p.provider}); run one agent at a time, or name a provider with --provider`,
     multipleAgents: (p: { home: string; named: string }) =>
       `more than one agent matches ${p.home} (${p.named}); name one with --agent`,
     noUsageData: (p: { home: string; known: string }) =>

@@ -270,6 +270,16 @@ export interface PricingProvider {
   /** Human-readable name. */
   label: string;
   /**
+   * Agent ids this provider is the natural default for — `codex` for OpenAI,
+   * `claude` for Anthropic.
+   *
+   * A dataset from one agent is priced with the provider that claims it, unless
+   * `--provider` says otherwise. A dataset that spans several agents, or names one
+   * nobody claims, falls back to the first provider and says so out loud
+   * (`dsh + codex` costed with one table is a number worth warning about).
+   */
+  defaultFor?: readonly string[] | undefined;
+  /**
    * Model used when a record names something this provider has no schedule for.
    * `null` disables the fallback, in which case unknown models are reported as
    * unpriced instead of being guessed at.

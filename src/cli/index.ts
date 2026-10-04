@@ -31,6 +31,7 @@ import { resolveLanguage, setLanguage, t } from '../i18n/index.ts';
 import { openInBrowser } from '../serve/open.ts';
 import { renderDiagnostic, UserError, type Warning } from '../i18n/errors.ts';
 import { mergeDatasets } from '../core/merge.ts';
+import { mixedAgentPricingWarning } from '../pricing/index.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -244,6 +245,10 @@ async function loadOrExit(
     // the configuration can group what the filesystem cannot.
     const dataset = await mergeDatasets(datasets, config.projects.length === 0 ? {} : { projects: config.projects });
     const provider = resolvePricingProvider(options.provider, dataset.agent, config.providers);
+    // One rate card for several vendors is a number worth flagging: the tokens add
+    // up, the money is one vendor's opinion. See `mixedAgentPricingWarning`.
+    const mixedAgents = mixedAgentPricingWarning(dataset.agents, provider, options.provider);
+    if (mixedAgents !== undefined) dataset.warnings.push(mixedAgents);
     // The vendor's rates are rewritten into the display currency here, once, so
     // every amount and every unit price downstream is already in it.
     const published = providerCurrencies(provider);

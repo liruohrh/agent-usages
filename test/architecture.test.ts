@@ -221,7 +221,7 @@ describe('architecture', () => {
       'counterForBasis', 'createPricingEngine', 'currencyOf', 'detectAgents', 'displayRate',
       'divideDecimal', 'dshAgent', 'expandWithDescendants', 'findAgent', 'findPricingProvider',
       'formatDecimal', 'formatInstant', 'formatSessionList', 'formatUsageReport', 'inRange',
-      'isPeak', 'listSessions', 'localeCurrency', 'mergeCosts', 'mergeDatasets', 'moneyBreakdown',
+      'isPeak', 'listSessions', 'localeCurrency', 'mergeCosts', 'mergeDatasets', 'mixedAgentPricingWarning', 'moneyBreakdown',
       'multiplyDecimal', 'normalizePath', 'parseDecimal', 'parseInstant', 'parseRate',
       'presetRange', 'priceRecords', 'providerCurrencies', 'rateFor', 'rateFrom', 'reconcile',
       'renderHtmlReport', 'renderRounded', 'requireAgent', 'requirePricingProvider',

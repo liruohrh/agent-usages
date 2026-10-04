@@ -362,6 +362,8 @@ export interface ProviderConfig {
   label: string;
   /** Model used for records nothing else matches, or `null` to leave them unpriced. */
   defaultModel: string | null;
+  /** Agent ids this provider is the natural default for (`codex` → OpenAI). */
+  defaultFor?: readonly string[] | undefined;
   /** Models with a published schedule. */
   models: ModelPrice[];
 }
@@ -398,10 +400,19 @@ export function parsePricingConfig(value: unknown): PricingConfig {
     if (defaultModel !== null && !models.some((entry) => entry.model === defaultModel)) {
       throw new ConfigError(`providers[${index}].defaultModel`, 'configDefaultModelMissing', { model: defaultModel });
     }
+    // Which agents this vendor is the natural default for. Optional: a provider that
+    // claims none is still reachable with `--provider`, it just never wins by default.
+    const defaultFor =
+      node['defaultFor'] === undefined
+        ? []
+        : array(node['defaultFor'], `providers[${index}].defaultFor`).map((agent, at) =>
+            text(agent, `providers[${index}].defaultFor[${at}]`),
+          );
     return {
       id: text(node['id'], `providers[${index}].id`),
       label: text(node['label'], `providers[${index}].label`),
       defaultModel,
+      defaultFor,
       models,
     };
   });
@@ -419,6 +430,7 @@ export function providerFromConfig(entry: ProviderConfig): PricingProvider {
     id: entry.id,
     label: entry.label,
     defaultModel: entry.defaultModel,
+    defaultFor: entry.defaultFor ?? [],
     models: () => entry.models,
     find: (model: string) => {
       const wanted = model.trim().toLowerCase();
