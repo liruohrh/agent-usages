@@ -140,6 +140,23 @@ describe('architecture', () => {
     expect(dangling).toEqual([]);
   });
 
+  it('every file it opens by URL resolves from the file that names it', () => {
+    // `new URL('../config/rates.json', import.meta.url)` is a path like any other, and
+    // moving a module changes it. That is how `update rates --write-config` broke in CI
+    // for a week: the CLI moved from `src/cli.ts` into `src/cli/index.ts` and kept
+    // looking for `src/config/rates.json`, which no longer exists (2026-10-03). The
+    // import check above covers modules; this covers the data files beside them.
+    const dangling: string[] = [];
+    for (const file of typescriptUnder('src')) {
+      const text = code(readFileSync(resolve(ROOT, file), 'utf8'));
+      for (const match of text.matchAll(/new URL\(\s*(['"])([^'"]+)\1\s*,\s*import\.meta\.url\s*\)/g)) {
+        const specifier = match[2]!;
+        if (!existsSync(resolve(ROOT, dirname(file), specifier))) dangling.push(`${file} → ${specifier}`);
+      }
+    }
+    expect(dangling).toEqual([]);
+  });
+
   it('a layer only imports downward', () => {
     const violations: string[] = [];
     for (const file of typescriptUnder('src')) {

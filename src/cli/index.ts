@@ -638,7 +638,7 @@ async function runUpdate(target: string, options: { force?: boolean; writeConfig
 function writeRatesToRepo(): string {
   const cached = cachedConfigText('rates');
   if (cached === undefined) return t().update.noRatesToWrite;
-  const current = JSON.parse(readFileSync(new URL('../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+  const current = JSON.parse(readFileSync(new URL('../../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
   const fetched = JSON.parse(cached) as Record<string, unknown>;
   const before = (current['table'] ?? {}) as Record<string, string>;
   const after = (fetched['table'] ?? {}) as Record<string, string>;
@@ -654,7 +654,7 @@ function writeRatesToRepo(): string {
     source: fetched['source'],
     table,
   };
-  const path = fileURLToPath(new URL('../config/rates.json', import.meta.url));
+  const path = fileURLToPath(new URL('../../config/rates.json', import.meta.url));
   writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
   const held = kept === 0 ? '' : t().update.heldCurrencies(kept);
   return t().update.wroteBack(path, String(Object.keys(after).length), String(fetched['updatedAt']), held);
