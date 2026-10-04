@@ -101,7 +101,7 @@ export interface PricingProvider {
 - **取不到价格**：没有任何一张表认识这个模型时，它会被计入 `unpriced` 并给出提示——不借用别家型号的价，也不当成免费。
 
 ```bash
-agent-usages price              # 默认计价来源的价格表
+agent-usages price              # 全部计价来源的价格表（同 `--all`；`--provider X` 只看一张）
 agent-usages price --all        # 全部计价来源
 agent-usages usage --provider deepseek
 ```

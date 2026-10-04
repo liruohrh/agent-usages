@@ -1,6 +1,6 @@
 # DeepSeek 价格表
 
-`deepseek` 是五个计价来源之一（`--provider deepseek`；`dsh` 的默认表，见 [另外四家](vendors.md)）。单价全部来自 DeepSeek 官方文档，**未经任何推算或插值**；已失效的历史区间取自**官方价格页的 Wayback 存档**，因此整年的用量都能落到真实价格上。
+`deepseek` 是五个计价来源之一（`--provider deepseek`，见 [另外四家](vendors.md)）。单价全部来自 DeepSeek 官方文档，**未经任何推算或插值**；已失效的历史区间取自**官方价格页的 Wayback 存档**，因此整年的用量都能落到真实价格上。
 
 - 模型与价格（当前）：<https://api-docs.deepseek.com/zh-cn/quick_start/pricing>
 - 更新日志：<https://api-docs.deepseek.com/zh-cn/updates>

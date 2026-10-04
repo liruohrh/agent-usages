@@ -586,13 +586,13 @@ interface PriceOptions extends GlobalOptions {
 
 /** The `price` command implementation. */
 function runPrice(options: PriceOptions, config: ResolvedConfig): void {
-  // `--all` lists every table; without it the question is about one, and a
-  // `--provider` names which. Defaulting to the first table is the same answer the
-  // tool gave before vendors had a say, and it is a *price list* question rather
-  // than a pricing decision — a record is routed by its model, not listed here.
-  const providers = options.all === true
+  // No vendor is the default: a bare `price` is the whole price list, and a
+  // model nobody prices is reported unpriced rather than billed at somebody
+  // else's rate — the same rule records follow. `--all` is the explicit
+  // spelling of that, and `--provider` narrows the list to one table.
+  const providers = options.provider === undefined || options.all === true
     ? config.providers
-    : [options.provider === undefined ? config.providers[0]! : requirePricingProvider(options.provider, config.providers)];
+    : [requirePricingProvider(options.provider, config.providers)];
   const wanted = options.currency === undefined ? undefined : options.currency.trim().toUpperCase();
   const now = Date.now();
   const lines: string[] = [];

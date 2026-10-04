@@ -51,7 +51,6 @@ export {
   type ZoneTime,
 } from './engine.ts';
 export {
-  DEFAULT_PRICING_PROVIDER,
   PRICING_PROVIDERS,
   createRoutingEngine,
   findPricingProvider,

@@ -651,6 +651,23 @@ describe('price', () => {
     const { stdout } = await cli(['price', '--all']);
     expect(stdout).toContain('deepseek-v4-pro');
   });
+
+  it('lists every provider when none is named, and only one when one is', async () => {
+    // There is no default vendor any more: a bare `price` is the whole list, and
+    // `--all` is the explicit spelling of the same thing. A model nobody prices
+    // is reported unpriced, never billed at another table's rate.
+    const bare = await cli(['price', '--currency', 'USD', '--current']);
+    const all = await cli(['price', '--all', '--currency', 'USD', '--current']);
+    expect(bare.stdout).toBe(all.stdout);
+    for (const vendor of ['DeepSeek', 'OpenAI', 'Anthropic', 'Moonshot', 'Zhipu']) {
+      expect(bare.stdout).toContain(vendor);
+    }
+    // `--provider` still narrows the list to that table alone.
+    const one = await cli(['price', '--provider', 'zhipu', '--currency', 'USD', '--current']);
+    expect(one.stdout).toContain('Zhipu');
+    expect(one.stdout).not.toContain('DeepSeek');
+    expect(one.stdout).not.toContain('Anthropic');
+  });
 });
 
 describe('price bands', () => {

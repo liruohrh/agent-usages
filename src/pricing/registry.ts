@@ -19,9 +19,6 @@ import type { PricingProvider } from './contract.ts';
 /** Every pricing provider this build knows about, in display order. */
 export const PRICING_PROVIDERS: readonly PricingProvider[] = shippedProviders();
 
-/** Provider used when nothing else names one (`price` without `--provider`). */
-export const DEFAULT_PRICING_PROVIDER = PRICING_PROVIDERS[0]?.id ?? 'deepseek';
-
 /**
  * Look up a pricing provider.
  * @param id - provider id, matched case-insensitively.

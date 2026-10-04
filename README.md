@@ -11,7 +11,7 @@
 
 两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱，因此新增任何一方都只是加一个模块 + 一条注册项（见[架构与扩展](docs/architecture.md)）。
 
-价格表按 agent 自动选：`dsh` → DeepSeek、`codex` → OpenAI、`claude` → Anthropic（`--provider` 显式指定永远优先）。一次统计混了多个 agent 时，会用第一张表给所有人计价并**给出显式警告**——金额只是那一家的口径，要分开算就分别用 `--agent` 跑。
+价格表按**记录里的模型**选：一条记录是什么模型，就用认识它的那张表；没有任何表认识它就落 `unpriced` 并**点名警告**（`codex-auto-review` 就是这一条）。一次统计里混多家厂商没问题，头部会列出实际命中的表；`--provider X` 可以把整次运行钉死在一张表上。
 
 一次运行默认读取**本机所有装了数据的 agent**，把同一路径、同一 git 仓库的数据合并成同一个项目，并在每一层标明数字来自哪个 agent——详见[项目与工作区](#项目与工作区)。
 
@@ -124,7 +124,7 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 
 ### `price`
 
-打印内置价格表：每个生效区间的峰谷时段、单价、来源链接与说明。**不会**读取任何数据，也不需要 `--home`。加 `--all` 列出全部计价来源。价格明细与来源见 [DeepSeek 价格表](docs/pricing/deepseek.md) 与 [OpenAI / Anthropic / Kimi / 智谱](docs/pricing/vendors.md)。
+打印价格表：每个生效区间的峰谷时段、单价、来源链接与说明（有整段输入分档的按档列出）。**不会**读取任何数据，也不需要 `--home`。默认列出**全部**计价来源；`--provider X` 只看一张，`--all` 是同义的显式写法。价格明细与来源见 [DeepSeek 价格表](docs/pricing/deepseek.md) 与 [OpenAI / Anthropic / Kimi / 智谱](docs/pricing/vendors.md)。
 
 ### `agents`
 

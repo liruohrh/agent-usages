@@ -215,7 +215,7 @@ describe('architecture', () => {
     const api = await import('../src/index.ts');
     expect(Object.keys(api).sort()).toEqual([
       'AGENT_ADAPTERS', 'CACHE_WRITE_TTLS', 'CALENDAR_IDS', 'COST_DIGITS', 'DEFAULT_AGENT',
-      'DEFAULT_PRICING_PROVIDER', 'MONEY_SCALE', 'MONEY_SCALE_DIGITS', 'PRICING_PROVIDERS',
+      'MONEY_SCALE', 'MONEY_SCALE_DIGITS', 'PRICING_PROVIDERS',
       'bareModelName', 'basenameOf', 'basisQuantity', 'canonicalPath', 'charge', 'chargeComponent',
       'chooseDisplay', 'collectDescendantIds', 'convertProvider', 'costOf', 'costOfGrouped',
       'counterForBasis', 'createPricingEngine', 'createRoutingEngine', 'currencyOf', 'detectAgents', 'displayRate',
