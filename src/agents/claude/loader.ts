@@ -18,6 +18,11 @@
  *
  * The project directory name escapes the working directory lossily (`/` and `-`
  * both become `-`), so the `cwd` inside the entries is what the adapter trusts.
+ *
+ * A session's title, in order: the name the user set (`custom-title.json` next
+ * to the log), else the last compaction `summary`, else the first user entry
+ * that holds something the user actually typed — never the scaffolding Claude
+ * Code injects into those entries.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -60,6 +65,132 @@ function asInstant(value: unknown): number | null {
 }
 
 /**
+ * Longest title kept. A longer text is clipped at a sentence or word boundary
+ * instead of mid-word, so a title never ends on a fragment like `or '`.
+ */
+const MAX_TITLE = 80;
+
+/** Characters a title may end on when one sits in the first `MAX_TITLE` chars. */
+const SENTENCE_ENDS = '。！？；.!?;';
+
+/**
+ * Tagged scaffolding Claude Code writes into a `user` entry in front of, or
+ * instead of, what the user typed.
+ *
+ * `<permissions instructions>` normalises to the `permissions` name here, and
+ * `<pasted_content id="…">` to `pasted_content`: the tag is matched by its
+ * first word so an attribute does not hide it.
+ */
+const INJECTED_TAGS = new Set([
+  'local-command-caveat',
+  'local-command-stdout',
+  'local-command-stderr',
+  'command-name',
+  'command-message',
+  'command-args',
+  'bash-input',
+  'bash-stdout',
+  'bash-stderr',
+  'system-reminder',
+  'task-notification',
+  'pasted_content',
+  'permissions',
+  'environment_context',
+  'recommended_plugins',
+  'user_instructions',
+]);
+
+/**
+ * The user's own words out of one log entry, with Claude Code's scaffolding
+ * removed.
+ *
+ * Several blocks can lead one entry (`<command-name>` then
+ * `<local-command-stdout>`), and a block with no closing tag swallows the rest
+ * of the entry. An entry that is nothing but scaffolding yields `undefined`, so
+ * the caller moves on to the next one.
+ *
+ * @param text - the entry's text.
+ * @returns the remaining text, or `undefined` when none of it is the user's.
+ */
+function userWords(text: string): string | undefined {
+  let rest = text.trim();
+  while (rest.length > 0) {
+    const block = /^<([^<>\n]{1,80})>/.exec(rest);
+    const opening = block?.[1];
+    if (opening !== undefined) {
+      const name = (opening.trim().split(/\s+/)[0] ?? '').toLowerCase();
+      if (INJECTED_TAGS.has(name)) {
+        const closing = `</${opening}>`;
+        const end = rest.indexOf(closing);
+        if (end === -1) return undefined;
+        rest = rest.slice(end + closing.length).trim();
+        continue;
+      }
+    }
+    break;
+  }
+  return rest.length === 0 ? undefined : rest;
+}
+
+/** The first line with anything on it. */
+function firstLine(text: string): string | undefined {
+  return text
+    .split('\n')
+    .map((part) => part.trim())
+    .find((part) => part.length > 0);
+}
+
+/**
+ * Clip a title to `MAX_TITLE` without ending mid-word.
+ *
+ * A long prompt has to be cut somewhere; a sentence end inside the window is
+ * the nicest place, a word gap the next best, and only text with neither is cut
+ * hard. A dangling quote is dropped either way.
+ *
+ * @param text - the raw title.
+ * @returns the title to display.
+ */
+function clipTitle(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= MAX_TITLE) return flat;
+  const window = flat.slice(0, MAX_TITLE);
+  const floor = MAX_TITLE / 2;
+  let cut = -1;
+  for (let index = window.length - 1; index >= floor; index -= 1) {
+    const character = window[index];
+    if (character !== undefined && SENTENCE_ENDS.includes(character)) {
+      cut = index + 1;
+      break;
+    }
+  }
+  if (cut === -1) {
+    const gap = window.lastIndexOf(' ', MAX_TITLE - 1);
+    cut = gap < floor ? -1 : gap;
+  }
+  const clipped = flat.slice(0, cut === -1 ? MAX_TITLE : cut).trim();
+  return clipped.replace(/[\s"'“”‘’]+$/u, '') || clipped;
+}
+
+/**
+ * The title a `user` entry offers: the first line that is not scaffolding.
+ *
+ * @param content - the entry's `message.content`, a string or content blocks.
+ * @returns the title, or `undefined` when the entry holds nothing the user said.
+ */
+function promptTitle(content: unknown): string | undefined {
+  const text = typeof content === 'string'
+    ? content
+    : (Array.isArray(content)
+        ? content.map((block) => asString(asRecord(block)?.['text']) ?? '').join('\n')
+        : undefined);
+  if (text === undefined) return undefined;
+  const words = userWords(text);
+  if (words === undefined) return undefined;
+  const line = firstLine(words);
+  return line === undefined ? undefined : clipTitle(line);
+}
+
+/**
  * A model id as a pricing table can match it.
  *
  * Claude Code passes context-window suffixes through verbatim
@@ -92,7 +223,7 @@ interface ScannedSession {
   cwd: string | null;
   /** First timestamp seen. */
   createdAt: number | null;
-  /** Last `summary` entry, or the user-set title, or the opening prompt. */
+  /** Last `summary` entry, or the first real user input, or nothing. */
   title: string | null;
   /** One record per billed assistant entry, in file order. */
   records: UsageRecord[];
@@ -119,7 +250,10 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   let id: string | undefined;
   let cwd: string | null = null;
   let createdAt: number | null = null;
-  let title: string | null = null;
+  /** First user entry that is not scaffolding: what the user actually typed. */
+  let userTitle: string | null = null;
+  /** Last compaction `summary`: the closest thing to a title the log has. */
+  let summaryTitle: string | null = null;
   const records: UsageRecord[] = [];
   const messageIds: string[] = [];
   const children = new Map<string, number>();
@@ -146,21 +280,17 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     if (treeParent !== undefined) children.set(treeParent, (children.get(treeParent) ?? 0) + 1);
     id ??= asString(entry['sessionId']);
     cwd ??= asString(entry['cwd']) ?? null;
-    if (asString(entry['type']) === 'user' && title === null) {
-      // Sessions without a custom title still open with something worth showing.
+    if (asString(entry['type']) === 'user' && userTitle === null) {
+      // The first entry is often injected scaffolding rather than a prompt; keep
+      // looking until one holds something the user actually said.
       const message = asRecord(entry['message']);
-      const content = message?.['content'];
-      const text = typeof content === 'string'
-        ? content
-        : (Array.isArray(content) ? asString(asRecord(content[0])?.['text']) : undefined);
-      if (text !== undefined) {
-        const line = text.split('\n').map((part) => part.trim()).find((part) => part.length > 0);
-        if (line !== undefined) title = line.slice(0, 80);
-      }
+      const title = promptTitle(message?.['content']);
+      if (title !== undefined) userTitle = title;
     }
     if (asString(entry['type']) === 'summary') {
       // Compaction summaries are the closest thing to a title that the log has.
-      title = asString(entry['summary']) ?? title;
+      const summary = asString(entry['summary']);
+      if (summary !== undefined) summaryTitle = clipTitle(summary);
       continue;
     }
     const message = asRecord(entry['message']);
@@ -199,6 +329,9 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   // `--resume-session-at` branches in place: the log stays append-only and the
   // branch shows up as a message with two children.
   const branchPoints = [...children.values()].filter((count) => count > 1).length;
+  // A compaction summary describes the session better than its opening prompt
+  // does; a name the user set outranks both and is applied by the caller.
+  const title = summaryTitle ?? userTitle;
   return { id: id ?? fallbackId, cwd, createdAt, title, records, messageIds, branchPoints };
 }
 
@@ -239,13 +372,14 @@ async function walk(
       return;
     }
   }
-  // Claude Code keeps a user-set session name next to the log.
+  // Claude Code keeps a user-set session name next to the log. A name the user
+  // chose outranks everything the log itself offers — including an opening
+  // prompt, which used to occupy the title and hide the name.
   const custom = await readFile(join(file.replace(/\.jsonl$/, ''), 'custom-title.json'), 'utf8').catch(() => undefined);
-  if (custom !== undefined && session.title === null) {
+  if (custom !== undefined) {
     try {
       const parsed = asRecord(JSON.parse(custom));
       const customTitle = asString(parsed?.['customTitle']);
-      // A user-set name outranks the opening prompt.
       if (customTitle !== undefined) session = { ...session, title: customTitle };
     } catch {
       // An unreadable title is not worth failing a report over.

@@ -26,6 +26,11 @@
  * `session_meta.session_id` still names the **parent** — hence identity comes
  * from `id` (or the file name), and the parent link from
  * `source.subagent.thread_spawn`.
+ *
+ * A session's title is the task message a spawned subagent opened with, the
+ * flavour of a subagent Codex runs itself, or otherwise the first user entry
+ * that holds something the user actually typed — Codex writes environment
+ * context and plugin lists as ordinary user entries, so the first one rarely is.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -74,6 +79,121 @@ function asInstant(value: unknown): number | null {
 }
 
 /**
+ * Longest title kept. A longer text is clipped at a sentence or word boundary
+ * instead of mid-word, so a title never ends on a fragment like `or '`.
+ */
+const MAX_TITLE = 80;
+
+/** Characters a title may end on when one sits in the first `MAX_TITLE` chars. */
+const SENTENCE_ENDS = '。！？；.!?;';
+
+/**
+ * Tagged scaffolding Codex writes into a `user` turn.
+ *
+ * The opening entry of a rollout is almost never something a person typed:
+ * environment context, plugin lists and interrupt notices all arrive as plain
+ * user messages, sometimes several blocks in one message. None of them is a
+ * title, so they are stripped before the text is read.
+ */
+const INJECTED_TAGS = new Set([
+  'environment_context',
+  'recommended_plugins',
+  'user_instructions',
+  'turn_aborted',
+  'external_codex_apps_open_page',
+  'send_user_message_question_reply',
+]);
+
+/** Headings that introduce injected scaffolding rather than the user's words. */
+const INJECTED_HEADINGS = ['# AGENTS.md instructions'];
+
+/** Attachment blocks: the user's words sit in a request section inside them. */
+const ATTACHMENT_HEADINGS = ['# Files mentioned by the user:', '# Files pasted by the user:'];
+
+/** Sections that carry the user's own words inside an attachment block. */
+const REQUEST_SECTIONS = ['## My request for Codex:', '## My request:'];
+
+/**
+ * The user's own words out of one rollout message, with Codex's scaffolding
+ * removed.
+ *
+ * Leading injected blocks are dropped one by one; a block that is never closed,
+ * or an injected heading, swallows the rest of the message. A message that is
+ * nothing but scaffolding yields `undefined`, so the caller moves on to the next
+ * user turn.
+ *
+ * @param text - the message's text.
+ * @returns the remaining text, or `undefined` when none of it is the user's.
+ */
+function userWords(text: string): string | undefined {
+  let rest = text.trim();
+  while (rest.length > 0) {
+    const block = /^<([^<>\n]{1,80})>/.exec(rest);
+    const opening = block?.[1];
+    if (opening !== undefined) {
+      const name = (opening.trim().split(/\s+/)[0] ?? '').toLowerCase();
+      if (INJECTED_TAGS.has(name)) {
+        const closing = `</${opening}>`;
+        const end = rest.indexOf(closing);
+        if (end === -1) return undefined;
+        rest = rest.slice(end + closing.length).trim();
+        continue;
+      }
+    }
+    if (INJECTED_HEADINGS.some((heading) => rest.startsWith(heading))) return undefined;
+    if (ATTACHMENT_HEADINGS.some((heading) => rest.startsWith(heading))) {
+      const section = REQUEST_SECTIONS.map((marker) => ({ marker, index: rest.indexOf(marker) }))
+        .filter((candidate) => candidate.index !== -1)
+        .sort((left, right) => left.index - right.index)[0];
+      if (section === undefined) return undefined;
+      rest = rest.slice(section.index + section.marker.length).trim();
+      continue;
+    }
+    break;
+  }
+  return rest.length === 0 ? undefined : rest;
+}
+
+/** The first line with anything on it. */
+function firstLine(text: string): string | undefined {
+  return text
+    .split('\n')
+    .map((part) => part.trim())
+    .find((part) => part.length > 0);
+}
+
+/**
+ * Clip a title to `MAX_TITLE` without ending mid-word.
+ *
+ * A long prompt has to be cut somewhere; a sentence end inside the window is
+ * the nicest place, a word gap the next best, and only text with neither is cut
+ * hard. A dangling quote is dropped either way.
+ *
+ * @param text - the raw title.
+ * @returns the title to display.
+ */
+function clipTitle(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= MAX_TITLE) return flat;
+  const window = flat.slice(0, MAX_TITLE);
+  const floor = MAX_TITLE / 2;
+  let cut = -1;
+  for (let index = window.length - 1; index >= floor; index -= 1) {
+    const character = window[index];
+    if (character !== undefined && SENTENCE_ENDS.includes(character)) {
+      cut = index + 1;
+      break;
+    }
+  }
+  if (cut === -1) {
+    const gap = window.lastIndexOf(' ', MAX_TITLE - 1);
+    cut = gap < floor ? -1 : gap;
+  }
+  const clipped = flat.slice(0, cut === -1 ? MAX_TITLE : cut).trim();
+  return clipped.replace(/[\s"'“”‘’]+$/u, '') || clipped;
+}
+
+/**
  * Token buckets from Codex's six counters.
  *
  * `input_tokens` already contains `cached_input_tokens`, and `output_tokens`
@@ -105,7 +225,7 @@ interface ScannedSession {
   parentId: string | null;
   depth: number;
   isSubagent: boolean;
-  /** Title: the task a subagent was given, or nothing. */
+  /** Title: a subagent's task, or the first thing the user actually typed. */
   title: string | null;
   /** Session this one was forked from (`forked_from_id`). */
   forkedFrom: string | null;
@@ -132,6 +252,10 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   }
   let id: string | undefined;
   let title: string | null = null;
+  /** First user turn that is not scaffolding: what the user actually typed. */
+  let userTitle: string | null = null;
+  /** Flavour of a subagent that was not spawned through `thread_spawn`. */
+  let subagentKind: string | null = null;
   let forkedFrom: string | null = null;
   let forkBoundary: number | undefined;
   let agentPath: string | null = null;
@@ -162,13 +286,18 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       cwd ??= asString(payload['cwd']) ?? null;
       createdAt ??= asInstant(entry['timestamp']);
       // A subagent's `session_id` names its parent; the spawn record is the link.
-      const spawn = asRecord(asRecord(asRecord(payload['source'])?.['subagent'])?.['thread_spawn']);
+      const subagent = asRecord(asRecord(payload['source'])?.['subagent']);
+      const spawn = asRecord(subagent?.['thread_spawn']);
       if (spawn !== undefined) {
         isSubagent = true;
         depth = asNumber(spawn['depth']) ?? 1;
         parentId = asString(spawn['parent_thread_id']) ?? null;
         agentPath = asString(spawn['agent_path']) ?? null;
         agentNickname = asString(spawn['agent_nickname']) ?? null;
+      } else {
+        // Codex runs some subagents itself (its guardian reviewer) without a
+        // spawn record; the flavour it writes there is all the identity there is.
+        subagentKind = asString(subagent?.['other']) ?? null;
       }
       // A fork names its source and inherits its running total without copying
       // any event; the difference is what must never be billed here.
@@ -187,11 +316,14 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       model = asString(payload['model']) ?? model;
       continue;
     }
-    if (type === 'response_item' && payload !== undefined && title === null) {
-      // A subagent's first message is the task it was spawned with:
-      // "Message Type: NEW_TASK\nTask name: …\n\n<the task itself>".
-      if (asString(payload['type']) === 'agent_message') {
+    if (type === 'response_item' && payload !== undefined) {
+      const itemType = asString(payload['type']);
+      if (title === null && itemType === 'agent_message') {
+        // A subagent's first message is the task it was spawned with:
+        // "Message Type: NEW_TASK\nTask name: …\n\n<the task itself>".
         title = taskTitle(payload) ?? title;
+      } else if (title === null && userTitle === null && itemType === 'message' && asString(payload['role']) === 'user') {
+        userTitle = messageTitle(payload) ?? null;
       }
       continue;
     }
@@ -219,6 +351,10 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     });
   }
   if (id === undefined && records.length === 0 && cwd === null) return undefined;
+  // A spawned subagent is titled by the task it was given, and one Codex runs
+  // itself by its flavour — neither ever sees a human turn. Everything else is
+  // titled by the first thing the user actually typed.
+  title ??= subagentKind ?? userTitle;
   // Without a task message, the spawn path still names the agent.
   title ??= agentPath === null ? null : (agentPath.split('/').filter((part) => part.length > 0).pop() ?? null);
   title ??= agentNickname;
@@ -239,6 +375,24 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
 }
 
 /**
+ * The title a plain user message offers.
+ *
+ * Codex writes the injected scaffolding as ordinary user turns, so the first
+ * entry is usually not a title; the first entry that is the user's own words is.
+ *
+ * @param payload - a `response_item` payload of type `message`.
+ * @returns the title, or `undefined` when the message is only scaffolding.
+ */
+function messageTitle(payload: Record<string, unknown>): string | undefined {
+  const content = Array.isArray(payload['content']) ? payload['content'] : [];
+  const text = content.map((item) => asString(asRecord(item)?.['text']) ?? '').join('\n');
+  const words = userWords(text);
+  if (words === undefined) return undefined;
+  const line = firstLine(words);
+  return line === undefined ? undefined : clipTitle(line);
+}
+
+/**
  * The task text out of a subagent's opening `NEW_TASK` message.
  *
  * @param payload - the `agent_message` payload.
@@ -256,11 +410,8 @@ function taskTitle(payload: Record<string, unknown>): string | undefined {
   // task itself follows the `Payload:` marker.
   const marker = text.indexOf('Payload:');
   const body = marker === -1 ? text : text.slice(marker + 'Payload:'.length);
-  const line = body
-    .split('\n')
-    .map((part) => part.trim())
-    .find((part) => part.length > 0);
-  return line === undefined ? undefined : line.slice(0, 80);
+  const line = firstLine(body);
+  return line === undefined ? undefined : clipTitle(line);
 }
 
 /** Every `rollout-*.jsonl` under a directory tree, sorted for stable runs. */
@@ -532,7 +683,7 @@ async function readThreadTitles(home: string): Promise<Map<string, string>> {
       for (const row of rows) {
         const id = asString(row.id);
         const label = asString(row.name) ?? asString(row.title);
-        if (id !== undefined && label !== undefined) titles.set(id, label.replace(/\s+/g, ' ').slice(0, 80));
+        if (id !== undefined && label !== undefined) titles.set(id, clipTitle(label));
       }
     } finally {
       db.close();

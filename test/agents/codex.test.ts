@@ -18,6 +18,35 @@ const CHILD = '01a0ca0b-4181-7433-884b-58ccbd8701e9';
 
 let home: string;
 
+/** One `response_item` user message, the way Codex writes a prompt. */
+function userMessage(ordinal: number, text: string): unknown {
+  return {
+    timestamp: `2026-09-23T00:1${ordinal}:00.000Z`,
+    ordinal,
+    type: 'response_item',
+    payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+  };
+}
+
+/** One `session_meta` header. */
+function meta(id: string, extra: Record<string, unknown> = {}): unknown {
+  return {
+    timestamp: '2026-09-23T00:10:00.000Z',
+    ordinal: 0,
+    type: 'session_meta',
+    payload: { id, session_id: id, cwd: '/tmp/demo', ...extra },
+  };
+}
+
+/** Write one extra rollout into the fixture home's day directory. */
+async function writeRollout(name: string, entries: unknown[]): Promise<void> {
+  const day = join(home, 'sessions', '2026', '09', '23');
+  await writeFile(
+    join(day, `rollout-${name}.jsonl`),
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+  );
+}
+
 /** Codex's six counters, as a `token_count` event reports them. */
 function counters(input: number, cached: number, output: number, reasoning: number): Record<string, number> {
   return {
@@ -207,5 +236,124 @@ describe('reading a Codex home', () => {
     expect(data.projects[0]?.sessions).toHaveLength(4);
     expect(await codexAgent.hasData(home)).toBe(true);
     expect(await codexAgent.hasData(join(home, 'nope'))).toBe(false);
+  });
+});
+
+describe('titling a Codex session', () => {
+  /** The title the loader gave one rollout id. */
+  async function titleOf(id: string): Promise<string | null | undefined> {
+    const data = await codexAgent.load({ home });
+    return data.sessions.find((candidate) => candidate.id === id)?.title;
+  }
+
+  it('takes the first user entry that is not injected scaffolding', async () => {
+    // Codex writes several injected blocks as ordinary user entries, and a real
+    // rollout opens with them; only the entry after them is the user's own text.
+    await writeRollout('019f0000-0000-7000-8000-000000000001', [
+      meta('scaffolded'),
+      userMessage(
+        1,
+        '<environment_context>\n  <cwd>/tmp/demo</cwd>\n</environment_context><recommended_plugins>\n- Demo plugin\n</recommended_plugins>',
+      ),
+      userMessage(2, 'Rename the settings page\nand its tests\n'),
+      tokenCount(3, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(await titleOf('scaffolded')).toBe('Rename the settings page');
+  });
+
+  it('reads the request out of an attachment entry', async () => {
+    await writeRollout('019f0000-0000-7000-8000-000000000002', [
+      meta('attached'),
+      userMessage(1, '<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>'),
+      userMessage(2, '# Files mentioned by the user:\n\n## screenshot.png: /tmp/screenshot.png\n\n## My request:\nTidy up the sidebar spacing'),
+      tokenCount(3, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(await titleOf('attached')).toBe('Tidy up the sidebar spacing');
+  });
+
+  it('leaves a session with only scaffolding untitled', async () => {
+    await writeRollout('019f0000-0000-7000-8000-000000000003', [
+      meta('scaffolding-only'),
+      userMessage(1, '# AGENTS.md instructions\n\n<INSTRUCTIONS>\nDo not build the project.\n</INSTRUCTIONS><environment_context>\n  <cwd>/tmp/demo</cwd>\n</environment_context>'),
+      tokenCount(2, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(await titleOf('scaffolding-only')).toBeNull();
+  });
+
+  it('clips a long prompt at a word boundary, not mid-word', async () => {
+    // 96 characters, and the 80-char window ends inside `permitted`: a hard cut
+    // would leave `… is not permitte`, so the title has to stop at the gap.
+    const prompt = "Refused to start the preview because 'quick-mode' or 'safe-mode' is not permitted by the sandbox";
+    expect(prompt.length).toBeGreaterThan(80);
+    await writeRollout('019f0000-0000-7000-8000-000000000004', [
+      meta('long-prompt'),
+      userMessage(1, prompt),
+      tokenCount(2, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    const title = await titleOf('long-prompt');
+    expect(title).toBe("Refused to start the preview because 'quick-mode' or 'safe-mode' is not");
+    expect(title?.length).toBeLessThanOrEqual(80);
+    // The cut is a prefix that ends between words, so nothing is left half-typed.
+    expect(prompt.startsWith(title as string)).toBe(true);
+    expect(prompt[(title as string).length]).toBe(' ');
+    expect(prompt.slice(0, 80).trim()).not.toBe(title);
+  });
+
+  it('prefers a sentence end inside the window', async () => {
+    // The first sentence ends at character 61 — inside the window, so the title
+    // stops there rather than running on for another nineteen characters.
+    const prompt = `Fix the flaky retry helper and add a regression test for it. ${'Then keep going with the rest of the work'.repeat(2)}`;
+    expect(prompt.length).toBeGreaterThan(80);
+    await writeRollout('019f0000-0000-7000-8000-000000000005', [
+      meta('sentence'),
+      userMessage(1, prompt),
+      tokenCount(2, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(await titleOf('sentence')).toBe('Fix the flaky retry helper and add a regression test for it.');
+  });
+
+  it('keeps the NEW_TASK task of a spawned subagent', async () => {
+    await writeRollout('019f0000-0000-7000-8000-000000000006', [
+      meta('spawned', {
+        session_id: PARENT,
+        thread_source: 'subagent',
+        source: { subagent: { thread_spawn: { parent_thread_id: PARENT, depth: 1, agent_path: '/root/math' } } },
+      }),
+      {
+        timestamp: '2026-09-23T00:11:00.000Z',
+        ordinal: 1,
+        type: 'response_item',
+        payload: {
+          type: 'agent_message',
+          author: '/root',
+          recipient: '/root/math',
+          content: [{ type: 'input_text', text: 'Message Type: NEW_TASK\nTask name: /root/math\nSender: /root\nPayload:\nAdd 1+1 and reply with the number.' }],
+        },
+      },
+      // A spawned subagent's own environment entry is scaffolding too, and must
+      // not displace the task it was given.
+      userMessage(2, '<environment_context>\n  <cwd>/tmp/demo</cwd>\n</environment_context>'),
+      tokenCount(3, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(await titleOf('spawned')).toBe('Add 1+1 and reply with the number.');
+  });
+
+  it('names a subagent Codex ran itself by its flavour', async () => {
+    // Codex spawns its reviewer without a `thread_spawn` record; its only user
+    // entry is a machine-written prompt, so the flavour is the honest title.
+    await writeRollout('019f0000-0000-7000-8000-000000000007', [
+      meta('flavour', { thread_source: 'subagent', source: { subagent: { other: 'guardian' } } }),
+      userMessage(1, '<environment_context>\n  <cwd>/tmp/demo</cwd>\n</environment_context>'),
+      userMessage(2, 'Machine-written prompt asking for a review of the action above.'),
+      tokenCount(3, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(await titleOf('flavour')).toBe('guardian');
   });
 });
