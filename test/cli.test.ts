@@ -653,6 +653,153 @@ describe('price', () => {
   });
 });
 
+describe('price bands', () => {
+  /** A config dir with no language opinion and no update checks. */
+  function quietHome(language?: string): Record<string, string> {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-usages-bands-'));
+    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    writeFileSync(
+      join(dir, 'agent-usages', 'config.json'),
+      JSON.stringify({
+        version: 1,
+        ...(language === undefined ? {} : { language }),
+        updates: { pricing: false, rates: false },
+      }),
+      'utf8',
+    );
+    return { XDG_CONFIG_HOME: dir };
+  }
+
+  it('prints each whole-request band with the card it charges', async () => {
+    const { stdout } = await cli(['price', '--provider', 'openai', '--currency', 'USD', '--current'], quietHome());
+    const lines = stdout.split('\n');
+    const start = lines.findIndex((line) => line === '  gpt-5.6-sol');
+    expect(start).toBeGreaterThan(0);
+    // A band is not a peak-hours rule, and a period whose rates live in bands has
+    // no off-peak card of its own: the block is exactly these lines.
+    expect(lines.slice(start, start + 8)).toEqual([
+      '  gpt-5.6-sol',
+      '    别名: openai/gpt-5.6-sol',
+      '    [snapshot-2026-10-04] 按输入长度整段分档（厂商页快照）（USD）',
+      '      生效: 2026-01-01 00:00 → 至今 (UTC+00:00)',
+      '      输入分档（整条请求按命中档计价）:',
+      '        输入 ≤272K: 输入（未命中缓存） 4 / 缓存命中输入 0.4 / 缓存写入（默认 5 分钟档） 5 / 输出（含 reasoning） 20 $',
+      '        输入 >272K（整条按本档）: 输入（未命中缓存） 8 / 缓存命中输入 0.8 / 缓存写入（默认 5 分钟档） 10 / 输出（含 reasoning） 30 $',
+      '      来源: https://developers.openai.com/api/docs/pricing',
+    ]);
+    expect(stdout).not.toContain('峰谷: 输入');
+    expect(stdout).not.toContain('空闲:  $');
+  });
+
+  it('prints every band of a three-row table, output bound included', async () => {
+    const { stdout } = await cli(['price', '--provider', 'zhipu', '--currency', 'CNY', '--current'], quietHome());
+    // GLM-4.7's page splits its two short-input rows on output length, so each
+    // band prints its own card and the labels carry the bounds.
+    expect(stdout).toContain(
+      '        输入 <32K、输出 <0.2K: 输入（未命中缓存） 2 / 缓存命中输入 0.4 / 输出（含 reasoning） 8 ¥',
+    );
+    expect(stdout).toContain(
+      '        输入 <32K、输出 ≥0.2K: 输入（未命中缓存） 3 / 缓存命中输入 0.6 / 输出（含 reasoning） 14 ¥',
+    );
+    expect(stdout).toContain(
+      '        输入 ≥32K（整条按本档）: 输入（未命中缓存） 4 / 缓存命中输入 0.8 / 输出（含 reasoning） 16 ¥',
+    );
+  });
+
+  it('leaves a period without bands exactly as it was', async () => {
+    const { stdout } = await cli(['price', '--provider', 'deepseek', '--currency', 'CNY', '--current'], quietHome());
+    const lines = stdout.split('\n');
+    expect(lines.slice(0, 6)).toEqual([
+      '▸ DeepSeek（deepseek，CNY / 百万 tokens）',
+      '',
+      '  deepseek-flash',
+      '    别名: deepseek-v4-flash、deepseek-v4-flash-vision-exp、deepseek-chat、deepseek-reasoner',
+      '    [2026-09-10] V4.1-Flash（deepseek-flash）峰谷定价（CNY）',
+      '      生效: 2026-09-10 12:00 → 至今 (UTC+08:00)',
+    ]);
+    // The peak rule keeps its own line, then the two cards under their own labels.
+    expect(lines[6]).toMatch(/^ {6}峰谷: /);
+    expect(lines[7]).toBe('      空闲: 缓存命中输入 0.02 / 缓存未命中输入 1 / 输出 4 ¥');
+    expect(lines[8]).toBe('      高峰: 缓存命中输入 0.04 / 缓存未命中输入 2 / 输出 8 ¥');
+    expect(stdout).not.toContain('输入分档');
+  });
+
+  it('names the bands in the reader\'s language', async () => {
+    const { stdout } = await cli(
+      ['price', '--provider', 'openai', '--currency', 'USD', '--current'],
+      quietHome('en'),
+    );
+    expect(stdout).toContain('Input bands (the whole request takes the band it hits):');
+    expect(stdout).not.toContain('输入分档（整条请求按命中档计价）');
+    // The band labels are the vendor's own data and read as the price list wrote
+    // them, exactly like the component labels above.
+    expect(stdout).toContain('输入 ≤272K: 输入（未命中缓存） 4');
+  });
+
+  it('keeps the hours when a period carries both hours and bands', async () => {
+    // No shipped list mixes the two, but the schema allows it: the hours must
+    // still print (once, on their own line) and every band must show both cards.
+    const dir = mkdtempSync(join(tmpdir(), 'agent-usages-bands-'));
+    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    const miss = (rate: string) => ({ id: 'input-miss', label: '输入（未命中缓存）', basis: 'input', rate, per: 1_000_000 });
+    writeFileSync(
+      join(dir, 'agent-usages', 'config.json'),
+      JSON.stringify({
+        version: 1,
+        updates: { pricing: false, rates: false },
+        pricing: {
+          version: 1,
+          updatedAt: '2026-10-04',
+          providers: [
+            {
+              id: 'demo',
+              label: 'Demo',
+              models: [
+                {
+                  model: 'demo-1',
+                  aliases: ['demo-1'],
+                  periods: [
+                    {
+                      id: 'snap',
+                      label: '峰谷 + 分档',
+                      from: '2026-01-01T00:00:00+08:00',
+                      to: null,
+                      currency: 'CNY',
+                      offPeak: [],
+                      inputTiers: [
+                        { label: '输入 ≤200K', upTo: 200_000, offPeak: [miss('1')], peak: [miss('2')] },
+                        { label: '输入 >200K', upTo: null, offPeak: [miss('10')], peak: [miss('20')] },
+                      ],
+                      peakWindows: [{ fromHour: 9, toHour: 12, weekdays: null }],
+                      source: 'https://example.com/pricing',
+                      note: 'demo',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+    const { stdout } = await cli(['price', '--provider', 'demo', '--currency', 'CNY'], { XDG_CONFIG_HOME: dir });
+    const lines = stdout.split('\n');
+    expect(lines.slice(4, 14)).toEqual([
+      '      生效: 2026-01-01 00:00 → 至今 (UTC+08:00)',
+      '      峰谷: 每天 09:00-12:00（UTC+08:00）',
+      '      输入分档（整条请求按命中档计价）:',
+      '        输入 ≤200K:',
+      '          空闲: 输入（未命中缓存） 1 ¥',
+      '          高峰: 输入（未命中缓存） 2 ¥',
+      '        输入 >200K:',
+      '          空闲: 输入（未命中缓存） 10 ¥',
+      '          高峰: 输入（未命中缓存） 20 ¥',
+      '      来源: https://example.com/pricing',
+    ]);
+  });
+});
+
 describe('agents', () => {
   it('lists the supported agents and pricing sources', async () => {
     const { code, stdout } = await cli(['agents']);

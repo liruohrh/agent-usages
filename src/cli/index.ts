@@ -45,6 +45,7 @@ import { loadRateSeries, rateOn, type LoadedRateSeries } from '../config/series.
 import type { RateMode } from '../config/user.ts';
 import { cachedConfigText, runUpdates, type UpdateKind } from '../config/update.ts';
 import { parsePricingConfig, shippedPricingText } from '../pricing/catalog.ts';
+import type { PricePeriod } from '../pricing/contract.ts';
 import { parseRatesConfig, shippedRatesText } from '../pricing/rates.ts';
 import { parseHolidaysConfig, shippedHolidaysText } from '../config/holidays.ts';
 import { readUserConfig } from '../config/user.ts';
@@ -621,7 +622,6 @@ function runPrice(options: PriceOptions, config: ResolvedConfig): void {
       for (const period of shown) {
         lines.push(`    [${period.id}] ${period.label}（${period.currency}）`);
         lines.push(`      ${t().price.window}: ${engine.describeWindow(period)}`);
-        lines.push(`      ${t().price.tiers}: ${engine.describeTiers(period)}`);
         const render = (components: readonly RateComponent[]): string =>
           components
             .map((component) => {
@@ -640,8 +640,32 @@ function runPrice(options: PriceOptions, config: ResolvedConfig): void {
               return `${component.label} ${component.rate}${note}`;
             })
             .join(' / ') + ` ${currencyOf(period.currency).symbol}`;
-        lines.push(`      ${t().price.offPeak}: ${render(period.offPeak)}`);
-        if (period.peak !== null) lines.push(`      ${t().price.peak}: ${render(period.peak)}`);
+        if (period.inputTiers === undefined) {
+          lines.push(`      ${t().price.tiers}: ${engine.describeTiers(period)}`);
+          lines.push(`      ${t().price.offPeak}: ${render(period.offPeak)}`);
+          if (period.peak !== null) lines.push(`      ${t().price.peak}: ${render(period.peak)}`);
+        } else {
+          // A whole-request band is not a peak-hours rule, so its labels never
+          // ride on that line: when the period still has hours they print first
+          // on their own (the clock picks a line *inside* a band), and every band
+          // then prints the card it charges. A banded period keeps its peak cards
+          // inside the bands, so the hours are described on their own — the
+          // description only asks whether the period has a peak rule at all.
+          if (period.peakWindows.length > 0) {
+            const hours: PricePeriod = { ...period, inputTiers: undefined, peak: [] };
+            lines.push(`      ${t().price.tiers}: ${engine.describeTiers(hours)}`);
+          }
+          lines.push(`      ${t().price.bands}:`);
+          for (const band of period.inputTiers) {
+            if (band.peak === null) {
+              lines.push(`        ${band.label}: ${render(band.offPeak)}`);
+              continue;
+            }
+            lines.push(`        ${band.label}:`);
+            lines.push(`          ${t().price.offPeak}: ${render(band.offPeak)}`);
+            lines.push(`          ${t().price.peak}: ${render(band.peak)}`);
+          }
+        }
         lines.push(`      ${t().price.source}: ${period.source}`);
         lines.push(`      ${t().price.note}: ${period.note}`);
       }

@@ -106,6 +106,8 @@ export const en: Messages = {
     aliases: 'Aliases',
     window: 'In effect',
     tiers: 'Peak hours',
+    /** Whole-request size bands: each one is a price card of its own. */
+    bands: 'Input bands (the whole request takes the band it hits)',
     offPeak: 'Off-peak',
     peak: 'Peak',
     source: 'Source',

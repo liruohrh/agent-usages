@@ -143,6 +143,8 @@ export const zh = {
     aliases: '别名',
     window: '生效',
     tiers: '峰谷',
+    /** Whole-request size bands: each one is a price card of its own. */
+    bands: '输入分档（整条请求按命中档计价）',
     offPeak: '空闲',
     peak: '高峰',
     source: '来源',
