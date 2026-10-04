@@ -430,6 +430,11 @@ export const zh = {
     rateSeriesSource: 'frankfurter.dev（欧洲央行参考汇率）',
     seriesDetail: (p: { source: string; from: string; to: string; days: number }) =>
       `${p.source} ${p.from} ~ ${p.to}（${p.days} 个交易日）`,
+    configTiersEmpty: 'inputTiers 至少要写一档',
+    configTiersNotOpenEnded: '最后一档必须是开区间（upTo: null），否则更大的输入无法计价',
+    configTiersUnsorted: (p: { previous: string; current: string }) => `分档要按上界升序：${p.previous} 在 ${p.current} 之前`,
+    configTiersReplaceRates: '写了 inputTiers 就不能再写 offPeak/peak：档位表本身就是价目表，两处会互相矛盾',
+    configTiersPeakMismatch: '档位的 peak 要和区间的 peakWindows 一致：有时段就得每档都有高峰价，没有就都不能写',
     /* ---- agents and providers ---- */
     unknownAgent: (p: { id: string; known: string }) => `未知的 agent "${p.id}"；当前支持：${p.known}`,
     unknownProvider: (p: { id: string; known: string }) => `未知的计价来源 "${p.id}"；当前支持：${p.known}`,

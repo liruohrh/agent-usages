@@ -364,6 +364,12 @@ export const en: Messages = {
     rateSeriesSource: 'frankfurter.dev (ECB reference rates)',
     seriesDetail: (p: { source: string; from: string; to: string; days: number }) =>
       `${p.source} ${p.from} ~ ${p.to} (${p.days} business days)`,
+    configTiersEmpty: 'inputTiers needs at least one tier',
+    configTiersNotOpenEnded: 'the last tier must be open-ended (upTo: null), or larger inputs cannot be priced',
+    configTiersUnsorted: (p: { previous: string; current: string }) =>
+      `tiers must ascend by upTo: ${p.previous} comes before ${p.current}`,
+    configTiersReplaceRates: 'inputTiers replaces offPeak/peak: the tier list is the rate card',
+    configTiersPeakMismatch: 'each tier needs peak rates exactly when the period has peak windows',
     unknownAgent: (p: { id: string; known: string }) => `unknown agent "${p.id}"; currently supported: ${p.known}`,
     unknownProvider: (p: { id: string; known: string }) =>
       `unknown pricing provider "${p.id}"; currently supported: ${p.known}`,
