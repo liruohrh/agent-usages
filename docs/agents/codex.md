@@ -1,6 +1,6 @@
 # Codex 适配器
 
-`codex` 读 [Codex CLI](https://developers.openai.com/codex/) 自己写的 rollout，不依赖任何插件。主目录默认 `~/.codex`，可用 `CODEX_HOME` 或 `--home` 覆盖。
+`codex` 读 [Codex CLI](https://developers.openai.com/codex/) 自己写的 rollout，不依赖任何插件。主目录默认 `~/.codex`，可用 `CODEX_HOME`（逗号分隔可写多个目录）或 `--agent-dir codex=…` / `--home`（后者只在只选一个 agent 时可用）覆盖。
 
 ## 用 DeepSeek 跑 Codex（官方接法）
 

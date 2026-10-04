@@ -34,6 +34,7 @@ import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRec
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
+import { splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable pi honours for its agent directory. */
 const ENV_AGENT_DIR = 'PI_CODING_AGENT_DIR';
@@ -328,7 +329,7 @@ function buildSession(walked: WalkedSession): SessionRecord {
 /** Read a pi home into the agent-neutral dataset. */
 async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const env = options.env ?? process.env;
-  const source = options.home ?? defaultSource(env) ?? '';
+  const source = options.home ?? defaultSources(env)[0] ?? '';
   const warnings: Warning[] = [];
   if (options.home !== undefined && !isAbsolute(options.home)) {
     throw new UserError('piHomeNotAbsolute', { value: JSON.stringify(options.home) });
@@ -421,11 +422,17 @@ function firstUsageOf(session: SessionRecord): number {
   return Number.POSITIVE_INFINITY;
 }
 
-/** Default data root: pi's agent directory. */
-function defaultSource(env: NodeJS.ProcessEnv): string | null {
+/**
+ * Default data roots: pi's agent directories.
+ *
+ * `PI_CODING_AGENT_DIR` may name several roots, comma-separated;
+ * `PI_CODING_AGENT_SESSION_DIR` stays what it always was — one sessions
+ * directory inside a root — so it is not a root list.
+ */
+function defaultSources(env: NodeJS.ProcessEnv): readonly string[] {
   const explicit = env[ENV_AGENT_DIR];
-  if (explicit !== undefined && explicit.length > 0) return explicit;
-  return join(homedir(), '.pi', 'agent');
+  const named = explicit === undefined ? [] : uniqueRoots(splitRoots(explicit));
+  return named.length > 0 ? named : [join(homedir(), '.pi', 'agent')];
 }
 
 export const piAgent: AgentAdapter = {
@@ -433,7 +440,7 @@ export const piAgent: AgentAdapter = {
   label: 'pi (coding agent)',
   sessionNoun: t().errors.piSessionNoun,
   envVars: [ENV_AGENT_DIR, ENV_SESSION_DIR],
-  defaultSource,
+  defaultSources,
   hasData: async (source) => {
     const root = sessionsRootOf(source, process.env);
     for (const projectKey of await readdirOrEmpty(root)) {

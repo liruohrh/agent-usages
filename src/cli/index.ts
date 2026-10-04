@@ -17,7 +17,8 @@
 
 import { Command, InvalidArgumentError } from 'commander';
 
-import { AGENT_ADAPTERS, detectAgents, requireAgent, type AgentAdapter } from '../agents/index.ts';
+import { AGENT_ADAPTERS, type AgentAdapter } from '../agents/index.ts';
+import { loadPlannedAgents, planAgentSources } from '../agents/sources.ts';
 import {
   PRICING_PROVIDERS,
   createPricingEngine,
@@ -87,6 +88,12 @@ const EXIT_NO_DATA = 2;
 interface GlobalOptions {
   /** Agents to read: every occurrence of `--agent`, each already split on commas. */
   agent?: string[];
+  /**
+   * `--agent-dir <agent>=<path>[,<path>…]`, every occurrence in order.
+   *
+   * Not comma-split on the way in: the value's own commas separate directories.
+   */
+  agentDir?: string[];
   home?: string;
   provider?: string;
   json?: boolean;
@@ -198,6 +205,7 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
   const merged: GlobalOptions = {};
   for (const entry of chain) {
     if (entry.agent !== undefined) merged.agent = entry.agent;
+    if (entry.agentDir !== undefined) merged.agentDir = entry.agentDir;
     if (entry.home !== undefined) merged.home = entry.home;
     if (entry.provider !== undefined) merged.provider = entry.provider;
     if (entry.json !== undefined) merged.json = entry.json;
@@ -207,37 +215,12 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
     if (entry.update === false) merged.update = false;
   }
   if (options.agent !== undefined) merged.agent = options.agent;
+  if (options.agentDir !== undefined) merged.agentDir = options.agentDir;
   if (options.home !== undefined) merged.home = options.home;
   if (options.provider !== undefined) merged.provider = options.provider;
   if (options.json !== undefined) merged.json = options.json;
   if (options.update === false) merged.update = false;
   return { ...options, ...merged };
-}
-
-/**
- * The adapters a run should read.
- *
- * No `--agent` means every agent: the report answers "what did this machine
- * spend", and an agent that is not installed contributes nothing rather than
- * failing the run. Naming agents narrows it, and an explicitly named agent that
- * has no data is still an error — the user asked for that agent specifically.
- *
- * @param requested - every `--agent` value given, already comma-split.
- * @param home - an explicit data root, when given.
- * @returns the adapters to load, in selection order.
- * @throws {UserError} when an explicitly named agent is not one this build knows.
- */
-async function selectAgents(requested: readonly string[] | undefined, home: string | undefined): Promise<AgentAdapter[]> {
-  const wanted = (requested ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
-  const everything = wanted.length === 0 || wanted.some((id) => id.toLowerCase() === 'all');
-  if (everything) return detectAgents(home);
-  const chosen: AgentAdapter[] = [];
-  for (const id of wanted) {
-    const adapter = requireAgent(id);
-    // `--agent dsh --agent dsh` reads one agent once, not twice.
-    if (!chosen.includes(adapter)) chosen.push(adapter);
-  }
-  return chosen;
 }
 
 /**
@@ -269,29 +252,34 @@ async function loadOrExit(
   config: ResolvedConfig,
 ): Promise<Loaded | undefined> {
   try {
-    const adapters = await selectAgents(options.agent, options.home);
-    if (adapters.length === 0) {
-      const known = AGENT_ADAPTERS.map((adapter) => adapter.id).join('、');
+    // One directory per root, one root or more per agent: `--agent-dir`, then the
+    // agent's own environment variable, then its standard location. A directory
+    // that is unreadable or empty is skipped with a warning rather than failing
+    // the run; an agent with nothing readable at all still raises its own error.
+    const plan = await planAgentSources({
+      agent: options.agent,
+      agentDirs: options.agentDir,
+      ...(options.home === undefined ? {} : { home: options.home }),
+    });
+    if (plan.planned.length === 0) {
+      const known = AGENT_ADAPTERS.map((adapter) => adapter.id).join(t().period.listJoin);
       throw new Error(
         renderDiagnostic('noUsageData', { home: options.home ?? t().errors.defaultLocation, known }),
       );
     }
-    const datasets = await Promise.all(
-      adapters.map((adapter) =>
-        adapter.load({
-          ...(options.home === undefined ? {} : { home: options.home }),
-          enrich: true,
-        }),
-      ),
-    );
+    const adapters = plan.planned.map((entry) => entry.adapter);
+    const { datasets, warnings: sourceWarnings } = await loadPlannedAgents(plan.planned, { enrich: true });
     // Every agent's projects become one project per place: the same directory
     // read by two agents is one row, a repository's worktrees are one row, and
     // the configuration can group what the filesystem cannot.
     const dataset = await mergeDatasets(datasets, config.projects.length === 0 ? {} : { projects: config.projects });
+    // A skipped directory belongs with the adapters' other warnings: both report
+    // tables read `dataset.warnings`, so this is the one place it has to land.
+    dataset.warnings.push(...sourceWarnings);
     // Which tables this run may draw on. `--provider` pins one; otherwise every
     // shipped table is a candidate and the model in each record picks between them
-    // (see `createRoutingEngine`), so `codex` is priced by OpenAI and `claude` by
-    // Anthropic in the same run without anybody guessing from the agent id.
+    // (see `createRoutingEngine`), so `codex` is priced by OpenAI and `claudecode`
+    // by Anthropic in the same run without anybody guessing from the agent id.
     const pinned: PricingProvider | undefined =
       options.provider === undefined ? undefined : requirePricingProvider(options.provider, config.providers);
     const tables = pinned === undefined ? config.providers : [pinned];
@@ -861,9 +849,18 @@ function runCheckConfig(json: boolean): void {
 function runAgents(options: GlobalOptions): void {
   const lines = [t().agents.header];
   for (const adapter of AGENT_ADAPTERS) {
-    const source = adapter.defaultSource(process.env) ?? t().agents.unknownSource;
+    const sources = adapter.defaultSources(process.env);
     lines.push(`  ▸ ${adapter.id}  ${adapter.label}`);
-    lines.push(`      ${t().agents.defaultSource}: ${source}`);
+    lines.push(
+      `      ${t().agents.defaultSource}: ${sources.length === 0 ? t().agents.unknownSource : sources.join(t().period.listJoin)}`,
+    );
+    lines.push(
+      `      ${t().agents.aliases}: ${
+        adapter.aliases === undefined || adapter.aliases.length === 0
+          ? t().agents.noAliases
+          : adapter.aliases.join(t().period.listJoin)
+      }`,
+    );
     if (adapter.envVars.length > 0) lines.push(`      ${t().agents.envVars}: ${adapter.envVars.join(t().period.listJoin)}`);
     for (const note of adapter.notes()) lines.push(`      · ${note}`);
   }
@@ -877,14 +874,21 @@ function runAgents(options: GlobalOptions): void {
     process.stdout.write(
       `${JSON.stringify(
         {
-          agents: AGENT_ADAPTERS.map((adapter) => ({
-            id: adapter.id,
-            label: adapter.label,
-            sessionNoun: adapter.sessionNoun,
-            envVars: adapter.envVars,
-            defaultSource: adapter.defaultSource(process.env),
-            notes: adapter.notes(),
-          })),
+          agents: AGENT_ADAPTERS.map((adapter) => {
+            const sources = adapter.defaultSources(process.env);
+            return {
+              id: adapter.id,
+              label: adapter.label,
+              sessionNoun: adapter.sessionNoun,
+              envVars: adapter.envVars,
+              aliases: adapter.aliases ?? [],
+              // Kept for scripts written before an agent could have several
+              // roots; `sources` is the honest answer.
+              defaultSource: sources[0] ?? null,
+              sources,
+              notes: adapter.notes(),
+            };
+          }),
           pricingProviders: PRICING_PROVIDERS.map((provider) => ({
             id: provider.id,
             label: provider.label,
@@ -925,6 +929,7 @@ async function runServe(options: ServeOptions): Promise<void> {
   const { openStore, startServer } = await import('../serve/index.ts');
   const scan = {
     ...(options.agent === undefined ? {} : { agent: options.agent.join(',') }),
+    ...(options.agentDir === undefined ? {} : { agentDirs: options.agentDir }),
     ...(options.home === undefined ? {} : { home: options.home }),
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
     // Unlike the library default, the command follows the CLI's convention: the
@@ -988,10 +993,21 @@ function collectList(value: string, previous: string[] | undefined): string[] {
   return [...(previous ?? []), ...value.split(',')];
 }
 
+/**
+ * Accumulate a repeatable option whose value has commas of its own.
+ *
+ * `--agent-dir <agent>=<path>[,<path>…]` names several directories in one value,
+ * so splitting it on commas the way `--agent` is split would tear it apart.
+ */
+function collectOne(value: string, previous: string[] | undefined): string[] {
+  return [...(previous ?? []), value];
+}
+
 /** Register the options every command shares. */
 function commonOptions(command: Command): Command {
   return command
     .option('--agent <id>', t().help.agent, collectList)
+    .option('--agent-dir <spec>', t().help.agentDir, collectOne)
     .option('--home <dir>', t().help.home)
     .option('--provider <id>', t().help.provider)
     .option('--json', t().help.json)
@@ -1087,6 +1103,7 @@ export function buildProgram(): Command {
     .command('serve')
     .description(t().help.serve)
     .option('--agent <id>', t().help.agent, collectList)
+    .option('--agent-dir <spec>', t().help.agentDir, collectOne)
     .option('--home <dir>', t().help.home)
     .option('--no-update', t().help.noUpdate)
     .option('-p, --port <port>', t().help.servePort, parsePortOption)

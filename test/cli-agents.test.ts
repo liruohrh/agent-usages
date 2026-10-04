@@ -170,12 +170,12 @@ describe('--agent all', () => {
       agents: { agent: string; requests: number; cost: { total: string } }[];
       projects: { name: string; agents: string[]; workspaces: string[]; sessions: number; subagentSessions: number }[];
     };
-    expect(parsed.agents.map((row) => row.agent)).toEqual(['claude', 'dsh']);
-    expect(parsed.agent).toBe('dsh+claude');
+    expect(parsed.agents.map((row) => row.agent)).toEqual(['claudecode', 'dsh']);
+    expect(parsed.agent).toBe('dsh+claudecode');
     // One directory, read by two agents, is one project.
     expect(parsed.projects).toHaveLength(1);
     expect(parsed.projects[0]?.name).toBe('shared');
-    expect(parsed.projects[0]?.agents).toEqual(['claude', 'dsh']);
+    expect(parsed.projects[0]?.agents).toEqual(['claudecode', 'dsh']);
     expect(parsed.projects[0]?.workspaces).toEqual([CWD]);
     expect(parsed.projects[0]?.sessions).toBe(2);
     expect(parsed.projects[0]?.subagentSessions).toBe(0);
@@ -199,18 +199,18 @@ describe('--agent all', () => {
     }
     // Each agent's own bill is its own: DSH also read a cache-hit request, so
     // its request costs 0.02 more than Claude Code's.
-    expect(parsed.agents.map((row) => `${row.agent}:${row.cost.total}`)).toEqual(['claude:5.0000', 'dsh:5.0200']);
+    expect(parsed.agents.map((row) => `${row.agent}:${row.cost.total}`)).toEqual(['claudecode:5.0000', 'dsh:5.0200']);
   });
 
   it('names the agents it read, and marks every row, in the text report', async () => {
     const { code, stdout } = await cli(['usage', '--no-update']);
     expect(code).toBe(0);
-    expect(stdout).toContain('claude·dsh');
+    expect(stdout).toContain('claudecode·dsh');
     expect(stdout).toContain('2 会话');
     expect(stdout).toContain('· dsh');
-    expect(stdout).toContain('· claude');
+    expect(stdout).toContain('· claudecode');
     // One metric line per agent, then the node's own total.
-    expect(stdout).toMatch(/\n\s+claude {2}I\/M/);
+    expect(stdout).toMatch(/\n\s+claudecode\s+I\/M/);
     expect(stdout).toMatch(/\n\s+总 {2}I\/M/);
   });
 
@@ -222,9 +222,9 @@ describe('--agent all', () => {
       agents: { agent: string }[];
       projects: { agents: string[] }[];
     };
-    expect(parsed.agents.map((row) => row.agent)).toEqual(['claude']);
-    expect(parsed.agent).toBe('claude');
-    expect(parsed.projects[0]?.agents).toEqual(['claude']);
+    expect(parsed.agents.map((row) => row.agent)).toEqual(['claudecode']);
+    expect(parsed.agent).toBe('claudecode');
+    expect(parsed.projects[0]?.agents).toEqual(['claudecode']);
     const { stdout } = await cli(['usage', '--no-update'], { DSH_HOME: join(home, 'nowhere') });
     // A single-agent report keeps its unmarked rendering.
     expect(stdout).not.toContain('· claude');
@@ -233,8 +233,17 @@ describe('--agent all', () => {
   it('accepts a comma-separated list and repeated flags alike', async () => {
     const comma = (await usageJson(['--agent', 'dsh,claude'])) as { agents: { agent: string }[] };
     const repeated = (await usageJson(['--agent', 'dsh', '--agent', 'claude'])) as { agents: { agent: string }[] };
-    expect(comma.agents.map((row) => row.agent)).toEqual(['claude', 'dsh']);
+    expect(comma.agents.map((row) => row.agent)).toEqual(['claudecode', 'dsh']);
     expect(repeated.agents).toEqual(comma.agents);
+  });
+
+  it('still accepts the old `claude` id as an alias, and reports the new one', async () => {
+    // The id moved to `claudecode` (the agent, not the vendor), but a rename that
+    // breaks every existing script earns nothing: the old name keeps working.
+    const alias = (await usageJson(['--agent', 'claude'])) as { agent: string; agents: { agent: string }[] };
+    const canonical = (await usageJson(['--agent', 'claudecode'])) as { agent: string };
+    expect(alias.agents.map((row) => row.agent)).toEqual(['claudecode']);
+    expect(alias.agent).toBe(canonical.agent);
   });
 
   it('rejects an unknown id inside a list, naming it', async () => {
@@ -256,9 +265,9 @@ describe('--agent all', () => {
       agents: string[];
       projects: { sessions: { id: string; agent: string }[] }[];
     };
-    expect(parsed.agents).toEqual(['claude', 'dsh']);
+    expect(parsed.agents).toEqual(['claudecode', 'dsh']);
     const rows = parsed.projects.flatMap((project) => project.sessions);
-    expect(rows.map((row) => row.agent).sort()).toEqual(['claude', 'dsh']);
+    expect(rows.map((row) => row.agent).sort()).toEqual(['claudecode', 'dsh']);
   });
 });
 
@@ -372,7 +381,7 @@ describe('serve with two agents in one project', () => {
           ),
         ).toBe(dashboard.totals.cost.total);
         // Both agents are still loaded, so the UI can offer the other one again.
-        expect(dashboard.loadedAgents.map((agent) => agent.id).sort()).toEqual(['claude', 'dsh']);
+        expect(dashboard.loadedAgents.map((agent) => agent.id).sort()).toEqual(['claudecode', 'dsh']);
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
           const ended = once(child, 'exit');
@@ -422,5 +431,187 @@ describe('configured projects', () => {
     const warning = parsed.warnings.find((entry) => entry.code === 'configIgnored');
     expect(warning?.message).toMatch(/projects\[0\]\.paths/);
     await rm(join(configHome, 'agent-usages'), { recursive: true, force: true });
+  });
+});
+
+describe('data directories (--agent-dir / comma-separated environment)', () => {
+  /** A second Claude Code config directory, holding one more session. */
+  const EXTRA_SESSION = '99999999-3333-4333-8333-333333333333';
+  let extra: string;
+  /** A copy of the fixture's Claude Code home: the same session in a second root. */
+  let copy: string;
+
+  /** One claude session log, holding one billed request per message id given. */
+  function claudeLog(sessionId: string, messageIds: readonly string[]): string {
+    const lines = [
+      JSON.stringify({ type: 'user', uuid: 'u1', sessionId, timestamp: '2026-09-11T11:59:59.000Z', cwd: CWD }),
+    ];
+    messageIds.forEach((messageId, index) => {
+      lines.push(
+        JSON.stringify({
+          type: 'assistant',
+          uuid: `a${index}`,
+          parentUuid: null,
+          sessionId,
+          timestamp: `2026-09-11T12:00:0${index}.000Z`,
+          cwd: CWD,
+          version: '2.1.278',
+          message: {
+            id: messageId,
+            model: 'deepseek-v4-flash',
+            usage: { input_tokens: 1_000, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          },
+        }),
+      );
+    });
+    return `${lines.join('\n')}\n`;
+  }
+
+  beforeAll(async () => {
+    extra = await mkdtemp(join(tmpdir(), 'agent-usages-cli-extra-'));
+    const project = join(extra, 'projects', '-home-user-ws-shared');
+    await mkdir(project, { recursive: true });
+    await writeFile(join(project, `${EXTRA_SESSION}.jsonl`), claudeLog(EXTRA_SESSION, ['msg-e1']));
+
+    // The same session id in a second directory: a `--resume` in another cwd
+    // writes its own file. Its log repeats the original's request (`msg-a1`) and
+    // adds one of its own, so the union is two requests and either file alone
+    // holds fewer.
+    copy = await mkdtemp(join(tmpdir(), 'agent-usages-cli-copy-'));
+    const copyProject = join(copy, 'projects', '-home-user-ws-shared');
+    await mkdir(copyProject, { recursive: true });
+    await writeFile(join(copyProject, `${CLAUDE_SESSION}.jsonl`), claudeLog(CLAUDE_SESSION, ['msg-a1', 'msg-b2']));
+  });
+
+  afterAll(async () => {
+    await rm(extra, { recursive: true, force: true });
+    await rm(copy, { recursive: true, force: true });
+  });
+
+  /** What `--agent claudecode` reported: requests, session ids, and warnings. */
+  async function claudeReport(
+    args: string[],
+    env: Record<string, string> = {},
+  ): Promise<{ requests: number; ids: string[]; warnings: { code: string; message: string }[] }> {
+    const parsed = (await usageJson(['--agent', 'claudecode', ...args], env)) as {
+      totals: { requests: number };
+      warnings: { code: string; message: string }[];
+      projects: { sessionReports: { id: string }[] }[];
+    };
+    return {
+      requests: parsed.totals.requests,
+      ids: parsed.projects.flatMap((project) => project.sessionReports.map((session) => session.id)),
+      warnings: parsed.warnings,
+    };
+  }
+
+  const standard = (): string => join(home, '.claude');
+
+  it('reads every directory the environment variable lists, ignoring blanks and repeats', async () => {
+    const root = join(home, '.claude');
+    const report = await claudeReport([], {
+      CLAUDE_CONFIG_DIR: `${root}, , ${extra} , ${root}/`,
+    });
+    expect(report.requests).toBe(2);
+    expect(report.ids).toContain(EXTRA_SESSION);
+  });
+
+  it('takes several directories from --agent-dir, either comma-separated or repeated', async () => {
+    const comma = await claudeReport(['--agent-dir', `claudecode=${standard()},${extra}`]);
+    const repeated = await claudeReport([
+      '--agent-dir',
+      `claudecode=${standard()}`,
+      '--agent-dir',
+      `claudecode=${extra}`,
+    ]);
+    expect(comma.requests).toBe(2);
+    expect(repeated.requests).toBe(comma.requests);
+  });
+
+  it('lets --agent-dir win over the environment variable', async () => {
+    const report = await claudeReport(['--agent-dir', `claudecode=${standard()}`], {
+      CLAUDE_CONFIG_DIR: extra,
+    });
+    expect(report.requests).toBe(1);
+    expect(report.ids).not.toContain(EXTRA_SESSION);
+  });
+
+  it('lets the environment variable win over the standard location', async () => {
+    const report = await claudeReport([], { CLAUDE_CONFIG_DIR: extra });
+    expect(report.requests).toBe(1);
+    expect(report.ids).toContain(EXTRA_SESSION);
+  });
+
+  it('counts a session once when two roots hold it', async () => {
+    // The same directory twice, and a copy of it: the session id is what
+    // identifies a session, so its requests are counted once either way.
+    const twice = await claudeReport(['--agent-dir', `claudecode=${standard()},${standard()}/`]);
+    expect(twice.requests).toBe(1);
+    const copied = await claudeReport(['--agent-dir', `claudecode=${standard()},${copy}`]);
+    // The copy's file holds one request the original does not: it is the same
+    // session, so the two files union rather than one replacing the other.
+    expect(copied.requests).toBe(2);
+    expect(copied.ids.filter((id) => id === CLAUDE_SESSION)).toHaveLength(1);
+  });
+
+  it('adds up to one directory when the data is split in two', async () => {
+    const both = await claudeReport(['--agent-dir', `claudecode=${standard()},${extra}`]);
+    const one = await claudeReport(['--agent-dir', `claudecode=${standard()}`]);
+    expect(both.requests).toBe(one.requests + 1);
+  });
+
+  it('skips a directory with no data and says which one', async () => {
+    const missing = join(home, 'nowhere');
+    const report = await claudeReport(['--agent-dir', `claudecode=${standard()},${missing}`]);
+    expect(report.requests).toBe(1);
+    const warning = report.warnings.find((entry) => entry.code === 'agentDirNoData');
+    expect(warning?.message).toContain(missing);
+  });
+
+  it('refuses --home unless exactly one agent is selected', async () => {
+    const several = await cli(['usage', '--agent', 'dsh,claudecode', '--home', home, '--no-update']);
+    expect(several.code).toBe(1);
+    expect(several.stderr).toMatch(/--home/);
+
+    const every = await cli(['usage', '--home', home, '--no-update']);
+    expect(every.code).toBe(1);
+    expect(every.stderr).toMatch(/--home/);
+
+    // One agent is what it is for; the alias resolves like the id.
+    const single = await claudeReport(['--home', standard()]);
+    expect(single.requests).toBe(1);
+  });
+
+  it('refuses --home and --agent-dir for the same agent', async () => {
+    const { code, stderr } = await cli([
+      'usage',
+      '--agent',
+      'claudecode',
+      '--home',
+      standard(),
+      '--agent-dir',
+      `claudecode=${extra}`,
+      '--no-update',
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/--agent-dir|--home/);
+  });
+
+  it('rejects an --agent-dir that names no agent, an unknown one, or nothing at all', async () => {
+    const all = await cli(['usage', '--agent-dir', 'all=/tmp', '--no-update']);
+    expect(all.code).toBe(1);
+    expect(all.stderr).toMatch(/all/);
+
+    const unknown = await cli(['usage', '--agent-dir', 'nope=/tmp', '--no-update']);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toMatch(/nope/);
+
+    const unselected = await cli(['usage', '--agent', 'dsh', '--agent-dir', `claudecode=${extra}`, '--no-update']);
+    expect(unselected.code).toBe(1);
+    expect(unselected.stderr).toMatch(/claudecode/);
+
+    const malformed = await cli(['usage', '--agent-dir', 'claudecode', '--no-update']);
+    expect(malformed.code).toBe(1);
+    expect(malformed.stderr).toMatch(/--agent-dir/);
   });
 });

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { mergeDatasets } from '../../src/core/merge.ts';
+import { mergeDatasets, unionSessionRecords } from '../../src/core/merge.ts';
 import { resolveProjectSelectors } from '../../src/report/index.ts';
 import { dataset, project, record, session } from '../support/dataset.ts';
 
@@ -76,25 +76,25 @@ describe('mergeDatasets', () => {
   });
 
   it('merges one directory read by two agents into one project', async () => {
-    const merged = await mergeDatasets([agentDataset('dsh'), agentDataset('claude')]);
+    const merged = await mergeDatasets([agentDataset('dsh'), agentDataset('claudecode')]);
 
     expect(merged.projects).toHaveLength(1);
     const [project0] = merged.projects;
-    expect(project0?.agents).toEqual(['claude', 'dsh']);
+    expect(project0?.agents).toEqual(['claudecode', 'dsh']);
     expect(project0?.workspaces).toEqual(['/tmp/shared']);
     expect(project0?.sessions).toHaveLength(2);
-    expect(merged.agents).toEqual(['dsh', 'claude']);
-    expect(merged.agent).toBe('dsh+claude');
-    expect(merged.source).toBe('/data/dsh, /data/claude');
+    expect(merged.agents).toEqual(['dsh', 'claudecode']);
+    expect(merged.agent).toBe('dsh+claudecode');
+    expect(merged.source).toBe('/data/dsh, /data/claudecode');
     expect(merged.stats.sessions).toBe(2);
   });
 
   it('keeps each session id as the agent wrote it, with the agent beside it', async () => {
     // Both agents use the same id; only the pair is unique, so the bare id must
     // survive unchanged — a user pastes ids from the agent's own UI.
-    const merged = await mergeDatasets([agentDataset('dsh'), agentDataset('claude')]);
+    const merged = await mergeDatasets([agentDataset('dsh'), agentDataset('claudecode')]);
     const ids = merged.sessions.map((entry) => `${entry.agent}:${entry.id}`).sort();
-    expect(ids).toEqual(['claude:claude-session', 'dsh:dsh-session']);
+    expect(ids).toEqual(['claudecode:claudecode-session', 'dsh:dsh-session']);
     expect(merged.sessions.every((entry) => entry.id.endsWith('-session'))).toBe(true);
   });
 
@@ -115,7 +115,7 @@ describe('mergeDatasets', () => {
 
   it('keeps directories that share no repository apart', async () => {
     const first = agentDataset('dsh', { cwd: join(root, 'plain'), projectId: 'a' });
-    const second = agentDataset('claude', { cwd: join(root, 'main'), projectId: 'b' });
+    const second = agentDataset('claudecode', { cwd: join(root, 'main'), projectId: 'b' });
     const merged = await mergeDatasets([first, second]);
     expect(merged.projects.map((entry) => entry.name).sort()).toEqual(['main', 'plain']);
   });
@@ -136,7 +136,7 @@ describe('mergeDatasets', () => {
 
   it('sums the adapter counters and keeps every warning', async () => {
     const first = agentDataset('dsh');
-    const second = agentDataset('claude');
+    const second = agentDataset('claudecode');
     first.stats.filesRead = ['a.jsonl'];
     second.stats.filesRead = ['b.jsonl', 'a.jsonl'];
     const merged = await mergeDatasets([first, second]);
@@ -145,10 +145,68 @@ describe('mergeDatasets', () => {
   });
 });
 
+describe('a session read twice', () => {
+  it('unions the records by id, keeps the first reading, and takes the earlier facts', () => {
+    const into = session({
+      id: 's1',
+      agent: 'claudecode',
+      cwd: '/first',
+      createdAt: 300,
+      sourceFile: '/first/s1.jsonl',
+      records: [record({ id: 's1:m2', time: 200 }), record({ id: 's1:m1', time: 100 })],
+    });
+    const other = session({
+      id: 's1',
+      agent: 'claudecode',
+      cwd: '/second',
+      createdAt: 50,
+      title: 'named by the second log',
+      sourceFile: '/second/s1.jsonl',
+      records: [record({ id: 's1:m1', time: 100 }), record({ id: 's1:m3', time: 300 })],
+    });
+
+    unionSessionRecords(into, other);
+
+    // `s1:m1` is one API call although both logs carry it; `s1:m3` only the
+    // second one does, and losing it is what a "second file wins" rule costs.
+    expect(into.records.map((entry) => entry.id)).toEqual(['s1:m1', 's1:m2', 's1:m3']);
+    // The reading that placed the session stays the base for its project facts.
+    expect(into.cwd).toBe('/first');
+    expect(into.createdAt).toBe(50);
+    expect(into.title).toBe('named by the second log');
+    expect(into.extra?.['sourceFiles']).toEqual(['/first/s1.jsonl', '/second/s1.jsonl']);
+    expect(other.records).toHaveLength(2);
+  });
+
+  it('counts a session once when two datasets hold it', async () => {
+    const id = 'shared-session';
+    const reading = (name: string, ids: readonly string[]) =>
+      dataset(
+        [
+          project({
+            id: name,
+            name,
+            path: '/tmp/shared',
+            sessions: [session({ id, agent: 'claudecode', cwd: '/tmp/shared', records: ids.map((recordId, index) => record({ id: recordId, time: 100 * (index + 1) })) })],
+          }),
+        ],
+        { agent: 'claudecode', agents: ['claudecode'], source: `/data/${name}` },
+      );
+
+    const merged = await mergeDatasets([reading('first', [`${id}:m1`]), reading('second', [`${id}:m1`, `${id}:m2`])]);
+
+    expect(merged.sessions).toHaveLength(1);
+    expect(merged.sessions[0]?.records.map((entry) => entry.id)).toEqual([`${id}:m1`, `${id}:m2`]);
+    expect(merged.stats.records).toBe(2);
+    expect(merged.projects).toHaveLength(1);
+    expect(merged.projects[0]?.sessions).toHaveLength(1);
+  });
+});
+
 describe('configured projects', () => {
   it('gathers the declared paths under the configured name', async () => {
     const one = agentDataset('dsh', { cwd: join(root, 'main'), projectId: 'main' });
-    const two = agentDataset('claude', { cwd: join(root, 'plain'), projectId: 'plain' });
+    const two = agentDataset('claudecode', { cwd: join(root, 'plain'), projectId: 'plain' });
     const merged = await mergeDatasets([one, two], {
       projects: [{ name: 'Memolink', paths: [join(root, 'main'), join(root, 'plain')] }],
     });
@@ -157,7 +215,7 @@ describe('configured projects', () => {
     const [project0] = merged.projects;
     expect(project0?.name).toBe('Memolink');
     expect(project0?.id).toBe('project:Memolink');
-    expect(project0?.agents).toEqual(['claude', 'dsh']);
+    expect(project0?.agents).toEqual(['claudecode', 'dsh']);
     expect(project0?.workspaces).toEqual([join(root, 'main'), join(root, 'plain')].sort());
     // The configured project spans two repositories, so it claims neither.
     expect(project0?.repo).toBeUndefined();

@@ -388,13 +388,58 @@ describe('reading a Claude Code home', () => {
 
   it('groups sessions under the project their cwd names', async () => {
     const data = await claudeAgent.load({ home });
-    expect(data.agent).toBe('claude');
+    expect(data.agent).toBe('claudecode');
     expect(data.projects).toHaveLength(1);
     expect(data.projects[0]?.path).toBe('/tmp/demo');
     expect(data.projects[0]?.name).toBe('demo');
     expect(data.stats.records).toBe(2);
     expect(await claudeAgent.hasData(home)).toBe(true);
     expect(await claudeAgent.hasData(join(home, 'nope'))).toBe(false);
+  });
+});
+
+describe('one session with two logs', () => {
+  it('folds a session resumed in another working directory into one row', async () => {
+    // `--resume` in a different cwd makes Claude Code open a second file under
+    // *that* directory's project, with the same session id: one conversation in
+    // two logs. What both logs repeat is one API call and what only the second
+    // holds is not a duplicate, so the two files union instead of the second one
+    // replacing the first (or being dropped).
+    const id = 'bbbbbbbb-1111-4111-8111-00000000000b';
+    const entry = (uuid: string, messageId: string, time: string, cwd: string): string =>
+      JSON.stringify({
+        type: 'assistant',
+        uuid,
+        parentUuid: null,
+        sessionId: id,
+        timestamp: time,
+        cwd,
+        message: {
+          id: messageId,
+          model: 'deepseek-flash',
+          usage: { input_tokens: 1_000, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        },
+      });
+    const elsewhere = join(home, 'projects', '-tmp-elsewhere');
+    await mkdir(elsewhere, { recursive: true });
+    await writeFile(
+      join(home, 'projects', '-tmp-demo', `${id}.jsonl`),
+      `${entry('orig-1', 'msg-orig', '2026-09-24T00:00:01.000Z', '/tmp/demo')}\n`,
+    );
+    await writeFile(
+      join(elsewhere, `${id}.jsonl`),
+      [
+        // The same call the original log already billed, written again under the
+        // new cwd, plus one the original log does not have.
+        entry('moved-1', 'msg-orig', '2026-09-24T00:00:01.000Z', '/tmp/elsewhere'),
+        entry('moved-2', 'msg-new', '2026-09-24T00:00:02.000Z', '/tmp/elsewhere'),
+      ].join('\n') + '\n',
+    );
+
+    const data = await claudeAgent.load({ home });
+    const rows = data.sessions.filter((session) => session.id === id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.records.map((candidate) => candidate.id)).toEqual([`${id}:msg-orig`, `${id}:msg-new`]);
   });
 });
 

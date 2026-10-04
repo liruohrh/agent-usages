@@ -127,6 +127,8 @@ export const en: Messages = {
     defaultSource: 'Default data dir',
     unknownSource: '(cannot be determined automatically)',
     envVars: 'Environment',
+    aliases: 'Input aliases',
+    noAliases: '(none)',
     providers: 'Pricing providers (--provider):',
     models: 'Models',
   },
@@ -167,8 +169,9 @@ export const en: Messages = {
   },
   help: {
     program: 'Token usage and cost for coding agents',
-    agent: 'agent (defaults to all: every installed agent; comma-separate or repeat, e.g. `dsh,codex`)',
-    home: "the agent's data directory (defaults to its environment variable or standard location)",
+    agent: 'agent (defaults to all: every installed agent; comma-separate or repeat, e.g. `dsh,codex`; `claude` is the old spelling of `claudecode` and still works)',
+    home: "data directory; only with exactly one agent selected (defaults to that agent's environment variable or standard location)",
+    agentDir: 'data directories for one agent, repeatable; the value may be a comma-separated list (wins over the agent\u2019s environment variable, which wins over its standard location)',
     provider: 'pin prices to one table (default: pick the table per record, from its model; see `agents`)',
     json: 'print JSON',
     noUpdate: 'do not check for price or rate updates this run; use the local cache',
@@ -388,14 +391,28 @@ export const en: Messages = {
     noUsageData: (p: { home: string; known: string }) =>
       `no usage data found under ${p.home}; point at it with --agent / --home (currently supported: ${p.known})`,
     defaultLocation: 'the default location',
+    /* ---- where each agent's data lives: one agent, one or more directories ---- */
+    allAgents: 'all (no agent named)',
+    homeNeedsOneAgent: (p: { agents: string }) =>
+      `--home takes exactly one agent (currently selected: ${p.agents}); for several agents use --agent-dir <agent>=<path>[,<path>…], or set each agent's own environment variable`,
+    agentDirHomeConflict: (p: { agent: string }) =>
+      `--home and --agent-dir ${p.agent}=… both name the data directory of the same agent; pick one (--agent-dir takes several directories, --home takes one)`,
+    agentDirNotAnAgent: () =>
+      '--agent-dir cannot take all: all is the selection "every installed agent", not an agent; name one, e.g. --agent-dir claudecode=/a,/b',
+    agentDirNotSelected: (p: { agent: string; selected: string }) =>
+      `--agent-dir names ${p.agent}, which is not among the agents this --agent selected (${p.selected})`,
+    agentDirMalformed: (p: { value: string }) =>
+      `--agent-dir wants <agent>=<path>[,<path>…], got ${p.value}`,
+    agentDirNoData: (p: { agent: string; path: string }) => `${p.agent}: nothing under ${p.path}, skipped that directory.`,
+    agentDirUnreadable: (p: { agent: string; path: string; reason: string }) =>
+      `${p.agent}: ${p.path} could not be read (${p.reason}), skipped that directory.`,
     servePortNotInteger: (p: { value: string }) => `--port wants an integer 0…65535, got ${p.value}`,
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh wants a non-negative number of seconds, got ${p.value}`,
     serveOptionUnsupported: (p: { option: string }) =>
       `serve does not take ${p.option}: the dashboard picks its pricing table per model and always answers as a web page plus a JSON API; drop the flag and try again`,
     /* ---- dashboard warnings: they travel to the page, so they carry a code ---- */
-    serveAgentNoRoot: (p: { agent: string }) =>
-      `${p.agent}: no default data directory found, skipped (point --home at one to include it).`,
-    serveAgentNoData: (p: { agent: string; source: string }) => `${p.agent}: nothing readable under ${p.source}, skipped.`,
+    serveAgentNoRoot: (p: { agent: string; id: string }) =>
+      `${p.agent}: no default data directory found, skipped (point --agent-dir ${p.id}=<path> at one to include it).`,
     serveAgentLoadFailed: (p: { agent: string; reason: string }) => `${p.agent}: could not be read (${p.reason}), skipped.`,
     snapshotReadOnly: (p: { path: string }) =>
       `snapshot mode (--snapshot ${p.path}) never rescans; drop the flag to scan live.`,

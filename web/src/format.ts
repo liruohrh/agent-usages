@@ -251,7 +251,7 @@ export function bucketLabel(key: (typeof TOKEN_BUCKETS)[number]['key']): string 
 const AGENT_COLORS: Record<string, string> = {
   dsh: '#58a6ff',
   pi: '#a78bfa',
-  claude: '#f59e0b',
+  claudecode: '#f59e0b',
   codex: '#34d399',
 };
 
@@ -265,7 +265,7 @@ export function agentLabel(id: string): string {
   const known: Record<string, string> = {
     dsh: 'DSH',
     pi: 'pi',
-    claude: 'Claude',
+    claudecode: 'Claude',
     codex: 'Codex',
   };
   return known[id] ?? id;

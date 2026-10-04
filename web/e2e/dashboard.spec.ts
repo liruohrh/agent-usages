@@ -85,7 +85,7 @@ interface ApiDashboard {
 }
 
 /** Agent ids as the badges write them. */
-const AGENT_LABELS: Record<string, string> = { dsh: 'DSH', pi: 'pi', claude: 'Claude', codex: 'Codex' };
+const AGENT_LABELS: Record<string, string> = { dsh: 'DSH', pi: 'pi', claudecode: 'Claude', codex: 'Codex' };
 
 /** Fetch `/api/dashboard` from inside the page — the same request the app made. */
 async function apiDashboard(page: Page): Promise<ApiDashboard> {
@@ -352,6 +352,12 @@ test.describe('scope switching', () => {
     const subtotals = dashboard.subtotals ?? [];
     // The tracked synthetic fixture predates the field; the local snapshot has it.
     test.skip(subtotals.length === 0, 'this snapshot carries no per-price-list rows');
+    // One list quoted in the display currency says nothing the total line has not,
+    // so the page leaves the block out — and there is no row to compare against.
+    test.skip(
+      subtotals.length === 1 && subtotals[0]?.currency === dashboard.currency,
+      'a single price list in the display currency is not drawn',
+    );
 
     const rows = await rowsOf(page, '按表小计');
     expect(rows, 'one row per (price list, currency)').toHaveLength(subtotals.length);
@@ -700,7 +706,10 @@ test.describe('the session leaderboard', () => {
     const costChart = page.locator('[data-chart="cost"]');
     const rows = await costChart.locator('li').allInnerTexts();
     expect(rows[0]).toContain(dearest?.title ?? '');
-    expect(rows[0]).toContain(((Number(dearest?.cost.total ?? 0) / total) * 100).toFixed(1));
+    // Compare the share as a number: the page trims a trailing `.0` (`40.0%` is
+    // drawn as `40%`), and which one it is depends on the data.
+    const shownShare = Number(((rows[0]?.match(/([\d.]+)%/) ?? [])[1] ?? 'NaN'));
+    expect(Math.abs(shownShare - (Number(dearest?.cost.total ?? 0) / total) * 100)).toBeLessThan(0.1);
 
     // And it folds back.
     await page.locator('main section header').getByRole('button', { name: '收起图表' }).click();

@@ -2,7 +2,7 @@
 
 `pi` 是 [earendil-works/pi](https://github.com/earendil-works/pi)（本机 checkout：`~/ws/piexts/pi`）的 coding agent。适配器只读 pi 自己写的会话文件，**不依赖任何扩展**。
 
-数据目录默认 `~/.pi/agent`，可用 `PI_CODING_AGENT_DIR` 或 `--home` 覆盖；`PI_CODING_AGENT_SESSION_DIR` 可把会话目录单独挪走。
+数据目录默认 `~/.pi/agent`，可用 `PI_CODING_AGENT_DIR`（逗号分隔可写多个目录）或 `--agent-dir pi=…` / `--home`（后者只在只选一个 agent 时可用）覆盖；`PI_CODING_AGENT_SESSION_DIR` 可把会话目录单独挪走（仍是单值，不按逗号切）。
 
 ## 读取哪些文件
 

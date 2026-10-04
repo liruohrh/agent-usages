@@ -43,6 +43,7 @@ import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRec
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
+import { splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable Codex honours for its home directory. */
 const ENV_HOME = 'CODEX_HOME';
@@ -478,7 +479,7 @@ function firstUsageOf(session: SessionRecord): number {
 /** Read a Codex home into the agent-neutral dataset. */
 async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const env = options.env ?? process.env;
-  const source = options.home ?? defaultSource(env) ?? '';
+  const source = options.home ?? defaultSources(env)[0] ?? '';
   const warnings: Warning[] = [];
   if (options.home !== undefined && !isAbsolute(options.home)) {
     throw new UserError('codexHomeNotAbsolute', { value: JSON.stringify(options.home) });
@@ -696,11 +697,15 @@ async function readThreadTitles(home: string): Promise<Map<string, string>> {
   return titles;
 }
 
-/** Default data root: `~/.codex`. */
-function defaultSource(env: NodeJS.ProcessEnv): string | null {
+/**
+ * Default data roots: `~/.codex`, or every root `CODEX_HOME` names.
+ *
+ * The variable may hold several directories, comma-separated.
+ */
+function defaultSources(env: NodeJS.ProcessEnv): readonly string[] {
   const explicit = env[ENV_HOME];
-  if (explicit !== undefined && explicit.length > 0) return explicit;
-  return join(homedir(), '.codex');
+  const named = explicit === undefined ? [] : uniqueRoots(splitRoots(explicit));
+  return named.length > 0 ? named : [join(homedir(), '.codex')];
 }
 
 export const codexAgent: AgentAdapter = {
@@ -708,7 +713,7 @@ export const codexAgent: AgentAdapter = {
   label: 'Codex CLI',
   sessionNoun: t().errors.codexSessionNoun,
   envVars: [ENV_HOME],
-  defaultSource,
+  defaultSources,
   hasData: async (source) => (await findRollouts(join(source, 'sessions'))).length > 0,
   load,
   notes: () => t().errors.codexNotes(),

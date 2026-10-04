@@ -1,6 +1,6 @@
 # Claude Code 适配器
 
-`claude` 读 [Claude Code](https://claude.com/claude-code) 自己写的会话文件，不依赖任何插件。配置目录默认 `~/.claude`，可用 `CLAUDE_CONFIG_DIR` 或 `--home` 覆盖。
+`claudecode`（旧写法 `claude` 仍可用）读 [Claude Code](https://claude.com/claude-code) 自己写的会话文件，不依赖任何插件。配置目录默认 `~/.claude`，可用 `CLAUDE_CONFIG_DIR`（逗号分隔可写多个目录）或 `--agent-dir claudecode=…` / `--home`（后者只在只选一个 agent 时可用）覆盖。
 
 ## 用 DeepSeek 跑 Claude Code（官方接法）
 

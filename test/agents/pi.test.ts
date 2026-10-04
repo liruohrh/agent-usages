@@ -155,7 +155,8 @@ describe('reading a pi home', () => {
   it('recognises a pi home and honours its agent-directory variable', async () => {
     expect(await piAgent.hasData(home)).toBe(true);
     expect(await piAgent.hasData(join(home, 'nope'))).toBe(false);
-    expect(piAgent.defaultSource({ PI_CODING_AGENT_DIR: home })).toBe(home);
-    expect(piAgent.defaultSource({})).toMatch(/\.pi[/\\]agent$/);
+    expect(piAgent.defaultSources({ PI_CODING_AGENT_DIR: home })).toEqual([home]);
+    expect(piAgent.defaultSources({ PI_CODING_AGENT_DIR: `${home},/other` })).toEqual([home, '/other']);
+    expect(piAgent.defaultSources({})[0]).toMatch(/\.pi[/\\]agent$/);
   });
 });

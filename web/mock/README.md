@@ -26,9 +26,18 @@ pnpm web:snapshot     # → web/mock/dashboard.snapshot.json（约 650 KB）
 你本机那份）。
 
 ```sh
-# 改完 fixtures/ 之后重新生成（--home 必须是绝对路径：适配器只接受绝对路径）
+# 改完 fixtures/ 之后重新生成（--home 必须是绝对路径：适配器只接受绝对路径；
+# --home 只允许配一个 agent，这里正好一个）
 node src/serve/main.ts --write-snapshot web/mock/ci.snapshot.json \
-  --home "$PWD/web/mock/fixtures/claude" --agent claude
-node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json   # 56 项
+  --home "$PWD/web/mock/fixtures/claude" --agent claudecode
+# 快照里的 sourceFile / source 是本机绝对路径，入库前必须替换成中性路径，
+# 否则就把开发机的目录结构写进了版本库（下面的脚本把当前仓库根换掉）：
+python3 - <<'EOF'
+import os
+from pathlib import Path
+p = Path('web/mock/ci.snapshot.json')
+p.write_text(p.read_text().replace(os.getcwd(), '/home/demo/agent-usages'), encoding='utf-8')
+EOF
+node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json
 ```
 

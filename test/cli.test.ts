@@ -508,15 +508,29 @@ describe('agent and provider selection', () => {
 
   it('fails clearly when no agent matches the data root', async () => {
     const empty = await mkdtemp(join(tmpdir(), 'agent-usages-none-'));
-    const { code, stderr } = await cli(['usage', '--home', empty], { HOME: empty });
+    // `--home` is one directory for one agent, so it names the agent too; the
+    // empty root is then a "nothing here", not a "which agent did you mean".
+    const { code, stderr } = await cli(['usage', '--agent', 'dsh', '--home', empty], { HOME: empty });
     expect(code).toBe(1);
-    expect(stderr).toMatch(/没有找到可统计的用量数据/);
+    expect(stderr).toContain(`在 ${empty} 下没有找到 DSH 用量数据`);
+    await rm(empty, { recursive: true, force: true });
+  });
+
+  it('refuses --home when the run would read several agents', async () => {
+    const empty = await mkdtemp(join(tmpdir(), 'agent-usages-none-'));
+    const { code, stderr } = await cli(['usage', '--home', empty, '--no-update'], { HOME: empty, DSH_HOME: empty });
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/--home/);
+    expect(stderr).toMatch(/--agent-dir/);
     await rm(empty, { recursive: true, force: true });
   });
 
   it('reports a missing data root without a stack trace', async () => {
-    const { code, stderr } = await cli(['usage', '--home', join(home, 'missing')]);
+    // `--home` names one agent, so the missing root is the agent's own diagnostic
+    // — not the "which agent did you mean" error the empty flag would raise.
+    const { code, stderr } = await cli(['usage', '--agent', 'dsh', '--home', join(home, 'missing')]);
     expect(code).toBe(1);
+    expect(stderr).toContain(join(home, 'missing'));
     expect(stderr).not.toContain('at Object.');
   });
 });
@@ -628,7 +642,7 @@ describe('git repositories', () => {
     await writeLog(main, 'session-11111111-0000-4000-8000-0000000000aa');
     await writeLog(worktree, 'session-22222222-0000-4000-8000-0000000000bb');
 
-    const { stdout } = await cli(['usage', '--home', repoHome, '--no-update']);
+    const { stdout } = await cli(['usage', '--agent', 'dsh', '--home', repoHome, '--no-update']);
     expect(stdout).toContain('repo 仓库 · 2 个项目');
     expect(stdout).toContain('· git worktree · lynx-rewrite');
     // The repository line carries the sum of the two projects under it.

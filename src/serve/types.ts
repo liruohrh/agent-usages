@@ -33,7 +33,7 @@ export interface DashboardWarning {
 
 /** One agent's figures inside a scope (global, a project, a workspace). */
 export interface AgentTotals {
-  /** Adapter id: `dsh` / `pi` / `claude` / `codex`. */
+  /** Adapter id: `dsh` / `pi` / `claudecode` / `codex`. */
   id: string;
   /** Display name. */
   label: string;

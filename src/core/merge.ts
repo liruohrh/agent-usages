@@ -25,7 +25,7 @@
 import { repoOf } from './git.ts';
 import { basenameOf, canonicalPath, normalizePath } from './paths.ts';
 import type { Warning } from '../i18n/errors.ts';
-import type { DatasetStats, ProjectRecord, RepoInfo, RepoKind, SessionRecord, UsageDataset } from './types.ts';
+import type { DatasetStats, ProjectRecord, RepoInfo, RepoKind, SessionRecord, UsageDataset, UsageRecord } from './types.ts';
 
 /**
  * A project the user declared in `~/.config/agent-usages/config.json`.
@@ -109,6 +109,54 @@ function firstUsageOf(session: SessionRecord): number {
   return Number.POSITIVE_INFINITY;
 }
 
+/** Order two records the way one session's log is read: by time, then by id. */
+function byTimeThenId(left: UsageRecord, right: UsageRecord): number {
+  return left.time - right.time || left.id.localeCompare(right.id);
+}
+
+/** Every path a session's `extra.sourceFiles` already lists. */
+function sourceFilesOf(session: SessionRecord): string[] {
+  const listed = session.extra?.['sourceFiles'];
+  return Array.isArray(listed) ? listed.filter((path): path is string => typeof path === 'string') : [];
+}
+
+/**
+ * Fold one reading of a session into another.
+ *
+ * A session is one conversation, but it can be read more than once: two data
+ * roots that overlap, two project directories that hold the same session id
+ * because the session was resumed in another working directory, a `--resume`
+ * that copied the parent's history into a new file. In all of them the session
+ * is counted **once**, and its requests are the union — keyed by
+ * {@link UsageRecord.id}, which identifies one API call — so nothing is lost to
+ * whichever file the reader happened to open second, and nothing is charged
+ * twice for a prefix both files carry.
+ *
+ * The session already in the dataset (the first one read) is the base: it keeps
+ * its project and working directory, and adopts the other reading's records,
+ * the earlier creation time, a title it lacks, and the other file's path.
+ *
+ * @param into - the session already placed in the dataset; it is mutated.
+ * @param other - another reading of the same session (`agent` and `id` equal).
+ */
+export function unionSessionRecords(into: SessionRecord, other: SessionRecord): void {
+  if (other.records.length > 0) {
+    const known = new Set(into.records.map((record) => record.id));
+    const added = other.records.filter((record) => !known.has(record.id));
+    if (added.length > 0) into.records = [...into.records, ...added].sort(byTimeThenId);
+  }
+  if (other.createdAt !== null && (into.createdAt === null || other.createdAt < into.createdAt)) {
+    into.createdAt = other.createdAt;
+  }
+  if (into.title === null) into.title = other.title;
+  // One session, two files: the copy the reader is looking at is the base's, but
+  // both are real paths to the same conversation, so both are kept.
+  const paths = [...new Set([...sourceFilesOf(into), into.sourceFile, other.sourceFile].filter(
+    (path): path is string => typeof path === 'string' && path.length > 0,
+  ))];
+  if (paths.length > 1) into.extra = { ...(into.extra ?? {}), sourceFiles: paths };
+}
+
 /**
  * Merge one project's repository facts into one description.
  *
@@ -181,7 +229,10 @@ export async function mergeDatasets(
   // session list is authoritative — a session the adapter left out of its
   // projects is still usage and still has to be counted.
   const workspaces = new Map<string, Workspace>();
-  const seen = new Set<string>();
+  // Identity → the session already placed. It is a map, not a set, because a
+  // second reading of one session is not a duplicate to drop: its records are
+  // folded into the session that is already there (see `unionSessionRecords`).
+  const seen = new Map<string, SessionRecord>();
   for (const dataset of present) {
     const owningProject = new Map<string, ProjectRecord>();
     for (const project of dataset.projects) {
@@ -195,8 +246,12 @@ export async function mergeDatasets(
       .filter((session) => !dataset.sessions.some((candidate) => candidate.id === session.id));
     for (const session of [...roster, ...extras]) {
       const identity = `${session.agent}:${session.id}`;
-      if (seen.has(identity)) continue;
-      seen.add(identity);
+      const already = seen.get(identity);
+      if (already !== undefined) {
+        unionSessionRecords(already, session);
+        continue;
+      }
+      seen.set(identity, session);
       const project = owningProject.get(session.id);
       const path = session.cwd ?? (project?.path !== undefined && project.path.length > 0 ? project.path : '');
       const key = path.length > 0 ? `w:${normalizePath(path)}` : `p:${session.agent}:${project?.id ?? '<none>'}`;

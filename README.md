@@ -6,7 +6,7 @@
 
 | 维度 | 作用 | 当前支持 |
 | --- | --- | --- |
-| **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness）、`pi`、`claude`（Claude Code）、`codex`（Codex）；默认**全部** |
+| **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness）、`pi`、`claudecode`（Claude Code）、`codex`（Codex）；默认**全部**（`claude` 是 `claudecode` 的旧写法，仍可用） |
 | **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek）、`openai`（OpenAI）、`anthropic`（Anthropic）、`moonshot`（Kimi）、`zhipu`（GLM） |
 
 两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱，因此新增任何一方都只是加一个模块 + 一条注册项（见[架构与扩展](docs/architecture.md)）。
@@ -81,11 +81,13 @@ agent-usages usage                          # 默认：全部已安装的 agent
 agent-usages usage --agent dsh              # 只看一个
 agent-usages usage --agent dsh,codex        # 逗号分隔
 agent-usages usage --agent dsh --agent codex  # 重复给出，等价
-agent-usages usage --home /path/to/.dsh     # 显式指定数据目录（对所有被选中的 agent 生效）
+agent-usages usage --home /path/to/.dsh     # 显式指定数据目录（只在只选一个 agent 时可用）
+agent-usages usage --agent claudecode --agent-dir claudecode=/work/.claude,/home/me/.claude
+                                            # 一个 agent 可以有多个目录（可重复；逗号分隔）
 agent-usages agents                         # 看每个 agent 认哪些环境变量、默认目录在哪
 ```
 
-`--home` 也可用各 agent 自己的环境变量替代：DSH 用 `DSH_HOME`（默认 `~/.dsh`），pi 用 `PI_CODING_AGENT_DIR`（默认 `~/.pi/agent`），Claude Code 用 `CLAUDE_CONFIG_DIR`（默认 `~/.claude`），Codex 用 `CODEX_HOME`（默认 `~/.codex`）。`--agent` / `--home` / `--provider` / `--json` 都是全局选项，放在子命令前后都可以。
+数据目录的三种指定方式，优先级从高到低：`--agent-dir <agent>=<路径>[,<路径>…]`（可重复，一个 agent 可以多个目录）、该 agent 自己的环境变量（值里也可以写逗号分隔的多个目录）、适配器的标准位置。环境变量：DSH 用 `DSH_HOME`（默认 `~/.dsh`），pi 用 `PI_CODING_AGENT_DIR`（默认 `~/.pi/agent`），Claude Code 用 `CLAUDE_CONFIG_DIR`（默认 `~/.claude`），Codex 用 `CODEX_HOME`（默认 `~/.codex`）。`--home` 是「一个目录给一个 agent」的简写，因此只在恰好选中一个 agent 时有效。`--agent` / `--agent-dir` / `--home` / `--provider` / `--json` 都是全局选项，放在子命令前后都可以。
 
 ---
 
@@ -112,7 +114,7 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 | `--currency-rate <rate>` | 1 单位计价货币 = <rate> 单位显示货币；只给汇率不给币种时照常折算但不显示货币 |
 | `--rate-mode <mode>` | `latest`（默认，全程一个汇率）/ `historical`（按每条记录当天的汇率） |
 | `--agent <id,...>` | 读哪些 agent；默认 `all`（所有已安装的），可逗号分隔或重复；见[目标 agent](#目标-agent-与数据目录) |
-| `--home` / `--provider` / `--json` / `--no-update` | 见上 |
+| `--agent-dir` / `--home` / `--provider` / `--json` / `--no-update` | 见上 |
 
 ### `session list`
 
@@ -307,8 +309,8 @@ demo-app (~/ws/apps/demo-app) 2026-08-16
 
 ### 多 agent 时的输出
 
-- 头部 `Agent` 一行列出本次读到的所有 agent：`Agent  claude·dsh`。
-- 项目行标注涉及的 agent 与会话数：`shared · 2026-09-11 · claude·dsh · 2 会话 · 0 子代理`。
+- 头部 `Agent` 一行列出本次读到的所有 agent：`Agent  claudecode·dsh`。
+- 项目行标注涉及的 agent 与会话数：`shared · 2026-09-11 · claudecode·dsh · 2 会话 · 0 子代理`。
 - 项目的指标行**按 agent 分列**：每个 agent 一行，最后一行是该项目自己的 `总`；各 agent 行逐项相加正好等于总计。
 - 会话与子代理行以 `· agent` 结尾。
 - **只读到一个 agent 时保持原样**：单 agent 报告不重复标同一个 id（上面这些标记只在合并了多个 agent 时出现）。

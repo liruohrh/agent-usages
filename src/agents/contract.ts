@@ -42,6 +42,14 @@ export interface AdapterOptions {
 export interface AgentAdapter {
   /** Stable id, e.g. `dsh`. Used by `--agent` and reported in JSON output. */
   id: string;
+  /**
+   * Other names `--agent` accepts for this adapter, matched case-insensitively.
+   *
+   * A rename is cheap for us and expensive for the people who typed the old id
+   * into a script, so an id that ever shipped keeps an alias. Aliases appear only
+   * on input: everything reported, grouped or linked uses {@link AgentAdapter.id}.
+   */
+  aliases?: readonly string[] | undefined;
   /** Human-readable name. */
   label: string;
   /** What this agent calls a session, for display (`会话`). */
@@ -52,11 +60,18 @@ export interface AgentAdapter {
    */
   envVars: readonly string[];
   /**
-   * Default data root, given an environment.
+   * Data roots this adapter reads when nothing else names one, given an environment.
+   *
+   * Several roots mean the agent's data is split across directories (a work home
+   * and a personal one, say) and all of them are read; a variable that holds
+   * several paths spells them comma-separated. An empty list means no root can be
+   * determined at all — no environment variable and no home directory to default
+   * to — which the adapter's own `load` reports in its own words.
+   *
    * @param env - environment to read.
-   * @returns the absolute default root, or `null` when it cannot be determined.
+   * @returns the absolute roots, in precedence order, without duplicates.
    */
-  defaultSource(env: NodeJS.ProcessEnv): string | null;
+  defaultSources(env: NodeJS.ProcessEnv): readonly string[];
   /**
    * Whether this agent's data looks present at a root.
    * @param source - absolute data root.

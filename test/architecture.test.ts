@@ -228,7 +228,7 @@ describe('architecture', () => {
       'resolveAgent', 'resolveProjectSelectors', 'resolveRange',
       'resolveSessionSelectors', 'runQuery', 'scalePerMillion', 'seedDate', 'seedTable',
       'selectCurrency', 'sessionListToJson', 'shippedRateConfig', 'sumAmounts', 'sumTokens',
-      'summarize', 'toNumber', 'trimDecimal', 'usageToJson', 'workspacePathsOf', 'zoneTime',
+      'summarize', 'toNumber', 'trimDecimal', 'unionSessionRecords', 'usageToJson', 'workspacePathsOf', 'zoneTime',
     ]);
   });
 });

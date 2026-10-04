@@ -24,6 +24,8 @@ interface Args {
   open?: boolean;
   refresh?: number;
   agent?: string;
+  /** `--agent-dir <agent>=<path>[,<path>…]`, every occurrence in order. */
+  agentDir?: string[];
   home?: string;
   snapshot?: string;
   dev?: boolean;
@@ -34,7 +36,16 @@ interface Args {
   help?: boolean;
 }
 
-const USAGE = `用法：agent-usages serve [选项]
+/**
+ * The `--help` text.
+ *
+ * The three option lines that carry semantics — which agents, where their data
+ * is, and the fact that `--home` takes one agent — are the CLI's own strings, so
+ * the two entry points cannot drift apart in what they promise.
+ * @returns the usage block.
+ */
+function usage(): string {
+  return `用法：agent-usages serve [选项]
 
 起一个本地 Web 数据分析平台：项目 → 工作区 → 会话 → 子代理，按 agent 分列与
 总计的消耗、时间序列、模型与计价区间明细。只读，默认只绑本地回环地址。
@@ -43,8 +54,9 @@ const USAGE = `用法：agent-usages serve [选项]
   -p, --port <端口>        监听端口（默认 7788，0 表示随机空闲端口）
       --host <地址>        绑定地址（默认 127.0.0.1）
       --open               启动后用系统浏览器打开
-      --agent <选择>       要读的 agent：all（默认）、dsh、dsh,pi
-      --home <路径>        指定数据根目录（原样传给各适配器）
+      --agent <选择>       ${t().help.agent}
+      --agent-dir <spec>   ${t().help.agentDir}
+      --home <路径>        ${t().help.home}
       --refresh <秒>       每隔多少秒重扫一次（默认不重扫）
       --snapshot <文件>    读离线 JSON 快照，不扫描任何 agent 数据
       --dev                前端走 Vite 开发服务器（默认代理到 127.0.0.1:5173）
@@ -55,8 +67,10 @@ const USAGE = `用法：agent-usages serve [选项]
   -h, --help               显示本帮助
 
 环境变量：DSH_HOME / PI_CODING_AGENT_DIR / CLAUDE_CONFIG_DIR / CODEX_HOME 与各
-适配器一致；AGENT_USAGES_WEB_DIST 可覆盖前端构建产物目录。
+适配器一致，值可以是逗号分隔的多个目录；AGENT_USAGES_WEB_DIST 可覆盖前端构建
+产物目录。
 `;
+}
 
 /** Parse the flags above, rejecting anything unknown rather than guessing. */
 export function parseArgs(argv: readonly string[]): Args {
@@ -97,6 +111,10 @@ export function parseArgs(argv: readonly string[]): Args {
       }
       case '--agent':
         args.agent = next();
+        break;
+      case '--agent-dir':
+        // Not comma-split here: the value's own commas separate directories.
+        args.agentDir = [...(args.agentDir ?? []), next()];
         break;
       case '--home':
         args.home = next();
@@ -142,12 +160,13 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     return 1;
   }
   if (args.help === true) {
-    process.stdout.write(USAGE);
+    process.stdout.write(usage());
     return 0;
   }
 
   const scan = {
     ...(args.agent === undefined ? {} : { agent: args.agent }),
+    ...(args.agentDir === undefined ? {} : { agentDirs: args.agentDir }),
     ...(args.home === undefined ? {} : { home: args.home }),
     ...(args.snapshot === undefined ? {} : { snapshot: args.snapshot }),
     noUpdate: args.noUpdate ?? true,

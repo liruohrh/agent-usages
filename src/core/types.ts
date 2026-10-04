@@ -202,7 +202,7 @@ export interface UsageDataset {
   /**
    * Agent the dataset came from, e.g. `dsh`.
    *
-   * A merged dataset covers several agents; it joins their ids (`dsh+claude`)
+   * A merged dataset covers several agents; it joins their ids (`dsh+claudecode`)
    * and lists them individually in {@link agents}. The per-session
    * {@link SessionRecord.agent} is the authoritative answer.
    */

@@ -24,12 +24,25 @@ export const DEFAULT_AGENT = dshAgent.id;
 
 /**
  * Look up an agent adapter.
- * @param id - agent id, matched case-insensitively.
+ * @param id - agent id or one of its aliases, matched case-insensitively.
  * @returns the adapter, or `undefined` when this build has no such agent.
  */
 export function findAgent(id: string): AgentAdapter | undefined {
   const wanted = id.trim().toLowerCase();
-  return AGENT_ADAPTERS.find((adapter) => adapter.id.toLowerCase() === wanted);
+  return AGENT_ADAPTERS.find(
+    (adapter) =>
+      adapter.id.toLowerCase() === wanted ||
+      (adapter.aliases ?? []).some((alias) => alias.toLowerCase() === wanted),
+  );
+}
+
+/**
+ * Every name an adapter answers to, its own id first.
+ * @param adapter - the adapter.
+ * @returns the id followed by its aliases.
+ */
+export function namesOf(adapter: AgentAdapter): readonly string[] {
+  return [adapter.id, ...(adapter.aliases ?? [])];
 }
 
 /**
@@ -41,7 +54,7 @@ export function findAgent(id: string): AgentAdapter | undefined {
 export function requireAgent(id: string): AgentAdapter {
   const adapter = findAgent(id);
   if (adapter === undefined) {
-    const known = AGENT_ADAPTERS.map((candidate) => candidate.id).join('、');
+    const known = AGENT_ADAPTERS.map((candidate) => candidate.id).join(t().period.listJoin);
     throw new UserError('unknownAgent', { id, known });
   }
   return adapter;
@@ -66,17 +79,32 @@ export async function resolveAgent(
 ): Promise<AgentAdapter> {
   if (requested !== undefined) return requireAgent(requested);
 
-  const candidates = await detectAgents(home, env);
+  const candidates = await detectAgents({ home, env });
   const [only] = candidates;
   if (candidates.length === 1 && only !== undefined) return only;
   if (candidates.length > 1) {
-    const named = candidates.map((adapter) => adapter.id).join('、');
+    const named = candidates.map((adapter) => adapter.id).join(t().period.listJoin);
     throw new UserError('multipleAgents', { home: home ?? t().errors.defaultLocation, named });
   }
-  const known = AGENT_ADAPTERS.map((adapter) => adapter.id).join('、');
+  const known = AGENT_ADAPTERS.map((adapter) => adapter.id).join(t().period.listJoin);
   throw new Error(
     renderDiagnostic('noUsageData', { home: home ?? t().errors.defaultLocation, known }),
   );
+}
+
+/** Where to look for each agent's data, when the caller knows. */
+export interface DetectOptions {
+  /**
+   * A single data root every adapter is probed at, instead of its own roots.
+   *
+   * This is the library's `--home`-shaped escape hatch: it is only meaningful
+   * for one agent at a time, which is why the CLI rejects it with several.
+   */
+  home?: string | undefined;
+  /** Roots named per adapter id (canonical ids), overriding environment and default. */
+  dirs?: ReadonlyMap<string, readonly string[]> | undefined;
+  /** Environment for the adapters' own variables. */
+  env?: NodeJS.ProcessEnv | undefined;
 }
 
 /**
@@ -87,21 +115,35 @@ export async function resolveAgent(
  * contributes nothing and is not an error — and it goes through the adapter's
  * own `hasData`, so a new agent needs no second discovery implementation here.
  *
- * @param home - an explicit data root, when given; otherwise each adapter's own
- *   default location is probed.
- * @param env - environment for default roots.
+ * An agent is detected when *any* of its roots holds data; which roots those are
+ * is the caller's business (see `sources.ts` for the flag/environment/default
+ * order).
+ *
+ * @param options - an explicit single root, per-agent roots, and the environment.
  * @returns the adapters that found data, in registry order.
  */
-export async function detectAgents(home?: string, env: NodeJS.ProcessEnv = process.env): Promise<AgentAdapter[]> {
+export async function detectAgents(options: DetectOptions = {}): Promise<AgentAdapter[]> {
+  const env = options.env ?? process.env;
   const found: AgentAdapter[] = [];
   for (const adapter of AGENT_ADAPTERS) {
-    const source = home ?? adapter.defaultSource(env);
-    if (source === null) continue;
-    try {
-      if (await adapter.hasData(source)) found.push(adapter);
-    } catch {
-      // An unreadable directory or a broken symlink means "no data here", not
-      // "this report cannot run".
+    const named = options.dirs?.get(adapter.id);
+    const sources =
+      options.home !== undefined
+        ? [options.home]
+        : named !== undefined && named.length > 0
+          ? [...named]
+          : adapter.defaultSources(env);
+    for (const source of sources) {
+      if (source === undefined || source.trim().length === 0) continue;
+      try {
+        if (await adapter.hasData(source)) {
+          found.push(adapter);
+          break;
+        }
+      } catch {
+        // An unreadable directory or a broken symlink means "no data here", not
+        // "this report cannot run".
+      }
     }
   }
   return found;

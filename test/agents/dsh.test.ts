@@ -305,10 +305,11 @@ describe('adapter metadata', () => {
   it('declares its id, environment variable, and default source', () => {
     expect(dshAgent.id).toBe('dsh');
     expect(dshAgent.envVars).toEqual(['DSH_HOME']);
-    expect(dshAgent.defaultSource({ HOME: '/home/user' })).toBe('/home/user/.dsh');
-    expect(dshAgent.defaultSource({ DSH_HOME: '/custom' })).toBe('/custom');
-    expect(dshAgent.defaultSource({ DSH_HOME: '  ', HOME: '/home/user' })).toBe('/home/user/.dsh');
-    expect(dshAgent.defaultSource({})).toBeNull();
+    expect(dshAgent.defaultSources({ HOME: '/home/user' })).toEqual(['/home/user/.dsh']);
+    expect(dshAgent.defaultSources({ DSH_HOME: '/custom' })).toEqual(['/custom']);
+    expect(dshAgent.defaultSources({ DSH_HOME: '/a, /b ,, /a' })).toEqual(['/a', '/b']);
+    expect(dshAgent.defaultSources({ DSH_HOME: '  ', HOME: '/home/user' })).toEqual(['/home/user/.dsh']);
+    expect(dshAgent.defaultSources({})).toEqual([]);
   });
 
   it('resolves the home the way the harness does', () => {

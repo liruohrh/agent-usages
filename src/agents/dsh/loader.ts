@@ -37,6 +37,7 @@ import type {
 import { repoOf } from '../../core/git.ts';
 import { normalizePath, workspacePathsOf } from '../../core/paths.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
+import { splitRoots, uniqueRoots } from '../roots.ts';
 import { readSessionLogIndex, locateSessionLogs, type SessionLogInfo } from './sessionlog.ts';
 
 /** Narrow an unknown JSON value to a record. */
@@ -230,7 +231,7 @@ function resolveProjectKey(
  * @throws when the data root carries neither a session log nor a projection cache.
  */
 async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
-  const source = resolve(options.home ?? defaultSource(options.env ?? process.env) ?? '');
+  const source = resolve(options.home ?? defaultSources(options.env ?? process.env)[0] ?? '');
   const warnings: Warning[] = [];
   if (options.home !== undefined && !isAbsolute(options.home)) {
     throw new UserError('dshHomeNotAbsolute', { value: JSON.stringify(options.home) });
@@ -444,13 +445,20 @@ export function lastUsageOf(session: SessionRecord): number {
   return Number.NEGATIVE_INFINITY;
 }
 
-/** Default DSH home, honouring the same environment the harness does. */
-function defaultSource(env: NodeJS.ProcessEnv): string | null {
-  const configured = env['DSH_HOME']?.trim();
-  if (configured !== undefined && configured.length > 0) return configured;
+/**
+ * Default DSH homes, honouring the same environment the harness does.
+ *
+ * `DSH_HOME` may name several homes, comma-separated. With no home directory at
+ * all there is nothing to default to, and the list is empty: `load` then says so
+ * in its own words.
+ */
+function defaultSources(env: NodeJS.ProcessEnv): readonly string[] {
+  const configured = env['DSH_HOME'];
+  const named = configured === undefined ? [] : uniqueRoots(splitRoots(configured));
+  if (named.length > 0) return named;
   const home = env['HOME'] ?? env['USERPROFILE'] ?? '';
-  if (home.length === 0) return null;
-  return join(home, '.dsh');
+  if (home.length === 0) return [];
+  return [join(home, '.dsh')];
 }
 
 /**
@@ -461,8 +469,8 @@ function defaultSource(env: NodeJS.ProcessEnv): string | null {
  * @throws when `DSH_HOME` is set but not absolute, or no home can be determined.
  */
 export function resolveDshHome(configured?: string, env: NodeJS.ProcessEnv = process.env): string {
-  const candidate = configured ?? defaultSource(env);
-  if (candidate === null || candidate === undefined || candidate.trim().length === 0) {
+  const candidate = configured ?? defaultSources(env)[0];
+  if (candidate === undefined || candidate.trim().length === 0) {
     throw new UserError('dshHomeUnresolved', {});
   }
   if (!isAbsolute(candidate)) {
@@ -477,7 +485,7 @@ export const dshAgent: AgentAdapter = {
   label: 'DeepSeek Harness (DSH)',
   sessionNoun: t().errors.dshSessionNoun,
   envVars: ['DSH_HOME'],
-  defaultSource,
+  defaultSources,
   hasData: async (source) => {
     try {
       if ((await locateSessionLogs(source)).length > 0) return true;

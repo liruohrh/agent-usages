@@ -3,7 +3,7 @@
  *
  * A run may read several agents at once, and an agent is not a vendor: `dsh` and
  * `pi` run whatever model the user points them at, and `codex` runs OpenAI while
- * `claude` runs Anthropic. So a table is chosen **per record**, from the model the
+ * `claudecode` runs Anthropic. So a table is chosen **per record**, from the model the
  * record names: the first table in configuration order that knows it wins, and a
  * model no table prices stays unpriced rather than borrowing another vendor's
  * rate — an unpriced record is honest, a guessed price is not.

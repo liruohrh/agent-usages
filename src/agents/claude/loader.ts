@@ -30,6 +30,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
+import { unionSessionRecords } from '../../core/merge.ts';
 import { workspacePathsOf } from '../../core/paths.ts';
 import type {
   CacheWriteTtl,
@@ -42,6 +43,7 @@ import type {
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
+import { splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable Claude Code honours for its config directory. */
 const ENV_CONFIG_DIR = 'CLAUDE_CONFIG_DIR';
@@ -475,7 +477,7 @@ function buildSession(walked: WalkedSession): SessionRecord {
   const records = [...session.records].sort((left, right) => left.time - right.time);
   return {
     id: session.id,
-    agent: 'claude',
+    agent: 'claudecode',
     title: session.title,
     cwd: session.cwd,
     // The file this row was read from — for a subagent, its own log.
@@ -499,21 +501,30 @@ function firstUsageOf(session: SessionRecord): number {
   return Number.POSITIVE_INFINITY;
 }
 
-/** The `projects` directory under a Claude Code config directory. */
-function projectsRootOf(source: string, env: NodeJS.ProcessEnv): string {
-  return join(env[ENV_CONFIG_DIR] ?? source, 'projects');
+/**
+ * The `projects` directory under one Claude Code config directory.
+ *
+ * The root is the one the caller was handed, never the raw environment: with
+ * `CLAUDE_CONFIG_DIR=/a,/b` the variable names two roots and only the layer that
+ * resolved them knows which one is being read.
+ *
+ * @param source - one config directory.
+ * @returns its `projects` directory.
+ */
+function projectsRootOf(source: string): string {
+  return join(source, 'projects');
 }
 
 /** Read a Claude Code home into the agent-neutral dataset. */
 async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const env = options.env ?? process.env;
-  const source = options.home ?? defaultSource(env) ?? '';
+  const source = options.home ?? defaultSources(env)[0] ?? '';
   const warnings: Warning[] = [];
   if (options.home !== undefined && !isAbsolute(options.home)) {
     throw new UserError('claudeHomeNotAbsolute', { value: JSON.stringify(options.home) });
   }
 
-  const projectsRoot = projectsRootOf(source, env);
+  const projectsRoot = projectsRootOf(source);
   const walked = new Map<string, WalkedSession[]>();
   for (const projectKey of await readdirOrEmpty(projectsRoot)) {
     const projectDir = join(projectsRoot, projectKey);
@@ -527,11 +538,13 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   if (walked.size === 0) {
     throw new Error(renderDiagnostic('claudeNoData', { source }));
   }
-  const btw = await countSideQuestions(join(env[ENV_CONFIG_DIR] ?? source, 'history.jsonl'));
+  const btw = await countSideQuestions(join(source, 'history.jsonl'));
   if (btw > 0) warnings.push(new UserError('sideQuestionsUncounted', { count: String(btw), agent: 'Claude Code' }));
 
   const sessions: SessionRecord[] = [];
   const projectOfSession = new Map<string, string>();
+  /** Emitted sessions by id, so a second file of the same session can be folded in. */
+  const emitted = new Map<string, SessionRecord>();
   // `--fork-session` copies the source's entries verbatim — same `message.id`,
   // no back-pointer — so the copy is recognised by the calls it repeats. One
   // message id is one API call, so an id billed by an earlier file is inherited
@@ -545,7 +558,6 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
         (right.session.records[0]?.time ?? right.session.createdAt ?? 0),
     );
     for (const entry of ordered) {
-      if (sessions.some((session) => session.id === entry.session.id)) continue;
       const records: UsageRecord[] = [];
       const messageIds: string[] = [];
       let inheritedFrom: string | null = null;
@@ -581,6 +593,16 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
         parentId: inheritedFrom ?? entry.parentId,
       });
       if (Object.keys(extra).length > 0) session.extra = extra;
+      // One session id can be in two project directories: Claude Code writes a
+      // new file when the session is resumed in another working directory. That
+      // is one conversation, so its requests are folded into the session already
+      // emitted instead of one file replacing the other.
+      const already = emitted.get(session.id);
+      if (already !== undefined) {
+        unionSessionRecords(already, session);
+        continue;
+      }
+      emitted.set(session.id, session);
       sessions.push(session);
       projectOfSession.set(session.id, projectKey);
     }
@@ -607,7 +629,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       name: path.length > 0 ? basename(path) : projectKey,
       path,
       sessions: members,
-      agents: ['claude'],
+      agents: ['claudecode'],
       workspaces: workspacePathsOf(members, path),
     });
   }
@@ -621,8 +643,8 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   projects.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 
   return {
-    agent: 'claude',
-    agents: ['claude'],
+    agent: 'claudecode',
+    agents: ['claudecode'],
     source,
     projects,
     sessions,
@@ -665,21 +687,29 @@ async function countSideQuestions(path: string): Promise<number> {
   return count;
 }
 
-/** Default data root: the Claude Code config directory. */
-function defaultSource(env: NodeJS.ProcessEnv): string | null {
+/**
+ * Default data roots: the Claude Code config directories.
+ *
+ * `CLAUDE_CONFIG_DIR` may name several roots, comma-separated — a work config and
+ * a personal one are one agent's usage and are read together.
+ */
+function defaultSources(env: NodeJS.ProcessEnv): readonly string[] {
   const explicit = env[ENV_CONFIG_DIR];
-  if (explicit !== undefined && explicit.length > 0) return explicit;
-  return join(homedir(), '.claude');
+  const named = explicit === undefined ? [] : uniqueRoots(splitRoots(explicit));
+  return named.length > 0 ? named : [join(homedir(), '.claude')];
 }
 
 export const claudeAgent: AgentAdapter = {
-  id: 'claude',
+  id: 'claudecode',
+  // `claude` is the vendor; the agent is Claude Code, so the id follows `codex`.
+  // The old id keeps working — it is in scripts and in muscle memory.
+  aliases: ['claude'],
   label: 'Claude Code',
   sessionNoun: t().errors.claudeSessionNoun,
   envVars: [ENV_CONFIG_DIR],
-  defaultSource,
+  defaultSources,
   hasData: async (source) => {
-    const root = projectsRootOf(source, process.env);
+    const root = projectsRootOf(source);
     for (const projectKey of await readdirOrEmpty(root)) {
       const entries = await readdirOrEmpty(join(root, projectKey));
       if (entries.some((entry) => entry.endsWith('.jsonl'))) return true;

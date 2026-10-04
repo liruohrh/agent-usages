@@ -80,14 +80,14 @@ function multiAgent() {
         sessions: [
           session({
             id: 'claude-flat',
-            agent: 'claude',
+            agent: 'claudecode',
             cwd: '/tmp/demo',
             records: [record({ id: 'f1', time: STUB_AT.late, model: 'tiered-model', tokens: FULL })],
           }),
         ],
       }),
     ],
-    { agent: 'claude', agents: ['claude'], source: '/data/claude' },
+    { agent: 'claudecode', agents: ['claudecode'], source: '/data/claude' },
   );
   return mergeDatasets([dsh, claude]);
 }
@@ -108,12 +108,12 @@ function quantities(result: UsageResult): { key: string; value: number }[] {
 describe('per-agent totals', () => {
   it('names every agent, sorted, with its own row', async () => {
     const result = runQuery(await multiAgent(), query(), context);
-    expect(result.agents.map((row) => row.agent)).toEqual(['claude', 'dsh']);
+    expect(result.agents.map((row) => row.agent)).toEqual(['claudecode', 'dsh']);
     const dsh = result.agents.find((row) => row.agent === 'dsh');
     expect(dsh?.sessions).toBe(2);
     expect(dsh?.subagentSessions).toBe(1);
     expect(dsh?.requests).toBe(2);
-    expect(result.projects[0]?.agents).toEqual(['claude', 'dsh']);
+    expect(result.projects[0]?.agents).toEqual(['claudecode', 'dsh']);
     expect(result.projects[0]?.workspaces).toEqual(['/tmp/demo']);
   });
 
@@ -167,7 +167,7 @@ describe('per-agent totals', () => {
     const result = runQuery(await multiAgent(), query({ subagentMode: 'detail' }), context);
     const rows = result.projects.flatMap((entry) => entry.sessionReports ?? []);
     expect(rows.map((row) => `${row.agent}:${row.id}`).sort()).toEqual([
-      'claude:claude-flat',
+      'claudecode:claude-flat',
       'dsh:dsh-child',
       'dsh:dsh-parent',
     ]);
@@ -192,13 +192,13 @@ describe('per-agent totals', () => {
         sessions: [
           session({
             id: 'source',
-            agent: 'claude',
+            agent: 'claudecode',
             cwd: '/tmp/p',
             records: [record({ id: 's1', time: STUB_AT.early, model: 'flat-model', tokens: FULL })],
           }),
           session({
             id: 'fork',
-            agent: 'claude',
+            agent: 'claudecode',
             cwd: '/tmp/p',
             parentId: 'source',
             depth: 0,

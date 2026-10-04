@@ -54,6 +54,7 @@ import { basename, resolve as resolvePath, sep } from 'node:path';
 
 import { AGENT_ADAPTERS, findAgent } from '../agents/registry.ts';
 import type { AgentAdapter } from '../agents/contract.ts';
+import { loadPlannedAgents, planAgentSources, resolveSelectorIds } from '../agents/sources.ts';
 import { addCostTotals, costOf, zeroCostTotals, type CostSubtotal, type OriginalPricing } from '../report/accounting.ts';
 import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
@@ -119,8 +120,21 @@ export interface ScanOptions {
    * such as `dsh,pi`.
    */
   agent?: string | undefined;
-  /** Explicit data root, passed to every adapter (`--home`). */
+  /**
+   * Explicit data root, passed to the one selected adapter (`--home`).
+   *
+   * Only meaningful with exactly one agent selected: one directory cannot say
+   * which of several agents it belongs to. Use {@link ScanOptions.agentDirs} for
+   * that.
+   */
   home?: string | undefined;
+  /**
+   * Per-agent data roots from `--agent-dir <agent>=<path>[,<path>…]`.
+   *
+   * Wins over each agent's environment variable, which wins over its standard
+   * location.
+   */
+  agentDirs?: readonly string[] | undefined;
   /** Path to a JSON snapshot to read instead of scanning (`--snapshot`). */
   snapshot?: string | undefined;
   /** Skip the lazy price/rate refresh; the server always does. */
@@ -626,6 +640,11 @@ export function localizeDashboard<T extends { warnings: readonly DashboardWarnin
   };
 }
 
+/** Every agent id this build ships, for diagnostics. */
+function knownAgentIds(): string {
+  return AGENT_ADAPTERS.map((adapter) => adapter.id).join(t().period.listJoin);
+}
+
 /** Build a warning this layer owns (the adapters keep their own codes). */
 function warning(code: string, message: string, params?: Record<string, unknown>): DashboardWarning {
   return { code, message, ...(params === undefined ? {} : { params }) };
@@ -664,15 +683,9 @@ export async function openStore(options: ScanOptions = {}): Promise<DashboardSto
 
 /** Parse `--agent` into the adapters to read. */
 export function selectAdapters(selector: string | undefined): AgentAdapter[] {
-  const text = (selector ?? 'all').trim();
-  if (text.length === 0 || text.toLowerCase() === 'all') return [...AGENT_ADAPTERS];
-  const ids = text.split(/[,\s]+/).filter((id) => id.length > 0);
-  return ids.map((id) => {
+  return resolveSelectorIds(selector).map((id) => {
     const adapter = findAgent(id);
-    if (adapter === undefined) {
-      const known = AGENT_ADAPTERS.map((candidate) => candidate.id).join('、');
-      throw new Error(t().errors.unknownAgent({ id, known }));
-    }
+    if (adapter === undefined) throw new Error(t().errors.unknownAgent({ id, known: knownAgentIds() }));
     return adapter;
   });
 }
@@ -705,7 +718,9 @@ function emptyScanDataset(): UsageDataset {
 async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
   const env = options.env ?? process.env;
   const now = options.now ?? new Date();
-  const adapters = selectAdapters(options.agent);
+  // `--agent` is validated up front, so a typo fails before any pricing work:
+  // the planner below reads the same selector and resolves the roots.
+  selectAdapters(options.agent);
 
   /** Read the configuration, and build everything that depends on it. */
   const resolveRuntime = async (): Promise<{
@@ -826,43 +841,44 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     const loaded: UsageDataset[] = [];
     const sources: { id: string; label: string; source: string }[] = [];
     const warnings: DashboardWarning[] = [...config.warnings.map(flattenWarning)];
-    for (const adapter of adapters) {
-      const source = options.home ?? adapter.defaultSource(env);
-      if (source === null || source.trim().length === 0) {
+    // The dashboard reads every agent it ships, so a missing one is a warning on
+    // the page rather than a silent absence: `detect: false` plans them all.
+    const plan = await planAgentSources({
+      ...(options.agent === undefined ? {} : { agent: [options.agent] }),
+      ...(options.agentDirs === undefined ? {} : { agentDirs: options.agentDirs }),
+      ...(options.home === undefined ? {} : { home: options.home }),
+      env,
+      detect: false,
+    });
+    for (const entry of plan.planned) {
+      const { adapter } = entry;
+      if (entry.roots.length === 0) {
         warnings.push(
           warning(
             'serveAgentNoRoot',
-            renderDiagnostic('serveAgentNoRoot', { agent: adapter.label }),
-            { agent: adapter.label },
+            renderDiagnostic('serveAgentNoRoot', { agent: adapter.label, id: adapter.id }),
+            { agent: adapter.label, id: adapter.id },
           ),
         );
         continue;
       }
       try {
-        if (!(await adapter.hasData(source))) {
-          warnings.push(
-            warning(
-              'serveAgentNoData',
-              renderDiagnostic('serveAgentNoData', { agent: adapter.label, source }),
-              { agent: adapter.label, source },
-            ),
-          );
-          continue;
+        const read = await loadPlannedAgents([entry], { env, enrich: true });
+        for (const item of read.warnings) warnings.push(flattenWarning(item));
+        for (const dataset of read.datasets) {
+          // 每个 agent 单独跑一次查询只为取它自己的告警：合成之后，报告不再区分告警来自哪个 agent。
+          const result = runQuery(dataset, queryOf(resolveRange({})), context);
+          loaded.push(dataset);
+          for (const item of result.warnings) {
+            // "nothing billed" is a per-agent fact the dashboard states itself.
+            if (item.code === 'noUsageInRange') continue;
+            warnings.push(flattenWarning(item));
+          }
         }
-        const dataset = await adapter.load({
-          ...(options.home === undefined ? {} : { home: options.home }),
-          env,
-          enrich: true,
-        });
-        // 每个 agent 单独跑一次查询只为取它自己的告警：合成之后，报告不再区分告警来自哪个 agent。
-        const result = runQuery(dataset, queryOf(resolveRange({})), context);
-        loaded.push(dataset);
-        sources.push({ id: adapter.id, label: adapter.label, source: dataset.source });
-        for (const item of result.warnings) {
-          // "nothing billed" is a per-agent fact the dashboard states itself.
-          if (item.code === 'noUsageInRange') continue;
-          warnings.push(flattenWarning(item));
-        }
+        // One entry per agent, not one per directory: an agent read from three
+        // roots is still one agent, and the line names every root it came from.
+        const roots = [...new Set(read.datasets.map((dataset) => dataset.source))];
+        if (roots.length > 0) sources.push({ id: adapter.id, label: adapter.label, source: roots.join(', ') });
       } catch (error) {
         warnings.push(
           warning(

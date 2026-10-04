@@ -165,6 +165,8 @@ export const zh = {
     defaultSource: '默认数据目录',
     unknownSource: '（无法自动确定）',
     envVars: '环境变量',
+    aliases: '输入别名',
+    noAliases: '（无）',
     providers: '支持的计价来源（--provider）:',
     models: '模型',
   },
@@ -218,8 +220,9 @@ export const zh = {
   /** Command descriptions and option help. */
   help: {
     program: '统计 coding agent 的 token 消耗与费用',
-    agent: 'agent（默认 all：统计所有已安装的 agent；可用逗号或重复指定，如 `dsh,codex`）',
-    home: 'agent 的数据目录（默认用该 agent 的环境变量或标准位置）',
+    agent: 'agent（默认 all：统计所有已安装的 agent；可用逗号或重复指定，如 `dsh,codex`；`claude` 是 `claudecode` 的旧写法，仍可用）',
+    home: 'agent 的数据目录；只在恰好选中一个 agent 时可用（默认用该 agent 的环境变量或标准位置）',
+    agentDir: '给某个 agent 指定数据目录，可重复；值可以是逗号分隔的多个目录（优先级：本参数 > 该 agent 的环境变量 > 标准位置）',
     provider: '把价格钉死在一张表上（默认按每条记录里的模型自动选表；见 `agents`）',
     json: '以 JSON 输出',
     noUpdate: '本次不检查价格表/汇率更新，直接用本地缓存',
@@ -452,15 +455,29 @@ export const zh = {
     noUsageData: (p: { home: string; known: string }) =>
       `在 ${p.home} 没有找到可统计的用量数据；可用 --agent / --home 指定（当前支持：${p.known}）`,
     defaultLocation: '默认位置',
+    /* ---- where each agent's data lives: one agent, one or more directories ---- */
+    allAgents: 'all（未点名 agent）',
+    homeNeedsOneAgent: (p: { agents: string }) =>
+      `--home 只能用于恰好一个 agent（当前选择是 ${p.agents}）；多个 agent 请用 --agent-dir <agent>=<路径>[,<路径>…]，或设置各 agent 自己的环境变量`,
+    agentDirHomeConflict: (p: { agent: string }) =>
+      `--home 与 --agent-dir ${p.agent}=… 指定了同一个 agent 的数据目录，二选一（--agent-dir 支持多个目录，--home 只有一个）`,
+    agentDirNotAnAgent: () =>
+      '--agent-dir 不能用 all：all 是"全部已安装的 agent"这个选择集合，不是某个 agent；请写具体 agent，例如 --agent-dir claudecode=/a,/b',
+    agentDirNotSelected: (p: { agent: string; selected: string }) =>
+      `--agent-dir 指定了 ${p.agent}，但它不在本次 --agent 的选择里（${p.selected}）`,
+    agentDirMalformed: (p: { value: string }) =>
+      `--agent-dir 需要 <agent>=<路径>[,<路径>…]，收到 ${p.value}`,
+    agentDirNoData: (p: { agent: string; path: string }) => `${p.agent}：${p.path} 下没有找到数据，已跳过这个目录。`,
+    agentDirUnreadable: (p: { agent: string; path: string; reason: string }) =>
+      `${p.agent}：${p.path} 读取失败（${p.reason}），已跳过这个目录。`,
     /* ---- serve ---- */
     servePortNotInteger: (p: { value: string }) => `--port 需要 0…65535 的整数，收到 ${p.value}`,
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh 需要非负秒数，收到 ${p.value}`,
     serveOptionUnsupported: (p: { option: string }) =>
       `serve 不接受 ${p.option}：仪表盘的计价来源按记录里的模型自动选择，输出固定是网页与 JSON API；去掉这个参数再试`,
     /* ---- dashboard warnings: they travel to the page, so they carry a code ---- */
-    serveAgentNoRoot: (p: { agent: string }) =>
-      `${p.agent}：找不到默认数据目录，已跳过（可用 --home 指定）。`,
-    serveAgentNoData: (p: { agent: string; source: string }) => `${p.agent}：${p.source} 下没有可读数据，已跳过。`,
+    serveAgentNoRoot: (p: { agent: string; id: string }) =>
+      `${p.agent}：找不到默认数据目录，已跳过（可用 --agent-dir ${p.id}=<路径> 指定）。`,
     serveAgentLoadFailed: (p: { agent: string; reason: string }) => `${p.agent}：读取失败（${p.reason}），已跳过。`,
     snapshotReadOnly: (p: { path: string }) =>
       `快照模式（--snapshot ${p.path}）不重扫；去掉该参数即改为实时扫描。`,

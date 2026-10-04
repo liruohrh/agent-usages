@@ -1,8 +1,8 @@
 # DSH 适配器
 
-`dsh` 是当前唯一支持的 agent。它只读 DeepSeek Harness 自己写的落盘数据，**不依赖任何第三方插件**。
+`dsh` 读 DeepSeek Harness 自己写的落盘数据，**不依赖任何第三方插件**。
 
-数据目录默认取 `DSH_HOME`，没有则 `~/.dsh`；所有子命令都支持 `--home` 覆盖。
+数据目录默认取 `DSH_HOME`（值里可以写逗号分隔的多个目录），没有则 `~/.dsh`；所有子命令都支持 `--agent-dir dsh=…` 覆盖，只选一个 agent 时也可以用 `--home`。
 
 ## 读取哪些文件
 

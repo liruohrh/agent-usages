@@ -1,12 +1,12 @@
 {
-  "generatedAt": 1791120463235,
+  "generatedAt": 1791136776823,
   "mode": "live",
   "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
-  "scannedAt": 1791120463229,
-  "scanMs": 19,
+  "scannedAt": 1791136776817,
+  "scanMs": 22,
   "loadedAgents": [
     {
-      "id": "claude",
+      "id": "claudecode",
       "label": "Claude Code",
       "source": "/home/demo/agent-usages/web/mock/fixtures/claude"
     }
@@ -20,7 +20,7 @@
   "rangeTo": null,
   "agents": [
     {
-      "id": "claude",
+      "id": "claudecode",
       "label": "Claude Code",
       "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
       "sessions": 3,
@@ -163,7 +163,7 @@
         "/ws/other"
       ],
       "agents": [
-        "claude"
+        "claudecode"
       ],
       "sessions": 1,
       "subagentSessions": 0,
@@ -220,7 +220,7 @@
       },
       "agentTotals": [
         {
-          "id": "claude",
+          "id": "claudecode",
           "label": "Claude Code",
           "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
           "sessions": 1,
@@ -302,7 +302,7 @@
           "path": "/ws/other",
           "name": "other",
           "agents": [
-            "claude"
+            "claudecode"
           ],
           "sessionCount": 1,
           "subagentCount": 0,
@@ -329,7 +329,7 @@
           },
           "agentTotals": [
             {
-              "id": "claude",
+              "id": "claudecode",
               "label": "Claude Code",
               "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
               "sessions": 1,
@@ -408,9 +408,9 @@
           },
           "sessionReports": [
             {
-              "uid": "claude:22222222-2222-4222-8222-222222222222",
+              "uid": "claudecode:22222222-2222-4222-8222-222222222222",
               "id": "22222222-2222-4222-8222-222222222222",
-              "agent": "claude",
+              "agent": "claudecode",
               "projectId": "-ws-other",
               "projectName": "other",
               "workspace": "/ws/other",
@@ -520,9 +520,9 @@
       ],
       "sessionReports": [
         {
-          "uid": "claude:22222222-2222-4222-8222-222222222222",
+          "uid": "claudecode:22222222-2222-4222-8222-222222222222",
           "id": "22222222-2222-4222-8222-222222222222",
-          "agent": "claude",
+          "agent": "claudecode",
           "projectId": "-ws-other",
           "projectName": "other",
           "workspace": "/ws/other",
@@ -630,7 +630,7 @@
       ],
       "models": [
         {
-          "agent": "claude",
+          "agent": "claudecode",
           "projectId": "-ws-other",
           "model": "deepseek-flash",
           "requests": 2,
@@ -667,7 +667,7 @@
       ],
       "bands": [
         {
-          "agent": "claude",
+          "agent": "claudecode",
           "projectId": "-ws-other",
           "model": "deepseek-flash",
           "periodId": "2026-09-10",
@@ -753,7 +753,7 @@
         "/ws/demo-app"
       ],
       "agents": [
-        "claude"
+        "claudecode"
       ],
       "sessions": 2,
       "subagentSessions": 1,
@@ -810,7 +810,7 @@
       },
       "agentTotals": [
         {
-          "id": "claude",
+          "id": "claudecode",
           "label": "Claude Code",
           "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
           "sessions": 2,
@@ -892,7 +892,7 @@
           "path": "/ws/demo-app",
           "name": "demo-app",
           "agents": [
-            "claude"
+            "claudecode"
           ],
           "sessionCount": 2,
           "subagentCount": 1,
@@ -919,7 +919,7 @@
           },
           "agentTotals": [
             {
-              "id": "claude",
+              "id": "claudecode",
               "label": "Claude Code",
               "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
               "sessions": 2,
@@ -998,9 +998,9 @@
           },
           "sessionReports": [
             {
-              "uid": "claude:11111111-1111-4111-8111-111111111111",
+              "uid": "claudecode:11111111-1111-4111-8111-111111111111",
               "id": "11111111-1111-4111-8111-111111111111",
-              "agent": "claude",
+              "agent": "claudecode",
               "projectId": "-ws-demo-app",
               "projectName": "demo-app",
               "workspace": "/ws/demo-app",
@@ -1106,9 +1106,9 @@
               }
             },
             {
-              "uid": "claude:a1",
+              "uid": "claudecode:a1",
               "id": "a1",
-              "agent": "claude",
+              "agent": "claudecode",
               "projectId": "-ws-demo-app",
               "projectName": "demo-app",
               "workspace": "/ws/demo-app",
@@ -1218,9 +1218,9 @@
       ],
       "sessionReports": [
         {
-          "uid": "claude:11111111-1111-4111-8111-111111111111",
+          "uid": "claudecode:11111111-1111-4111-8111-111111111111",
           "id": "11111111-1111-4111-8111-111111111111",
-          "agent": "claude",
+          "agent": "claudecode",
           "projectId": "-ws-demo-app",
           "projectName": "demo-app",
           "workspace": "/ws/demo-app",
@@ -1326,9 +1326,9 @@
           }
         },
         {
-          "uid": "claude:a1",
+          "uid": "claudecode:a1",
           "id": "a1",
-          "agent": "claude",
+          "agent": "claudecode",
           "projectId": "-ws-demo-app",
           "projectName": "demo-app",
           "workspace": "/ws/demo-app",
@@ -1436,7 +1436,7 @@
       ],
       "models": [
         {
-          "agent": "claude",
+          "agent": "claudecode",
           "projectId": "-ws-demo-app",
           "model": "deepseek-flash",
           "requests": 3,
@@ -1471,7 +1471,7 @@
           }
         },
         {
-          "agent": "claude",
+          "agent": "claudecode",
           "projectId": "-ws-demo-app",
           "model": "deepseek-pro",
           "requests": 1,
@@ -1498,7 +1498,7 @@
       ],
       "bands": [
         {
-          "agent": "claude",
+          "agent": "claudecode",
           "projectId": "-ws-demo-app",
           "model": "deepseek-flash",
           "periodId": "2026-09-10",
@@ -1583,7 +1583,7 @@
       {
         "t": 1790092800000,
         "bucket": "day",
-        "agent": "claude",
+        "agent": "claudecode",
         "projectId": "-ws-demo-app",
         "requests": 3,
         "tokens": {
@@ -1598,7 +1598,7 @@
       {
         "t": 1790179200000,
         "bucket": "day",
-        "agent": "claude",
+        "agent": "claudecode",
         "projectId": "-ws-demo-app",
         "requests": 1,
         "tokens": {
@@ -1613,7 +1613,7 @@
       {
         "t": 1790265600000,
         "bucket": "day",
-        "agent": "claude",
+        "agent": "claudecode",
         "projectId": "-ws-other",
         "requests": 2,
         "tokens": {
@@ -1630,7 +1630,7 @@
       {
         "t": 1790128800000,
         "bucket": "hour",
-        "agent": "claude",
+        "agent": "claudecode",
         "projectId": "-ws-demo-app",
         "requests": 3,
         "tokens": {
@@ -1645,7 +1645,7 @@
       {
         "t": 1790211600000,
         "bucket": "hour",
-        "agent": "claude",
+        "agent": "claudecode",
         "projectId": "-ws-demo-app",
         "requests": 1,
         "tokens": {
@@ -1660,7 +1660,7 @@
       {
         "t": 1790316000000,
         "bucket": "hour",
-        "agent": "claude",
+        "agent": "claudecode",
         "projectId": "-ws-other",
         "requests": 1,
         "tokens": {
@@ -1675,7 +1675,7 @@
       {
         "t": 1790319600000,
         "bucket": "hour",
-        "agent": "claude",
+        "agent": "claudecode",
         "projectId": "-ws-other",
         "requests": 1,
         "tokens": {
@@ -1691,7 +1691,7 @@
   },
   "models": [
     {
-      "agent": "claude",
+      "agent": "claudecode",
       "projectId": "-ws-demo-app",
       "model": "deepseek-flash",
       "requests": 3,
@@ -1726,7 +1726,7 @@
       }
     },
     {
-      "agent": "claude",
+      "agent": "claudecode",
       "projectId": "-ws-demo-app",
       "model": "deepseek-pro",
       "requests": 1,
@@ -1751,7 +1751,7 @@
       }
     },
     {
-      "agent": "claude",
+      "agent": "claudecode",
       "projectId": "-ws-other",
       "model": "deepseek-flash",
       "requests": 2,
@@ -1788,7 +1788,7 @@
   ],
   "bands": [
     {
-      "agent": "claude",
+      "agent": "claudecode",
       "projectId": "-ws-demo-app",
       "model": "deepseek-flash",
       "periodId": "2026-09-10",
@@ -1865,7 +1865,7 @@
       ]
     },
     {
-      "agent": "claude",
+      "agent": "claudecode",
       "projectId": "-ws-other",
       "model": "deepseek-flash",
       "periodId": "2026-09-10",
