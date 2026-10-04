@@ -4,8 +4,12 @@
  * OpenAI, Anthropic, Moonshot and Zhipu are transcribed from the vendors' own
  * pages (fetched 2026-10-04) and cross-checked against LiteLLM/OpenRouter: every
  * rate below is pinned against the vendor's row, so a mistyped digit or a silent
- * fallback to an aggregator fails here rather than in a user's report. Moonshot
- * and Zhipu publish yuan only, so their rows are `CNY` and are not converted.
+ * fallback to an aggregator fails here rather than in a user's report.
+ *
+ * Moonshot and Zhipu quote two currencies — a Chinese list in yuan and an
+ * international one in dollars — so like DeepSeek they carry both over the same
+ * windows and the reader's currency picks one. Neither list is a conversion of
+ * the other, and the assertions below pin each one to its own page.
  *
  * The bases matter as much as the numbers: Anthropic bills cache writes on their
  * own basis with a 1-hour multiplier, OpenAI bills them only where its table has
@@ -23,7 +27,7 @@ import {
   type ProviderConfig,
 } from '../../src/pricing/catalog.ts';
 import type { PricePeriod, PricingProvider } from '../../src/pricing/index.ts';
-import { createPricingEngine } from '../../src/pricing/index.ts';
+import { createPricingEngine, selectCurrency } from '../../src/pricing/index.ts';
 import { record } from '../support/dataset.ts';
 
 /** The shipped file, parsed once. */
@@ -48,25 +52,49 @@ function lookup(id: string): PricingProvider {
   return found;
 }
 
-/** The single period of one model of one provider. */
-function period(id: string, model: string): PricePeriod {
+/** Every period of one model of one provider. */
+function periods(id: string, model: string): readonly PricePeriod[] {
   const entry = provider(id).models.find((price) => price.model === model);
   if (entry === undefined) throw new Error(`${id} has no model ${model}`);
-  const first = entry.periods[0];
+  return entry.periods;
+}
+
+/** The first period of one model, which is the list the file publishes first. */
+function period(id: string, model: string): PricePeriod {
+  const first = periods(id, model)[0];
   if (first === undefined) throw new Error(`${id}/${model} has no period`);
   return first;
 }
 
-/** One component of one model's card, by component id. */
+/** One model's period in a named currency. */
+function periodIn(id: string, model: string, currency: string): PricePeriod {
+  const found = periods(id, model).find((entry) => entry.currency === currency);
+  if (found === undefined) throw new Error(`${id}/${model} has no ${currency} period`);
+  return found;
+}
+
+/** One component of one model's card in a currency, by component id. */
+function componentIn(id: string, model: string, currency: string, wanted: string) {
+  const found = periodIn(id, model, currency).offPeak.find((entry) => entry.id === wanted);
+  if (found === undefined) throw new Error(`${id}/${model} ${currency} has no ${wanted} component`);
+  return found;
+}
+
+/** One component of one model's first card, by component id. */
 function component(id: string, model: string, wanted: string) {
   const found = period(id, model).offPeak.find((entry) => entry.id === wanted);
   if (found === undefined) throw new Error(`${id}/${model} has no ${wanted} component`);
   return found;
 }
 
-/** One component's published rate. */
+/** One component's published rate, on the model's first list. */
 function rate(id: string, model: string, part: string): string {
   return component(id, model, part).rate;
+}
+
+/** One component's published rate, in a named currency. */
+function rateIn(id: string, model: string, currency: string, part: string): string {
+  return componentIn(id, model, currency, part).rate;
 }
 
 /** The component ids of a model's card, in file order. */
@@ -77,12 +105,24 @@ function components(id: string, model: string): string[] {
 /** The four vendors added on top of DeepSeek. */
 const ADDED = ['openai', 'anthropic', 'moonshot', 'zhipu'] as const;
 
-/** Each vendor's own page, which is where its rows come from. */
-const VENDOR_PAGE: Record<(typeof ADDED)[number], string> = {
-  openai: 'https://developers.openai.com/api/docs/pricing',
-  anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing',
-  moonshot: 'https://platform.kimi.com/docs/pricing/chat',
-  zhipu: 'https://docs.bigmodel.cn/cn/guide/start/pricing',
+/**
+ * Each vendor's own page, per currency.
+ *
+ * A vendor that quotes two currencies publishes two lists: the Chinese site in
+ * yuan and the international site in dollars. They are separate published
+ * numbers, so each period names the page it was copied from.
+ */
+const VENDOR_PAGE: Record<(typeof ADDED)[number], Partial<Record<'CNY' | 'USD', string>>> = {
+  openai: { USD: 'https://developers.openai.com/api/docs/pricing' },
+  anthropic: { USD: 'https://platform.claude.com/docs/en/about-claude/pricing' },
+  moonshot: {
+    CNY: 'https://platform.kimi.com/docs/pricing/chat',
+    USD: 'https://platform.kimi.ai/docs/pricing/chat',
+  },
+  zhipu: {
+    CNY: 'https://docs.bigmodel.cn/cn/guide/start/pricing',
+    USD: 'https://docs.z.ai/guides/overview/pricing',
+  },
 };
 
 /** The aggregator URL the few uncovered rows still point at. */
@@ -128,18 +168,31 @@ describe('the shipped vendor list', () => {
 });
 
 describe('provenance', () => {
-  it('points every vendor-sourced period at its vendor page, with the fetch date', () => {
+  it('points every period at the vendor page for its own currency, with the fetch date', () => {
     for (const id of ADDED) {
       for (const model of provider(id).models) {
-        if (!fromVendor(id, model.model)) continue;
-        const entry = period(id, model.model);
-        expect(entry.source).toBe(VENDOR_PAGE[id]);
-        expect(entry.note).toContain('抓取于 2026-10-04');
-        expect(entry.note).toContain(VENDOR_PAGE[id].replace('https://', ''));
-        // One open-ended period per model: the vendor page lists current prices only.
-        expect(entry.to).toBeNull();
-        expect(entry.peak).toBeNull();
-        expect(entry.peakWindows).toEqual([]);
+        for (const entry of model.periods) {
+          const expected = fromVendor(id, model.model)
+            ? VENDOR_PAGE[id][entry.currency as 'CNY' | 'USD']
+            : LITELLM;
+          expect(entry.source).toBe(expected);
+          if (entry.source === LITELLM) continue;
+          expect(entry.note).toContain('抓取于 2026-10-04');
+          expect(entry.note).toContain(entry.source.replace('https://', ''));
+        }
+      }
+    }
+  });
+
+  it('gives every period an open-ended window with no peak rule', () => {
+    for (const id of ADDED) {
+      for (const model of provider(id).models) {
+        for (const entry of model.periods) {
+          // One snapshot per published list: the vendor page shows current prices only.
+          expect(entry.to).toBeNull();
+          expect(entry.peak).toBeNull();
+          expect(entry.peakWindows).toEqual([]);
+        }
       }
     }
   });
@@ -148,6 +201,7 @@ describe('provenance', () => {
     // The vendor pages have no row for these three, so they stay on LiteLLM and
     // the note says so rather than pretending the vendor published them.
     for (const [id, model] of AGGREGATOR_ROWS) {
+      expect(periods(id, model)).toHaveLength(1);
       const entry = period(id, model);
       expect(entry.source).toBe(LITELLM);
       expect(entry.note).toContain('聚合源');
@@ -155,18 +209,61 @@ describe('provenance', () => {
     }
   });
 
-  it('publishes yuan for the vendors whose pages are yuan-only', () => {
-    // Moonshot and Zhipu publish CNY; converting would invent a number.
+  it('publishes the yuan and dollar lists side by side, window for window', () => {
+    // The DeepSeek pattern: the same model carries one list per published
+    // currency over identical windows, and the reader's currency picks one.
     for (const id of ['moonshot', 'zhipu'] as const) {
       for (const model of provider(id).models) {
-        const entry = period(id, model.model);
-        const vendorRow = fromVendor(id, model.model);
-        expect(entry.currency).toBe(vendorRow ? 'CNY' : 'USD');
-        if (vendorRow) expect(entry.note).toContain('CNY');
+        if (!fromVendor(id, model.model)) {
+          expect(model.periods.map((entry) => entry.currency)).toEqual(['USD']);
+          continue;
+        }
+        expect(model.periods.map((entry) => entry.currency)).toEqual(['CNY', 'USD']);
+        const cny = periodIn(id, model.model, 'CNY');
+        const usd = periodIn(id, model.model, 'USD');
+        expect(usd.from).toBe(cny.from);
+        expect(usd.to).toBe(cny.to);
+        expect(usd.id).toBe(cny.id);
+        expect(cny.note).toContain('CNY');
+        expect(usd.note).toContain('USD');
+        expect(usd.source).not.toBe(cny.source);
       }
     }
-    for (const id of ['openai', 'anthropic'] as const) {
-      for (const model of provider(id).models) expect(period(id, model.model).currency).toBe('USD');
+  });
+
+  it('records the dollar list as its own numbers, not a conversion', () => {
+    // GLM-5.3 is ¥8 / ¥28 / ¥2 and $1.4 / $4.4 / $0.26; Kimi K3 is ¥20 / ¥100 / ¥2
+    // and $3 / $15 / $0.30. Each is what its own page prints.
+    expect(rateIn('zhipu', 'glm-5.3', 'CNY', 'output')).toBe('28');
+    expect(rateIn('zhipu', 'glm-5.3', 'USD', 'output')).toBe('4.4');
+    expect(rateIn('zhipu', 'glm-5.3', 'USD', 'input-hit')).toBe('0.26');
+    expect(rateIn('zhipu', 'glm-5', 'USD', 'input-miss')).toBe('1');
+    expect(rateIn('moonshot', 'kimi-k3', 'CNY', 'output')).toBe('100');
+    expect(rateIn('moonshot', 'kimi-k3', 'USD', 'output')).toBe('15');
+    expect(rateIn('moonshot', 'kimi-k3', 'USD', 'input-write')).toBe('3');
+    expect(rateIn('moonshot', 'kimi-k3', 'USD', 'input-hit')).toBe('0.3');
+    expect(rateIn('moonshot', 'kimi-k2.7-code', 'USD', 'input-miss')).toBe('0.95');
+    expect(rateIn('moonshot', 'kimi-k2.7-code-highspeed', 'USD', 'output')).toBe('8.00');
+  });
+
+  it('lets the currency the reader wants pick the list', () => {
+    // `selectCurrency` keeps one list per model before the engine ever sees it,
+    // which is what makes `--currency USD` show the international prices and
+    // `--currency CNY` the Chinese ones — and an unquoted currency fall back to
+    // the dollar list rather than to a mixture.
+    const cases: [string, string, string][] = [
+      ['zhipu', 'USD', 'USD'],
+      ['zhipu', 'CNY', 'CNY'],
+      ['zhipu', 'EUR', 'USD'],
+      ['moonshot', 'CNY', 'CNY'],
+      ['moonshot', 'EUR', 'USD'],
+    ];
+    for (const [id, wanted, expected] of cases) {
+      const picked = selectCurrency(lookup(id), wanted);
+      for (const model of picked.provider.models()) {
+        if (!fromVendor(id, model.model)) continue;
+        expect([...new Set(model.periods.map((entry) => entry.currency))]).toEqual([expected]);
+      }
     }
   });
 
@@ -313,6 +410,9 @@ describe('billing bases', () => {
     // formula is miss input + hit + output + cache storage, so writes are input.
     expect(components('moonshot', 'kimi-k3')).toEqual(['input-miss', 'input-hit', 'input-write', 'output']);
     expect(component('moonshot', 'kimi-k3', 'input-write').ttlMultipliers).toEqual({ '1h': '2' });
+    // Both published lists carry the same write tier, so the basis does not
+    // depend on which currency the reader asked for.
+    expect(componentIn('moonshot', 'kimi-k3', 'USD', 'input-write').ttlMultipliers).toEqual({ '1h': '2' });
     for (const model of ['kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'kimi-k2.5']) {
       expect(components('moonshot', model)).toEqual(['input-miss', 'input-hit', 'output']);
       expect(component('moonshot', model, 'input-miss').basis).toBe('inputAndCacheWrite');
@@ -427,6 +527,23 @@ describe('cost of a request', () => {
       record({ time: AT, model: 'glm-5.3', tokens: { ...emptyBuckets(), cacheWrite: 1_000_000 } }),
     );
     expect(cost?.total).toBe(8_000_000_000n);
+  });
+
+  it('prices the same request out of either published list', () => {
+    // The reader's currency chooses the list before the engine runs, so the same
+    // record costs ¥142 on the Chinese list and $21.30 on the international one
+    // for Kimi K3, and ¥8 / $1.40 for one million GLM-5.3 cache writes.
+    const kimiCny = createPricingEngine(selectCurrency(lookup('moonshot'), 'CNY').provider);
+    const kimiUsd = createPricingEngine(selectCurrency(lookup('moonshot'), 'USD').provider);
+    const kimiTokens = { ...emptyBuckets(), input: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000, output: 1_000_000 };
+    expect(kimiCny.costOf(record({ time: AT, model: 'kimi-k3', tokens: kimiTokens }))?.total).toBe(142_000_000_000n);
+    expect(kimiUsd.costOf(record({ time: AT, model: 'kimi-k3', tokens: kimiTokens }))?.total).toBe(21_300_000_000n);
+
+    const glmCny = createPricingEngine(selectCurrency(lookup('zhipu'), 'CNY').provider);
+    const glmUsd = createPricingEngine(selectCurrency(lookup('zhipu'), 'USD').provider);
+    const write = { ...emptyBuckets(), cacheWrite: 1_000_000 };
+    expect(glmCny.costOf(record({ time: AT, model: 'glm-5.3', tokens: write }))?.total).toBe(8_000_000_000n);
+    expect(glmUsd.costOf(record({ time: AT, model: 'glm-5.3', tokens: write }))?.total).toBe(1_400_000_000n);
   });
 
   it('leaves a model the sources do not cover unpriced', () => {
