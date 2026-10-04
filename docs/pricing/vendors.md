@@ -7,12 +7,11 @@
 | 来源 | 角色 |
 | --- | --- |
 | [developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing)、[platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing)、[platform.kimi.com/docs/pricing/chat](https://platform.kimi.com/docs/pricing/chat) 与 [platform.kimi.ai/docs/pricing/chat](https://platform.kimi.ai/docs/pricing/chat)、[docs.bigmodel.cn/cn/guide/start/pricing](https://docs.bigmodel.cn/cn/guide/start/pricing) 与 [docs.z.ai/guides/overview/pricing](https://docs.z.ai/guides/overview/pricing) | **权威**：表里绝大多数数字 |
-| [LiteLLM 价格表](https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json) | **兜底**：厂商页没有的那三行（表里标「聚合源」） |
 | [OpenRouter](https://openrouter.ai/api/v1/models) | 不采用。**OpenRouter 自己就是一个价格提供者**（它有自己的路由/托管价），不是厂商价的来源；实测它在 `gpt-5.6-sol`（报 2/10/0.2，厂商 4/20）、`kimi-k3`（报 0.72/13/0.7，厂商 $3/15 或 ¥20/100）、`glm-5.2`（报 0.3/3.49，厂商 $1.4/4.4 或 ¥8/28）上都是错的 |
 
 - **缓存写入**：OpenAI 对 gpt-5.6 及更新型号**收费**（= 1.25 × 输入，厂商页「Cache writes」列；`gpt-5.5` 与专用模型写 `-`）；Anthropic 5 分钟 1.25×、1 小时 2×（表里 `ttlMultipliers`，适配器按日志的 `ephemeral_1h_input_tokens` 选档——真实数据 98.9% 是 1 小时档）；Kimi 两档都有；智谱不单列。
 - **未建模：整段分档**。OpenAI `gpt-5.6-sol` >272K 输入价、智谱 GLM-5/5.1/4.7 中文站的 ≥32K 档都是「整段按高档重算」，而本仓库的 `aboveThreshold` 只对**超出部分**加价，语义不同，硬套会歪曲厂商规则——所以只把档位列在每条 `note` 里，**长请求会被低估**（实测数据里单次请求最大输入 247,861 tokens，尚未触发）。
-- 四家 `defaultModel` 都是 `null`：模型查不到就落 `unpriced` 并给警告。目前唯一一条是 codex 日志里的 `codex-auto-review`（Codex 自动审批线程的标签，厂商与两个聚合源都查不到）。
+- **只收录厂商页查得到的模型**，每条记录按它自己的模型选表（`src/pricing/routing.ts`）：混多家厂商的用量时各按各的表算，头部列出实际命中的表；`--provider` 把整次运行钉死在一张表上。没有任何表认识某个模型时它是 `unpriced` 并给警告——不借用别家型号的价（目前唯一一条是 codex 日志里的 `codex-auto-review`，Codex 自动审批线程的标签，厂商页查不到）。
 
 ## 覆盖的模型
 
@@ -31,7 +30,6 @@
 | `gpt-5.6-luna` | 0.2 | 0.02 | 0.25 | 1.2 | — |
 | `gpt-5.5` | 5 | 0.5 | — | 30 | — |
 | `gpt-5.3-codex` | 1.75 | 0.175 | — | 14 | — |
-| `gpt-5.6` （聚合源） | 4 | 0.4 | — | 20 | — |
 
 ### Anthropic（`--provider anthropic`）
 
@@ -68,7 +66,6 @@
 | `kimi-k2.7-code` | 0.95（含写入） | 0.19 | 含在输入 | 4 | — |
 | `kimi-k2.7-code-highspeed` | 1.9（含写入） | 0.38 | 含在输入 | 8 | — |
 | `kimi-k2.6` | 0.95（含写入） | 0.16 | 含在输入 | 4 | — |
-| `kimi-k2.5` （聚合源） | 0.6（含写入） | 0.1 | 含在输入 | 3 | — |
 
 ### 智谱 / GLM（`--provider zhipu`）
 
@@ -93,6 +90,5 @@
 | `glm-5` | 1（含写入） | 0.2 | 含在输入 | 3.2 | — |
 | `glm-4.7` | 0.6（含写入） | 0.11 | 含在输入 | 2.2 | — |
 | `glm-5.3-flash` | 0.15（含写入） | 0.03 | 含在输入 | 0.5 | — |
-| `glm-5-code` （聚合源） | 1.2（含写入） | 0.3 | 含在输入 | 5 | — |
 
-（`—` 表示该厂商不单独收这个桶；标「（聚合源）」的行是厂商页没有、暂用 LiteLLM 的。价格以 [`config/pricing.json`](../config.md) 为准，本页是它的可读版本。）
+（`—` 表示该厂商不单独收这个桶。价格以 [`config/pricing.json`](../config.md) 为准，本页是它的可读版本。）

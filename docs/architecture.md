@@ -66,10 +66,13 @@ export interface AgentAdapter {
 ## 新增一个计价来源
 
 加厂商就是往仓库的 `config/pricing.json` 里加一条（`src/pricing/registry.ts` 启动时读它，
+**一张表管一个厂商，每条记录按它自己的模型选表**（`src/pricing/routing.ts`）：一次统计里混了
+多家厂商的用量时，各条各按自己那张表算钱，头部会列出实际命中的表；`--provider` 则把整次运行钉死在
+一张表上。没有任何表认识某个模型时，它是 `unpriced`，不会被套上别家的价。
 `src/pricing/catalog.ts` 负责解析与校验）：
 
 ```jsonc
-{ "id": "deepseek", "label": "DeepSeek", "defaultModel": "deepseek-flash",
+{ "id": "deepseek", "label": "DeepSeek",
   "models": [{ "model": "deepseek-flash", "aliases": ["deepseek-chat", "..."],
                "periods": [{ "id": "2026-09-10", "from": "2026-09-10T12:00:00+08:00", "to": null,
                              "currency": "CNY",   // 只要代码，符号内置；时钟取自 from 的偏移
@@ -85,7 +88,6 @@ export interface AgentAdapter {
 export interface PricingProvider {
   id: string;                    // --provider 的值
   label: string;
-  defaultModel: string | null;   // 未知模型时借用谁的价格；null 表示不计价
   models(): readonly ModelPrice[];
   find(model): ModelPrice | undefined;
 }
@@ -96,7 +98,7 @@ export interface PricingProvider {
 - **分时段**：区间给 `peakWindows`（本地时段 + 可选星期限制）与 `peak` 费率，引擎按请求**自身时刻**选区间、按区间**自己的时区**选峰谷；不给 `peak` 就是统一价。
 - **不按量计的桶**：不列该组件即可（例如 DeepSeek 不单独计缓存写入，就用 `basis: 'inputAndCacheWrite'` 把写入并入未命中输入）。
 - **别的货币**：`currency` 一填，`--currency-rate` 与显示符号自动跟着变。
-- **取不到价格**：`defaultModel: null` 时未知模型会被计入 `unpriced` 并给出提示，而不是当成免费。
+- **取不到价格**：没有任何一张表认识这个模型时，它会被计入 `unpriced` 并给出提示——不借用别家型号的价，也不当成免费。
 
 ```bash
 agent-usages price              # 默认计价来源的价格表
