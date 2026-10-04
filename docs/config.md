@@ -186,12 +186,15 @@ update [all|prices|rates] [--force] [--write-config]
 ## 定时任务
 
 `.github/workflows/refresh-rates.yml` 每天 15:30 UTC（欧洲央行约 15:00 UTC 发布参考汇率之后）
-跑一次：`update rates --force --write-config` → `check-config` → 测试 → 有变化才提交
-`config/rates.json`（提交人是 `github-actions[bot]`）。也能在 Actions 页面手动触发
-（workflow_dispatch）。
+跑一次：`update rates --force --write-config` → 有变化才提交 `config/rates.json`
+（提交人是 `github-actions[bot]`）。也能在 Actions 页面手动触发（workflow_dispatch）。
+写回前命令自己会解析校验拉到的数据，任务里**不**跑测试——那是每次 push 的
+[test.yml](.github/workflows/test.yml) 的事，包括这个 bot 的提交。
 
-- **价格表不自动改**：厂商价格页是 HTML，无法可靠解析，改价仍然人工提交 + `check-config`；
-  但定时任务每天会用 `check-config` 验一遍，坏掉的配置不会溜过去。
+- **价格表不自动改**：厂商价格页是 HTML，无法可靠解析，改价仍然人工提交 + `check-config`。
+  随包的 `config/pricing.json` 与 `config/holidays.json` 由测试直接解析（`test/pricing/*.test.ts`
+  自己说的："随包文件也要过，配置里的手误必须打断测试套件，而不是用户第一次运行"），
+  所以坏配置在 PR 阶段就会红，不需要定时任务兜底。
 - 任一汇率源都失败时命令返回非零，任务失败并留下日志，不会提交半截数据。
 - 用 `GITHUB_TOKEN` 推送到默认分支，不会触发新的工作流（不会自激）。
 
