@@ -34,6 +34,8 @@ export interface RankedEntry {
   subtitle?: string | undefined;
   /** Counts shown next to the bar (sessions, subagents…). */
   counts?: string | undefined;
+  /** Extra controls drawn with the title — a copy button, for a session's log. */
+  actions?: ReactNode | undefined;
   tokens: TokenBuckets;
   cost: CostTotals;
   requests: number;
@@ -665,6 +667,7 @@ export function RankedList({
                             {entry.subtitle}
                           </span>
                         )}
+                        {entry.actions}
                         {sortKey === 'recent' && entry.lastUsage != null && (
                           <span className="shrink-0 text-[11px] text-muted">{formatInstant(entry.lastUsage)}</span>
                         )}

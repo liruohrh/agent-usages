@@ -36,6 +36,10 @@ interface ApiSession {
   agent: string;
   isSubagent: boolean;
   parentId: string | null;
+  workspace: string;
+  cwd: string | null;
+  /** Absolute path of the session's own log file, when the agent reports one. */
+  sourceFile?: string | undefined;
   requests: number;
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number };
   cost: { total: string; cacheHitInputCost: string };
@@ -193,6 +197,24 @@ function rootSessions(dashboard: ApiDashboard): ApiSession[] {
 /** The billed-bucket total a row's `T` column shows. */
 function billed(session: ApiSession): number {
   return session.tokens.input + session.tokens.cacheRead + session.tokens.cacheWrite + session.tokens.output;
+}
+
+/** What the page's clipboard holds right now. */
+async function clipboardOf(page: Page): Promise<string> {
+  return page.evaluate(() => navigator.clipboard.readText());
+}
+
+/**
+ * Every session in the payload whose agent named its log file.
+ *
+ * The button is only offered where there is a path to copy, so a test about it
+ * has to pick one of those — or skip, when the data at hand (the tracked
+ * synthetic fixture, say) predates the field.
+ */
+function sessionsWithLogFile(dashboard: ApiDashboard): ApiSession[] {
+  return dashboard.projects
+    .flatMap((project) => project.sessionReports)
+    .filter((session) => typeof session.sourceFile === 'string' && session.sourceFile.length > 0);
 }
 
 /** The two projects a switching test uses, or a skip when there are fewer. */
@@ -478,6 +500,33 @@ test.describe('a session', () => {
       sortedRows(detail.detail.models).map((row) => apiTriple(row)),
     );
   });
+
+  test('copies the log file path and the workspace from its header', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    // The payload is fetched from the page, so the page has to exist first.
+    await page.goto('/');
+    const named = sessionsWithLogFile(await apiDashboard(page));
+    test.skip(named.length === 0, 'no session reports a log file (the fixture predates the field)');
+    const chosen = named[0] as ApiSession;
+    await page.goto(`/s/${encodeURIComponent(chosen.uid)}`);
+
+    // The header shows the file and offers it on the clipboard: the whole point is
+    // to paste this path into a terminal or an editor.
+    const logButton = page.getByRole('button', { name: '复制日志文件路径' });
+    await expect(logButton).toBeVisible();
+    await expect(logButton).toHaveAttribute('aria-label', '复制日志文件路径');
+    await expect(logButton).toHaveAttribute('title', new RegExp(chosen.sourceFile?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') ?? ''));
+    await logButton.click();
+    await expect(logButton).toHaveAttribute('data-copy-state', 'copied');
+    expect(await clipboardOf(page)).toBe(chosen.sourceFile);
+
+    // Where it ran is one more path worth having, and it is on the same header.
+    const workspace = chosen.cwd ?? chosen.workspace;
+    const workspaceButton = page.getByRole('button', { name: '复制工作目录' });
+    await expect(workspaceButton).toBeVisible();
+    await workspaceButton.click();
+    expect(await clipboardOf(page)).toBe(workspace);
+  });
 });
 
 test.describe('the session leaderboard', () => {
@@ -512,6 +561,28 @@ test.describe('the session leaderboard', () => {
     expect(requests).toBe(dearest?.requests);
     expect(close(tokens, dearest ? billed(dearest) : 0)).toBeLessThan(0.02);
     expect(close(cost, Number(dearest?.cost.total ?? 0))).toBeLessThan(0.01);
+  });
+
+  test('copies a row’s log path without opening the row', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/?view=sessions');
+    const sessions = rootSessions(await apiDashboard(page));
+    const named = sessions.filter((session) => typeof session.sourceFile === 'string' && session.sourceFile.length > 0);
+    test.skip(named.length === 0, 'no session reports a log file (the fixture predates the field)');
+
+    // Which rows offer the button is data-dependent, so the row is found by the
+    // path its button carries rather than by position.
+    const buttons = page.locator('main ol > li button[data-copy-path]');
+    const paths = await buttons.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-copy-path')));
+    const index = paths.findIndex((path) => named.some((session) => session.sourceFile === path));
+    expect(index, 'at least one row copies a path the API reports').toBeGreaterThanOrEqual(0);
+    const button = buttons.nth(index);
+    await expect(button).toHaveAttribute('aria-label', '复制日志文件路径');
+    await button.click();
+    await expect(button).toHaveAttribute('data-copy-state', 'copied');
+    expect(await clipboardOf(page)).toBe(paths[index]);
+    // Copying is not selecting: the row's own expansion stays closed.
+    await expect(rowAt(page, index).locator('table')).toHaveCount(0);
   });
 
   test('orders the list from the dropdown, both directions', async ({ page }) => {
@@ -679,7 +750,11 @@ test.describe('the session leaderboard', () => {
 
     const sessions = rootSessions(await apiDashboard(page));
     const first0 = [...sessions].sort((left, right) => Number(right.cost.total) - Number(left.cost.total))[0];
-    expect(buckets.join(' ')).toContain(first0?.cost.total ?? '');
+    // The 合计 line is this session's money. Compare the numbers, not the strings:
+    // the page trims trailing zeros (`58.3080` renders as `¥58.308`).
+    const totalLine = buckets.find((line) => line.includes('合计')) ?? '';
+    const shownCost = Number(((totalLine.match(/¥([\d.,]+)/) ?? [])[1] ?? '').replace(/,/g, ''));
+    expect(shownCost).toBeCloseTo(Number(first0?.cost.total ?? '0'), 2);
     await expect(detail.getByRole('link', { name: /打开会话详情/ })).toBeVisible();
 
     await first.locator('[role="button"]').first().click();

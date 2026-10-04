@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom';
 import type { SessionDetail as Detail, SessionTreeNode } from '../types';
 import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } from '../format';
 import { AgentBadge, Card, Chip, Notice } from './Bits';
+import { CopyPathButton } from './CopyPath';
 import { Composition, KpiRow, MetricDetailTable, ScopeSplitTable } from './Metrics';
 import { useT } from '../i18n';
 import { BandTable, ModelTable } from './Tables';
@@ -53,9 +54,31 @@ export function SessionDetailPanel({
               {session.isSubagent ? t.session.subagentNode : t.session.main}
             </Chip>
             {session.archived && <Chip tone="muted">{t.session.archived}</Chip>}
-            <span className="truncate" title={session.cwd ?? session.workspace}>
-              {shortenPath(session.cwd ?? session.workspace, 60)}
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="truncate" title={session.cwd ?? session.workspace}>
+                {shortenPath(session.cwd ?? session.workspace, 60)}
+              </span>
+              <CopyPathButton
+                value={session.cwd ?? session.workspace}
+                label={t.copy.workspace}
+                short={t.copy.workspaceShort}
+              />
             </span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
+            <span>{t.copy.logPathShort}：</span>
+            {session.sourceFile === undefined ? (
+              // The adapter could not name the file: say so instead of offering a
+              // button that would copy nothing.
+              <span title={t.copy.noLogPath}>{t.copy.noLogPath}</span>
+            ) : (
+              <>
+                <span className="max-w-[42rem] truncate text-muted" title={session.sourceFile}>
+                  {shortenPath(session.sourceFile, 72)}
+                </span>
+                <CopyPathButton value={session.sourceFile} label={t.copy.logPath} short={t.copy.logPathShort} />
+              </>
+            )}
           </div>
           <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-faint">
             <span>{t.session.project(session.projectName)}</span>

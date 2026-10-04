@@ -27,7 +27,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
 import { workspacePathsOf } from '../../core/paths.ts';
@@ -478,6 +478,8 @@ function buildSession(walked: WalkedSession): SessionRecord {
     agent: 'claude',
     title: session.title,
     cwd: session.cwd,
+    // The file this row was read from — for a subagent, its own log.
+    sourceFile: resolve(walked.file),
     createdAt: session.createdAt,
     records,
     parentId,

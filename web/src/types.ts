@@ -84,6 +84,8 @@ export interface SessionNode {
   projectId: string;
   projectName: string;
   workspace: string;
+  /** Absolute path of this session's own log file, when the agent reports one. */
+  sourceFile?: string | undefined;
   title: string | null;
   cwd: string | null;
   createdAt: number | null;

@@ -31,6 +31,7 @@ import {
   TOKEN_BUCKETS,
 } from '../format';
 import { AgentBadge, Card, Chip, ShareBar } from './Bits';
+import { CopyPathButton } from './CopyPath';
 import { useT } from '../i18n';
 
 /** Total tokens across the four billed buckets. */
@@ -629,6 +630,7 @@ function SessionCell({
             </Link>
             {session.subagentCount > 0 && <Chip tone="muted">{t.board.subagentsChip(String(session.subagentCount))}</Chip>}
             {session.archived && <Chip tone="muted">{t.session.archived}</Chip>}
+            <CopyPathButton value={session.sourceFile} label={t.copy.logPath} short={t.copy.logPathShort} compact />
           </div>
         </td>
       );

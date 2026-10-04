@@ -24,7 +24,7 @@
 
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { isolateConfig } from './tmp-config.mjs';
 
@@ -203,11 +203,12 @@ async function exercise(base, { live }) {
 
   const sessions = await call(base, '/api/sessions');
   check('GET /api/sessions → 200', sessions.status === 200, `HTTP ${sessions.status}`);
-  check('sessions 非空且带 uid/agent', (sessions.body?.sessions ?? []).every((session) => typeof session.uid === 'string' && typeof session.agent === 'string'));
-  const subagents = (sessions.body?.sessions ?? []).filter((session) => session.isSubagent);
+  const listSessions = sessions.body?.sessions ?? [];
+  check('sessions 非空且带 uid/agent', listSessions.every((session) => typeof session.uid === 'string' && typeof session.agent === 'string'));
+  const subagents = listSessions.filter((session) => session.isSubagent);
   check('会话列表里有子代理（isSubagent）', subagents.length > 0);
 
-  const target = subagents[0] ?? sessions.body?.sessions?.[0];
+  const target = subagents[0] ?? listSessions[0];
   const detail = await call(base, `/api/sessions/${encodeURIComponent(target?.uid ?? 'nope')}`);
   check('GET /api/sessions/:id → 200', detail.status === 200, `HTTP ${detail.status}`);
   check('会话详情带委派树', detail.body?.detail?.tree !== undefined && Array.isArray(detail.body?.detail?.tree?.children));
@@ -220,6 +221,38 @@ async function exercise(base, { live }) {
   );
   const missingSession = await call(base, '/api/sessions/there-is-no-such-session');
   check('GET /api/sessions/<未知> → 404', missingSession.status === 404, `HTTP ${missingSession.status}`);
+
+  // The page's copy button hands the reader the session's own log file. Whether a
+  // session has one depends on the agent (an index-only session has no log), so
+  // absence is allowed — but a path that *is* there must be absolute, must match
+  // between the list and the detail, and in a live scan must be on disk. The
+  // tracked synthetic fixture predates the field, so the strict half waits for
+  // the live pass (or for a regenerated snapshot) to mean anything.
+  const namedSessions = listSessions.filter((session) => session.sourceFile !== undefined);
+  check(
+    '会话 sourceFile 有则必须是绝对路径',
+    namedSessions.every((session) => typeof session.sourceFile === 'string' && isAbsolute(session.sourceFile)),
+    namedSessions.slice(0, 3).map((session) => JSON.stringify(session.sourceFile)).join('; '),
+  );
+  check(
+    '会话详情沿用列表里的 sourceFile',
+    detail.body?.detail?.session?.sourceFile === target?.sourceFile,
+    `${JSON.stringify(detail.body?.detail?.session?.sourceFile)} vs ${JSON.stringify(target?.sourceFile)}`,
+  );
+  if (live) {
+    const broken = namedSessions.filter((session) => !existsSync(session.sourceFile));
+    // An adapter that fills the field at all must fill it from a file it read.
+    check(
+      '实时扫描：会话带 sourceFile',
+      namedSessions.length > 0,
+      `0 / ${listSessions.length} 个会话有日志路径`,
+    );
+    check(
+      '实时扫描：每个 sourceFile 都真的存在',
+      broken.length === 0,
+      broken.slice(0, 3).map((session) => session.sourceFile).join('; '),
+    );
+  }
 
   const day = await call(base, '/api/timeseries?bucket=day');
   check('GET /api/timeseries?bucket=day → 200', day.status === 200, `HTTP ${day.status}`);

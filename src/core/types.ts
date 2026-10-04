@@ -110,6 +110,16 @@ export interface SessionRecord {
   title: string | null;
   /** Working directory the session ran in, when known. */
   cwd: string | null;
+  /**
+   * Absolute path of the log file this session was read from, when known.
+   *
+   * A session *is* a file on disk, and a reader often wants the file itself — to
+   * grep one tool call, to hand it to another tool, to keep it after the agent
+   * rotates its own logs. For a subagent this is the subagent's own log, not its
+   * parent's. Absent means the adapter could not name the file (a session known
+   * only from an index or a projection cache); a path is never guessed.
+   */
+  sourceFile?: string | undefined;
   /** Session creation time, when known. */
   createdAt: number | null;
   /** Every billed request, ordered by {@link UsageRecord.time} ascending. */

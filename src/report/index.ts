@@ -202,6 +202,14 @@ export interface SessionReport {
   title: string | null;
   /** Working directory, when known. */
   cwd: string | null;
+  /**
+   * Absolute path of the log file this session was read from, when known.
+   *
+   * Carried through so a reader can go back to the raw log; absent for a session
+   * known only from an index or a projection cache, because a guessed path would
+   * be worse than none.
+   */
+  sourceFile?: string | undefined;
   /** Owning project's display name. */
   projectName: string;
   /** Owning project id. */
@@ -875,6 +883,7 @@ function sessionReport(input: SessionRowInput): SessionReport {
     agent: session.agent,
     title: session.title,
     cwd: session.cwd,
+    ...(session.sourceFile === undefined ? {} : { sourceFile: session.sourceFile }),
     projectName: project.name,
     projectId: project.id,
     createdAt: session.createdAt,
@@ -1340,6 +1349,8 @@ export interface SessionListEntry {
   projectName: string;
   /** Working directory. */
   cwd: string | null;
+  /** Absolute path of the session's own log file, when the agent reports one. */
+  sourceFile?: string | undefined;
   /** Session creation time. */
   createdAt: number | null;
   /** First billed request. */
@@ -1555,6 +1566,7 @@ function toListEntry(session: SessionRecord, project: ProjectRecord, dataset: Us
     projectId: project.id,
     projectName: project.name,
     cwd: session.cwd,
+    ...(session.sourceFile === undefined ? {} : { sourceFile: session.sourceFile }),
     createdAt: session.createdAt,
     firstUsage: session.records[0]?.time ?? null,
     lastUsage: session.records[session.records.length - 1]?.time ?? null,

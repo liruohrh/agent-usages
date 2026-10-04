@@ -530,7 +530,7 @@ describe('session list', () => {
         agent: string;
         totalProjects: number;
         totalSessions: number;
-        projects: { name: string; sessionCount: number; sessions: { title: string }[] }[];
+        projects: { name: string; sessionCount: number; sessions: { title: string; sourceFile?: string }[] }[];
       };
       expect(parsed.agent).toBe('dsh');
       expect(parsed.totalProjects).toBe(1);
@@ -538,6 +538,11 @@ describe('session list', () => {
       expect(parsed.projects[0]?.name).toBe('demo');
       expect(parsed.projects[0]?.sessionCount).toBe(1);
       expect(parsed.projects[0]?.sessions[0]?.title).toBe('演示会话');
+      // The row names the log it was read from, so a reader can open the file.
+      const sourceFile = parsed.projects[0]?.sessions[0]?.sourceFile ?? '';
+      expect(sourceFile.startsWith('/')).toBe(true);
+      expect(sourceFile.endsWith(`/${SESSION_ID}/session.jsonl`)).toBe(true);
+      expect(existsSync(sourceFile)).toBe(true);
     }
   });
 

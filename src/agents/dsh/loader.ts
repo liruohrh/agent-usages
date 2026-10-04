@@ -388,6 +388,8 @@ function buildSession(
     agent: 'dsh',
     title: meta.title,
     cwd: meta.cwd,
+    // Absent for a session only the projection cache knows: it has no log file.
+    ...(meta.log === undefined ? {} : { sourceFile: meta.log.path }),
     createdAt: meta.createdAt,
     records,
     parentId,

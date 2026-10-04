@@ -820,6 +820,7 @@ describe('sessionListToJson', () => {
             projectId: 'demo',
             projectName: 'demo',
             cwd: '/tmp/demo',
+            sourceFile: '/tmp/demo/session-1.jsonl',
             createdAt: 1_786_896_000_000,
             firstUsage: null,
             lastUsage: null,
@@ -851,6 +852,17 @@ describe('sessionListToJson', () => {
     expect(json.projects[0]?.firstUsageIso).toBe('2026-08-16T16:00:00.000Z');
     expect(json.projects[0]?.lastUsageIso).toBeNull();
     expect(json.projects[0]?.sessions[0]?.firstUsageIso).toBeNull();
+  });
+
+  it('carries the session’s log file path through, and leaves it out when there is none', () => {
+    const json = sessionListToJson(list) as { projects: { sessions: { sourceFile?: string }[] }[] };
+    expect(json.projects[0]?.sessions[0]?.sourceFile).toBe('/tmp/demo/session-1.jsonl');
+
+    // A session whose agent could not name its file says nothing rather than
+    // carrying a null a reader would have to interpret.
+    const without = { ...list, projects: [{ ...list.projects[0]!, sessions: [{ ...list.projects[0]!.sessions[0]!, sourceFile: undefined }] }] };
+    const bare = sessionListToJson(without) as { projects: { sessions: Record<string, unknown>[] }[] };
+    expect('sourceFile' in (bare.projects[0]?.sessions[0] ?? {})).toBe(false);
   });
 
   it('renders a readable text listing', () => {

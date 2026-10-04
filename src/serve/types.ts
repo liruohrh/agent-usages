@@ -126,6 +126,14 @@ export interface SessionNode {
   projectName: string;
   /** Workspace directory this session ran in. */
   workspace: string;
+  /**
+   * Absolute path of this session's own log file, when the agent reports one.
+   *
+   * The page offers it on the clipboard: the log is a file on the machine the
+   * server reads, and a reader who wants to grep one tool call needs the path,
+   * not the numbers. Absent when the adapter cannot name the file.
+   */
+  sourceFile?: string | undefined;
   /** Session title, when the agent stores one. */
   title: string | null;
   /** Working directory, when known. */

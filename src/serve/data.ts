@@ -1359,6 +1359,7 @@ function sessionNode(report: SessionReport, projectId: string, projectName: stri
     projectId,
     projectName,
     workspace: report.cwd ?? projectPath,
+    ...(report.sourceFile === undefined ? {} : { sourceFile: report.sourceFile }),
     title: report.title,
     cwd: report.cwd,
     createdAt: report.createdAt,
@@ -2178,6 +2179,7 @@ function sessionReportFromNode(node: SessionNode): SessionReport {
     agent: node.agent,
     title: node.title,
     cwd: node.cwd,
+    ...(node.sourceFile === undefined ? {} : { sourceFile: node.sourceFile }),
     projectName: node.projectName,
     projectId: node.projectId,
     createdAt: node.createdAt,
@@ -2351,6 +2353,9 @@ function normalizeSessionNode(value: unknown, projectId: string, projectName: st
     projectId: String(entry['projectId'] ?? projectId),
     projectName: String(entry['projectName'] ?? projectName),
     workspace: String(entry['workspace'] ?? entry['cwd'] ?? ''),
+    ...(typeof entry['sourceFile'] === 'string' && entry['sourceFile'].length > 0
+      ? { sourceFile: entry['sourceFile'] }
+      : {}),
     title: stringOrNull(entry['title']),
     cwd: stringOrNull(entry['cwd']),
     createdAt: numberOrNull(entry['createdAt']),

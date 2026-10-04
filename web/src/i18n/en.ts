@@ -249,6 +249,16 @@ export const en: Messages = {
     models: 'Models in this session',
     bands: 'Price bands in this session',
   },
+  /** Copying a session's own paths: the log file, and where it ran. */
+  copy: {
+    logPath: 'Copy the log file path',
+    logPathShort: 'Log path',
+    workspace: 'Copy the working directory',
+    workspaceShort: 'Workspace',
+    copied: 'Copied',
+    failed: 'Copy failed',
+    noLogPath: 'No log file path was recorded for this session (only index data).',
+  },
   settings: {
     title: 'Settings',
     open: 'Settings',

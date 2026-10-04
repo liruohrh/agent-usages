@@ -25,7 +25,7 @@
 import type { Warning } from '../../i18n/errors.ts';
 import { UserError } from '../../i18n/errors.ts';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
 
 import type { TokenBuckets, UsageRecord } from '../../core/types.ts';
@@ -61,6 +61,13 @@ function compareLogNames(left: string, right: string): number {
 export interface SessionLogInfo {
   /** Canonical session id as written in the header. */
   sessionId: string;
+  /**
+   * Absolute path of the log file these facts were read from.
+   *
+   * The `session.v<N>.jsonl.zstd` the locator picked, not a name derived from the
+   * id: which file holds the session is exactly what the version rule decides.
+   */
+  path: string;
   /** Parent session id when this session is a subagent; `null` for top-level sessions. */
   parentSessionId: string | null;
   /** Delegation depth: 0 for a top-level session, ≥1 for a subagent. */
@@ -270,6 +277,9 @@ export async function readSessionLog(path: string): Promise<SessionLogScan> {
   const depth = asInteger(state.header['delegationDepth']) ?? (parentRaw === undefined ? 0 : 1);
   return {
     sessionId,
+    // The file actually read — `session.v4.jsonl.zstd`, `session.v3.…` or the
+    // unversioned seed, whichever the locator chose.
+    path: resolve(path),
     parentSessionId: parentRaw ?? null,
     delegationDepth: depth,
     createdAt: asInteger(state.header['createdAt']) ?? null,

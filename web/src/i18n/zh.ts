@@ -262,6 +262,16 @@ export const zh = {
     models: '本会话模型明细',
     bands: '本会话计价区间',
   },
+  /** Copying a session's own paths: the log file, and where it ran. */
+  copy: {
+    logPath: '复制日志文件路径',
+    logPathShort: '日志路径',
+    workspace: '复制工作目录',
+    workspaceShort: '工作目录',
+    copied: '已复制',
+    failed: '复制失败',
+    noLogPath: '这个会话没有记录到日志文件路径（只知道索引信息）。',
+  },
   /** The settings page: the tool's own configuration file, edited in place. */
   settings: {
     title: '配置',

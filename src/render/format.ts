@@ -1129,6 +1129,7 @@ export function sessionListToJson(result: SessionListResult): unknown {
         projectId: session.projectId,
         projectName: session.projectName,
         cwd: session.cwd,
+        ...(session.sourceFile === undefined ? {} : { sourceFile: session.sourceFile }),
         createdAt: session.createdAt,
         createdAtIso: iso(session.createdAt),
         firstUsage: session.firstUsage,

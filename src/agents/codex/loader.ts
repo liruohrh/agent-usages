@@ -35,7 +35,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
 import { workspacePathsOf } from '../../core/paths.ts';
@@ -435,7 +435,7 @@ async function findRollouts(root: string): Promise<string[]> {
 }
 
 /** Assemble one neutral session record. */
-function buildSession(scanned: ScannedSession, named: string | null): SessionRecord {
+function buildSession(scanned: ScannedSession, named: string | null, file: string): SessionRecord {
   const records = [...scanned.records].sort((left, right) => left.time - right.time);
   const extra: Record<string, unknown> = {};
   // A fork is a continuation of its source, not a subagent it spawned: it keeps
@@ -453,6 +453,8 @@ function buildSession(scanned: ScannedSession, named: string | null): SessionRec
     agent: 'codex',
     title: named ?? scanned.title,
     cwd: scanned.cwd,
+    // The rollout this session was read from; its own file for a subagent.
+    sourceFile: resolve(file),
     createdAt: scanned.createdAt,
     records,
     parentId: scanned.parentId ?? scanned.forkedFrom,
@@ -495,7 +497,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       continue;
     }
     if (sessions.some((session) => session.id === scanned.id)) continue;
-    const session = buildSession(scanned, titles.get(scanned.id) ?? null);
+    const session = buildSession(scanned, titles.get(scanned.id) ?? null, file);
     sessions.push(session);
     filesOf.set(session.id, file);
   }

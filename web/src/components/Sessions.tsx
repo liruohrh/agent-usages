@@ -12,6 +12,7 @@ import { Link } from 'react-router-dom';
 import type { SessionNode } from '../types';
 import { formatCost, formatInstant, formatShare, formatTokens, shortenPath } from '../format';
 import { AgentBadge } from './Bits';
+import { CopyPathButton } from './CopyPath';
 import { BucketDetail, RankedList, type RankedEntry } from './Ranked';
 import { SessionTable } from './Tables';
 import { useT } from '../i18n';
@@ -59,6 +60,8 @@ export function SessionLeaderboard({
     href: `/s/${encodeURIComponent(session.uid)}`,
     badges: <AgentBadge id={session.agent} small />,
     subtitle: showProject ? session.projectName : shortenPath(session.workspace, 34),
+    // The log the numbers came from: the reader's next step is usually to open it.
+    actions: <CopyPathButton value={session.sourceFile} label={t.copy.logPath} short={t.copy.logPathShort} compact />,
     ...(session.subagentCount > 0 ? { counts: t.board.subagentsChip(String(session.subagentCount)) } : {}),
     tokens: session.tokens,
     cost: session.cost,

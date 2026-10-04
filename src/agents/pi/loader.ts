@@ -26,7 +26,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
 import { workspacePathsOf } from '../../core/paths.ts';
@@ -234,6 +234,8 @@ async function childRuns(sessionFile: string): Promise<string[]> {
 /** A session plus the facts the walk learned about its place in the tree. */
 interface WalkedSession {
   session: ScannedSession;
+  /** The JSONL file this session was read from. */
+  file: string;
   parentId: string | null;
   depth: number;
   /** A fork of another session: a continuation, not a subagent it spawned. */
@@ -274,7 +276,7 @@ async function walk(
       continuation = true;
     }
   }
-  found.push({ session, parentId: forkParentId ?? parentId, depth, continuation });
+  found.push({ session, file, parentId: forkParentId ?? parentId, depth, continuation });
   for (const run of await childRuns(file)) {
     await walk(run, session.id, depth + 1, found, warnings, source);
   }
@@ -296,7 +298,7 @@ function sessionsRootOf(source: string, env: NodeJS.ProcessEnv): string {
 
 /** Assemble one neutral session record from a walk result. */
 function buildSession(walked: WalkedSession): SessionRecord {
-  const { session, parentId, depth, continuation } = walked;
+  const { session, file, parentId, depth, continuation } = walked;
   const records = [...session.records].sort((left, right) =>
     left.time === right.time ? 0 : left.time - right.time,
   );
@@ -309,6 +311,8 @@ function buildSession(walked: WalkedSession): SessionRecord {
     // it was given says far more, so it wins when there is one.
     title: depth > 0 ? (session.task ?? session.title ?? session.firstUser) : (session.title ?? session.firstUser),
     cwd: session.cwd,
+    // The JSONL this row was read from — a subagent run's own file.
+    sourceFile: resolve(file),
     createdAt: session.createdAt,
     records,
     parentId,
