@@ -185,7 +185,8 @@ update [all|prices|rates] [--force] [--write-config]
 
 ## 定时任务
 
-`.github/workflows/refresh-rates.yml` 每天 15:30 UTC（欧洲央行约 15:00 UTC 发布参考汇率之后）
+`.github/workflows/refresh-rates.yml` 每周一 15:30 UTC（欧洲央行约 15:00 UTC 发布参考汇率之后；
+与本地策略的"汇率每周一次"是同一个数字）
 跑一次：`update rates --force --write-config` → 有变化才提交 `config/rates.json`
 （提交人是 `github-actions[bot]`）。也能在 Actions 页面手动触发（workflow_dispatch）。
 写回前命令自己会解析校验拉到的数据，任务里**不**跑测试——那是每次 push 的
