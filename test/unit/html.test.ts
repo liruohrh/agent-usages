@@ -135,6 +135,7 @@ function report(overrides: Partial<UsageResult> = {}): UsageResult {
     cost: cost('0.0000'),
     bands: [],
     models: [],
+    subtotals: [],
     projects: [],
     repos: [],
     warnings: [],
