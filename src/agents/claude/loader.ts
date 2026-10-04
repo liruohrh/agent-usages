@@ -31,7 +31,14 @@ import { basename, isAbsolute, join, relative, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
 import { workspacePathsOf } from '../../core/paths.ts';
-import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRecord } from '../../core/types.ts';
+import type {
+  CacheWriteTtl,
+  ProjectRecord,
+  SessionRecord,
+  TokenBuckets,
+  UsageDataset,
+  UsageRecord,
+} from '../../core/types.ts';
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
@@ -215,6 +222,32 @@ function usageBuckets(usage: Record<string, unknown>): TokenBuckets {
   };
 }
 
+/**
+ * The cache-write tier a usage block was billed at.
+ *
+ * Claude Code reports the two ephemeral tiers separately
+ * (`cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`) and this
+ * adapter has always summed them into one bucket. The sum alone undercharges: the
+ * vendor bills 1h writes at 2× input and 5m at 1.25×, and on the real logs this was
+ * measured against (2026-10-04) **98.9% of the cache-write tokens were the 1h tier**.
+ *
+ * A block that mixes tiers is billed at the higher one — the 5m share was ~1% there,
+ * and guessing low is the error that costs money.
+ * @param usage - one entry's `message.usage` block.
+ * @returns the tier to bill, or `undefined` when the block does not say.
+ */
+function cacheWriteTtlOf(usage: Record<string, unknown>): CacheWriteTtl | undefined {
+  const creation = asRecord(usage['cache_creation']);
+  if (creation === undefined) return undefined;
+  return asCount(creation['ephemeral_1h_input_tokens']) > 0 ? '1h' : undefined;
+}
+
+/** What one `usage` block contributes to a record: buckets, and the write tier. */
+function billedUsage(usage: Record<string, unknown>): Pick<UsageRecord, 'tokens' | 'cacheWriteTtl'> {
+  const ttl = cacheWriteTtlOf(usage);
+  return { tokens: usageBuckets(usage), ...(ttl === undefined ? {} : { cacheWriteTtl: ttl }) };
+}
+
 /** One session file's facts. */
 interface ScannedSession {
   /** Session id: the parent's file uuid, or the subagent's `sessionId`. */
@@ -304,12 +337,12 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
     const time = asInstant(entry['timestamp']);
     if (time === null) continue;
     const messageId = asString(message['id']) ?? asString(entry['uuid']) ?? `line${line}`;
-    const buckets = usageBuckets(usage);
-    const score = (asString(message['stop_reason']) === undefined ? 0 : 1_000_000_000) + buckets.output;
+    const billedUsageFields = billedUsage(usage);
+    const score = (asString(message['stop_reason']) === undefined ? 0 : 1_000_000_000) + billedUsageFields.tokens.output;
     const seen = billed.get(messageId);
     if (seen !== undefined) {
       if (score > seen.score) {
-        records[seen.index] = { ...(records[seen.index] as UsageRecord), tokens: buckets, time };
+        records[seen.index] = { ...(records[seen.index] as UsageRecord), ...billedUsageFields, time };
         billed.set(messageId, { index: seen.index, score });
       }
       continue;
@@ -322,7 +355,7 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       time,
       model: priceableModel(model),
       modelLabel: model,
-      tokens: buckets,
+      ...billedUsageFields,
     });
   }
   if (id === undefined && cwd === null && records.length === 0) return undefined;

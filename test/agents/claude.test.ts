@@ -103,6 +103,71 @@ afterEach(async () => {
 });
 
 describe('reading a Claude Code home', () => {
+  it('bills cache writes at the 1h tier when the log says so', async () => {
+    // Claude Code splits the two ephemeral tiers, and the vendor charges 1h writes at
+    // 2× input against 1.25× for 5m. Real logs are ~98.9% 1h (measured 2026-10-04), so
+    // billing the summed bucket at the 5m rate undercharged every cache write by 1.6×
+    // until this tier reached the record.
+    const project = join(home, 'projects', '-tmp-demo');
+    const id = 'eeeeeeee-1111-4111-8111-000000000001';
+    await writeFile(
+      join(project, `${id}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        uuid: 'ttl-1',
+        parentUuid: null,
+        sessionId: id,
+        timestamp: '2026-09-23T00:00:05.000Z',
+        cwd: '/tmp/demo',
+        message: {
+          id: 'msg-ttl',
+          model: 'claude-opus-5',
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 3_000,
+            cache_creation: { ephemeral_5m_input_tokens: 1_000, ephemeral_1h_input_tokens: 2_000 },
+          },
+        },
+      })}\n`,
+    );
+    const data = await claudeAgent.load({ home });
+    const records = data.sessions.flatMap((session) => session.records);
+    expect(records.find((record) => record.tokens.cacheWrite === 3_000)?.cacheWriteTtl).toBe('1h');
+  });
+
+  it('leaves the tier alone when the log only reports the 5m bucket', async () => {
+    const project = join(home, 'projects', '-tmp-demo');
+    const id = 'eeeeeeee-1111-4111-8111-000000000002';
+    await writeFile(
+      join(project, `${id}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        uuid: 'ttl-2',
+        parentUuid: null,
+        sessionId: id,
+        timestamp: '2026-09-23T00:00:06.000Z',
+        cwd: '/tmp/demo',
+        message: {
+          id: 'msg-ttl-5m',
+          model: 'claude-opus-5',
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 500,
+            cache_creation: { ephemeral_5m_input_tokens: 500, ephemeral_1h_input_tokens: 0 },
+          },
+        },
+      })}\n`,
+    );
+    const data = await claudeAgent.load({ home });
+    const records = data.sessions.flatMap((session) => session.records);
+    expect(records.find((record) => record.tokens.cacheWrite === 500)?.cacheWriteTtl).toBeUndefined();
+  });
   it('keeps the fuller record when one message.id appears twice', async () => {
     // A replayed request can repeat a message id with a different usage; the
     // entry that finished (a `stop_reason`) and reported more output wins.
