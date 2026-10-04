@@ -41,7 +41,9 @@ describe('parsePricingConfig', () => {
   it('reads the shipped file into providers', () => {
     const config = parsePricingConfig(shipped());
     expect(config.version).toBe(1);
-    expect(config.providers.map((entry) => entry.id)).toEqual(['deepseek']);
+    // DeepSeek stays first: it is the default for a run that names no provider.
+    // The four vendors after it are priced from an aggregator, not a vendor page.
+    expect(config.providers.map((entry) => entry.id)).toEqual(['deepseek', 'openai', 'anthropic', 'moonshot', 'zhipu']);
     const deepseek = config.providers[0]!;
     expect(deepseek.defaultModel).toBe('deepseek-flash');
     expect(deepseek.models.map((model) => model.model)).toEqual(['deepseek-flash', 'deepseek-v4-pro']);
@@ -65,7 +67,7 @@ describe('parsePricingConfig', () => {
   });
 
   it('accepts a string as well as a parsed document', () => {
-    expect(parsePricingConfig(JSON.stringify(shipped())).providers).toHaveLength(1);
+    expect(parsePricingConfig(JSON.stringify(shipped())).providers).toHaveLength(5);
   });
 
   it('reports the path of the field that is wrong', () => {
