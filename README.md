@@ -7,9 +7,11 @@
 | 维度 | 作用 | 当前支持 |
 | --- | --- | --- |
 | **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness）、`pi`、`claude`（Claude Code）、`codex`（Codex）；默认**全部** |
-| **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek 官方）— 目前唯一 |
+| **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek）、`openai`（OpenAI）、`anthropic`（Anthropic）、`moonshot`（Kimi）、`zhipu`（GLM） |
 
-DeepSeek 只是**目前唯一支持的计价来源**。两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱，因此新增任何一方都只是加一个模块 + 一条注册项（见[架构与扩展](docs/architecture.md)）。
+两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱，因此新增任何一方都只是加一个模块 + 一条注册项（见[架构与扩展](docs/architecture.md)）。
+
+价格表按 agent 自动选：`dsh` → DeepSeek、`codex` → OpenAI、`claude` → Anthropic（`--provider` 显式指定永远优先）。一次统计混了多个 agent 时，会用第一张表给所有人计价并**给出显式警告**——金额只是那一家的口径，要分开算就分别用 `--agent` 跑。
 
 一次运行默认读取**本机所有装了数据的 agent**，把同一路径、同一 git 仓库的数据合并成同一个项目，并在每一层标明数字来自哪个 agent——详见[项目与工作区](#项目与工作区)。
 
@@ -122,7 +124,7 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 
 ### `price`
 
-打印内置价格表：每个生效区间的峰谷时段、单价、来源链接与说明。**不会**读取任何数据，也不需要 `--home`。加 `--all` 列出全部计价来源。价格明细与来源见 [DeepSeek 价格表](docs/pricing/deepseek.md)。
+打印内置价格表：每个生效区间的峰谷时段、单价、来源链接与说明。**不会**读取任何数据，也不需要 `--home`。加 `--all` 列出全部计价来源。价格明细与来源见 [DeepSeek 价格表](docs/pricing/deepseek.md) 与 [OpenAI / Anthropic / Kimi / 智谱](docs/pricing/vendors.md)。
 
 ### `agents`
 

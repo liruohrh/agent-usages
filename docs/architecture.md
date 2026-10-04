@@ -5,7 +5,7 @@
 | 维度 | 作用 | 当前支持 |
 | --- | --- | --- |
 | **agent** | 从哪里读取用量 | `dsh`（DeepSeek Harness）、`pi`、`claude`（Claude Code）、`codex`（Codex） |
-| **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek） |
+| **模型价格计算** | 用谁的价格表把用量换算成钱 | `deepseek`（DeepSeek）、`openai`（OpenAI）、`anthropic`（Anthropic）、`moonshot`（Kimi）、`zhipu`（GLM） |
 
 两者互不知情：agent 适配器只负责产出「用量记录」，计价提供方只负责把记录换算成钱。因此新增任何一方都只是「一个模块 + 一条注册项」，核心层（聚合、报表、CLI）不需要改动。
 
