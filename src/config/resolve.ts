@@ -64,28 +64,37 @@ export interface ResolveOptions {
 
 /** Parse the price configuration from whichever layer is freshest. */
 function pricingProviders(env: NodeJS.ProcessEnv, warnings: Warning[]): ProviderConfig[] {
+  const shipped = parsePricingConfig(shippedPricingText());
   const cached = cachedConfigText('pricing', env);
   if (cached !== undefined) {
     try {
-      return parsePricingConfig(cached).providers;
+      const fetched = parsePricingConfig(cached);
+      // The cache exists to be *fresher* than the package — which holds right up
+      // until the package is upgraded. A shipped file dated later than the cache is
+      // the one the user just installed, and reading the cache then means a brand new
+      // vendor silently does not exist (`updatedAt` is `YYYY-MM-DD`, so this is a
+      // plain string compare).
+      return fetched.updatedAt >= shipped.updatedAt ? fetched.providers : shipped.providers;
     } catch (error) {
       warnings.push(new UserError('cachedPricesUnusable', { reason: (error as Error).message }));
     }
   }
-  return parsePricingConfig(shippedPricingText()).providers;
+  return shipped.providers;
 }
 
 /** Parse the rate configuration from whichever layer is freshest. */
 function ratesConfig(env: NodeJS.ProcessEnv, warnings: Warning[]): RatesConfig {
+  const shipped = parseRatesConfig(shippedRatesText());
   const cached = cachedConfigText('rates', env);
   if (cached !== undefined) {
     try {
-      return parseRatesConfig(cached);
+      const fetched = parseRatesConfig(cached);
+      return fetched.updatedAt >= shipped.updatedAt ? fetched : shipped;
     } catch (error) {
       warnings.push(new UserError('cachedRatesUnusable', { reason: (error as Error).message }));
     }
   }
-  return parseRatesConfig(shippedRatesText());
+  return shipped;
 }
 
 /**

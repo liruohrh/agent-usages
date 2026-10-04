@@ -2,9 +2,9 @@
  * Configuration-resolution tests.
  *
  * These pin the layer that everything else runs on: a user override must survive
- * the merge into a real provider (both currencies intact), a cached file must
- * win over the shipped one, and a broken file anywhere must degrade to the layer
- * below rather than stop the command.
+ * the merge into a real provider (both currencies intact), the *fresher* of the
+ * cached and shipped files must win, and a broken file anywhere must degrade to
+ * the layer below rather than stop the command.
  */
 
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -165,16 +165,35 @@ describe('resolveConfig', () => {
     expect(config.currency).toBeUndefined();
   });
 
-  it('uses the cached rate table when there is one', async () => {
+  it('uses the cached rate table when it is newer than the shipped one', async () => {
     const rates = JSON.parse(readFileSync(new URL('../../config/rates.json', import.meta.url), 'utf8')) as Record<string, unknown>;
     (rates['table'] as Record<string, string>)['CNY'] = '9.999';
-    rates['updatedAt'] = '2026-09-22';
+    // Later than the shipped file's own date, which is what "the cache wins" means.
+    rates['updatedAt'] = '2026-12-31';
     const config = await resolveConfig({
       noUpdate: true,
       env: envWith({ 'cache-rates.json': { fetchedAt: 1, text: JSON.stringify(rates) } }),
     });
     expect(config.rateTable.rates['CNY']).toBe('9.999');
-    expect(config.rateTable.provenance.date).toBe('2026-09-22');
+    expect(config.rateTable.provenance.date).toBe('2026-12-31');
+  });
+
+  it('ignores a cache the shipped package has outgrown', async () => {
+    // Upgrading the tool is supposed to bring its price lists with it. The cache is
+    // fetched from the repository and is normally the fresher of the two — until the
+    // package being run is newer than the last fetch, at which point a cached table
+    // would silently hide a vendor the user just installed (2026-10-04: the four new
+    // providers were invisible for exactly this reason).
+    const stale = JSON.parse(readFileSync(new URL('../../config/pricing.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+    stale['updatedAt'] = '2026-01-01';
+    stale['providers'] = [(stale['providers'] as unknown[])[0]];
+    const config = await resolveConfig({
+      noUpdate: true,
+      env: envWith({ 'cache-pricing.json': { fetchedAt: 1, text: JSON.stringify(stale) } }),
+    });
+    expect(config.warnings).toEqual([]);
+    // Five of them ship today; the point is that the stale cache's single entry lost.
+    expect(config.providers.map((provider) => provider.id)).toEqual(['deepseek', 'openai', 'anthropic', 'moonshot', 'zhipu']);
   });
 });
 
