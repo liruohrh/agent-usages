@@ -22,7 +22,7 @@ import { MONEY_SCALE, parseDecimal } from '../core/money.ts';
 import { UserError } from '../i18n/errors.ts';
 import type { Messages } from '../i18n/zh.ts';
 import { t } from '../i18n/index.ts';
-import type { CacheWriteTtl, TokenBuckets, UsageRecord } from '../core/types.ts';
+import { CACHE_WRITE_TTLS, type CacheWriteTtl, type TokenBuckets, type UsageRecord } from '../core/types.ts';
 import {
   type BillingBasis,
   type ComponentCharge,
@@ -288,6 +288,13 @@ function scaleRate(component: RateComponent, rate: bigint, multiplier: bigint): 
 export interface ChargeContext {
   /** TTL tier the provider reported for this request's cache writes. */
   cacheWriteTtl?: CacheWriteTtl | undefined;
+  /**
+   * How this request's cache writes split across TTL tiers, when it reports one.
+   *
+   * Each tier's tokens are charged at that tier's own multiplier; what the split
+   * does not cover is charged at {@link ChargeContext.cacheWriteTtl}.
+   */
+  cacheWriteTiers?: Readonly<Partial<Record<CacheWriteTtl, number>>> | undefined;
 }
 
 /** The multiplier a component publishes for a TTL tier, scaled; 1× when it names none. */
@@ -296,6 +303,41 @@ function ttlMultiplierOf(component: RateComponent, tier: CacheWriteTtl | null): 
   const published = component.ttlMultipliers[tier];
   if (published === undefined) return MONEY_SCALE;
   return parseRate(published);
+}
+
+/**
+ * Split a cache-write quantity into the tranches its TTL tiers named.
+ *
+ * Each tranche carries the multiplier its own tier publishes. Tiers are read in
+ * ascending order of life and clipped to what is left of the quantity, so the
+ * tranches always add up to exactly the tokens the record bills: a log that
+ * over-attributes a tier can never be charged for more writes than it recorded,
+ * and tokens no tier names fall to the fallback multiplier instead of vanishing.
+ *
+ * @param component - the component being charged, for its published multipliers.
+ * @param quantity - `tokens.cacheWrite`, the tokens to split.
+ * @param tiers - the record's per-tier token counts.
+ * @param fallback - multiplier for the tokens no tier names.
+ * @returns the tranches in charge order, empty when there is nothing to charge.
+ */
+function cacheWriteChunks(
+  component: RateComponent,
+  quantity: number,
+  tiers: Readonly<Partial<Record<CacheWriteTtl, number>>>,
+  fallback: bigint,
+): { tokens: number; multiplier: bigint }[] {
+  const chunks: { tokens: number; multiplier: bigint }[] = [];
+  let left = quantity;
+  for (const tier of CACHE_WRITE_TTLS) {
+    const named = tiers[tier];
+    if (named === undefined || !Number.isFinite(named) || named <= 0) continue;
+    const count = Math.min(Math.trunc(named), left);
+    if (count <= 0) continue;
+    chunks.push({ tokens: count, multiplier: ttlMultiplierOf(component, tier) });
+    left -= count;
+  }
+  if (left > 0) chunks.push({ tokens: left, multiplier: fallback });
+  return chunks;
 }
 
 /**
@@ -314,9 +356,14 @@ function ttlMultiplierOf(component: RateComponent, tier: CacheWriteTtl | null): 
  * unchanged, so a card that uses neither feature takes exactly the path it did
  * before either existed.
  *
+ * A cache write that reports a per-tier split is charged tier by tier — a 1-hour
+ * write does not cost what a 5-minute one does — and the tranches are added as
+ * scaled integers, so the total is exact and the long-context threshold is still
+ * crossed once, not once per tier.
+ *
  * @param component - the rate to charge.
  * @param tokens - the request's token buckets.
- * @param context - the request's TTL tier, when the provider reported one.
+ * @param context - the request's TTL tier and tier split, when the provider reported them.
  * @returns the charge, split by what produced it.
  */
 export function chargeComponent(
@@ -332,8 +379,16 @@ export function chargeComponent(
   // A tier that multiplies by one changes nothing, and reporting it would
   // suggest the money depended on a TTL the rate card does not price.
   const ttlTier = multiplier === MONEY_SCALE ? null : declared;
-  const baseRate = scaleRate(component, rateOf(component), multiplier);
   const threshold = component.aboveThreshold?.tokens;
+  if (component.basis === 'cacheWrite' && context.cacheWriteTiers !== undefined) {
+    return chargeCacheWriteTiers(component, quantity, context.cacheWriteTiers, {
+      fallback: multiplier,
+      ttlTier,
+      ttlMultiplier: multiplier,
+      threshold,
+    });
+  }
+  const baseRate = scaleRate(component, rateOf(component), multiplier);
   const baseTokens = threshold === undefined ? quantity : Math.min(quantity, threshold);
   const excessTokens = quantity - baseTokens;
   const base = charge(baseTokens, baseRate, component.per);
@@ -353,6 +408,75 @@ export function chargeComponent(
     ttlTier,
     ttlTokens: ttlTier === null ? 0 : quantity,
     ttlMultiplier: multiplier,
+  };
+}
+
+/** How a per-tier cache write is charged: the fallback multiplier, and the TTL shown. */
+interface TierChargeOptions {
+  /** Multiplier for tokens no named tier covers. */
+  fallback: bigint;
+  /** TTL tier the report labels the charge with, or `null`. */
+  ttlTier: CacheWriteTtl | null;
+  /** Multiplier of that reported tier. */
+  ttlMultiplier: bigint;
+  /** Long-context threshold of the component, when it has one. */
+  threshold: number | undefined;
+}
+
+/**
+ * Charge one cache-write quantity at each TTL tier's own multiplier.
+ *
+ * The long-context threshold is a property of the quantity, not of a tier: the
+ * tranches are charged in order and the base tranche is consumed by the first
+ * ones, so the whole charge crosses the threshold exactly once and a split
+ * write is billed neither less nor more than the same write unsplit.
+ *
+ * @param component - the cache-write component.
+ * @param quantity - the record's `tokens.cacheWrite`.
+ * @param tiers - the record's per-tier token counts.
+ * @param options - fallback multiplier, the reported TTL, and the threshold.
+ * @returns the component's charge, summed over the tiers.
+ */
+function chargeCacheWriteTiers(
+  component: RateComponent,
+  quantity: number,
+  tiers: Readonly<Partial<Record<CacheWriteTtl, number>>>,
+  options: TierChargeOptions,
+): ComponentCharge {
+  let base = 0n;
+  let excess = 0n;
+  let baseTokens = 0;
+  let excessTokens = 0;
+  let excessRate: bigint | null = null;
+  /** Every rate the excess tranche was billed at; more than one cannot be shown. */
+  const excessRates = new Set<bigint>();
+  let thresholdLeft = options.threshold ?? 0;
+  for (const chunk of cacheWriteChunks(component, quantity, tiers, options.fallback)) {
+    const baseRate = scaleRate(component, rateOf(component), chunk.multiplier);
+    const chunkBase = options.threshold === undefined ? chunk.tokens : Math.min(chunk.tokens, thresholdLeft);
+    const chunkExcess = chunk.tokens - chunkBase;
+    base += charge(chunkBase, baseRate, component.per);
+    baseTokens += chunkBase;
+    thresholdLeft -= chunkBase;
+    if (chunkExcess === 0 || component.aboveThreshold === undefined) continue;
+    const rate = scaleRate(component, parseRate(component.aboveThreshold.rate), chunk.multiplier);
+    excess += charge(chunkExcess, rate, component.per);
+    excessTokens += chunkExcess;
+    excessRates.add(rate);
+    excessRate ??= rate;
+  }
+  return {
+    base,
+    excess,
+    total: base + excess,
+    baseTokens,
+    excessTokens,
+    // Mixed tiers bill the excess at more than one rate, so no single rate
+    // describes it; the money is still their exact sum.
+    excessRate: excessRates.size === 1 ? excessRate : null,
+    ttlTier: options.ttlTier,
+    ttlTokens: options.ttlTier === null ? 0 : quantity,
+    ttlMultiplier: options.ttlMultiplier,
   };
 }
 
@@ -506,7 +630,10 @@ class Engine implements PricingEngine {
     let charges: Map<string, ComponentCharge> | undefined;
     let total = 0n;
     for (const component of rate.components) {
-      const charged = chargeComponent(component, record.tokens, { cacheWriteTtl: record.cacheWriteTtl });
+      const charged = chargeComponent(component, record.tokens, {
+        cacheWriteTtl: record.cacheWriteTtl,
+        cacheWriteTiers: record.cacheWriteTiers,
+      });
       // Each tranche is converted and truncated on its own so the parts a report
       // shows still add up to the whole it charges; with no conversion factor —
       // the common case — this is the identity, not an approximation.

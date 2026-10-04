@@ -223,29 +223,51 @@ function usageBuckets(usage: Record<string, unknown>): TokenBuckets {
 }
 
 /**
- * The cache-write tier a usage block was billed at.
+ * The cache-write tiers a usage block reports.
  *
- * Claude Code reports the two ephemeral tiers separately
- * (`cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`) and this
- * adapter has always summed them into one bucket. The sum alone undercharges: the
- * vendor bills 1h writes at 2× input and 5m at 1.25×, and on the real logs this was
- * measured against (2026-10-04) **98.9% of the cache-write tokens were the 1h tier**.
+ * Claude Code splits the write across the two ephemeral tiers
+ * (`cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`) and
+ * a request can write both at once — the format reports them side by side. The
+ * adapter used to name one tier for the whole sum, which prices the 5m share of
+ * such a write at the 1h rate, so the split is carried and the engine charges
+ * each tier its own price.
  *
- * A block that mixes tiers is billed at the higher one — the 5m share was ~1% there,
- * and guessing low is the error that costs money.
+ * On the logs this was measured against (2026-10-04) every record happened to
+ * write one tier or the other, so the split changes no number there — the 5m
+ * tier was 1.5% of the write tokens — but the record now says which is which.
+ *
  * @param usage - one entry's `message.usage` block.
- * @returns the tier to bill, or `undefined` when the block does not say.
+ * @returns the per-tier counts and the tier most of the write belongs to, or
+ *   nothing when the block does not report a split.
  */
-function cacheWriteTtlOf(usage: Record<string, unknown>): CacheWriteTtl | undefined {
+function cacheWriteTiersOf(
+  usage: Record<string, unknown>,
+): Pick<UsageRecord, 'cacheWriteTtl' | 'cacheWriteTiers'> {
   const creation = asRecord(usage['cache_creation']);
-  if (creation === undefined) return undefined;
-  return asCount(creation['ephemeral_1h_input_tokens']) > 0 ? '1h' : undefined;
+  if (creation === undefined) return {};
+  const fiveMinutes = asCount(creation['ephemeral_5m_input_tokens']);
+  const oneHour = asCount(creation['ephemeral_1h_input_tokens']);
+  if (fiveMinutes === 0 && oneHour === 0) return {};
+  const tiers: Partial<Record<CacheWriteTtl, number>> = {};
+  if (fiveMinutes > 0) tiers['5m'] = fiveMinutes;
+  if (oneHour > 0) tiers['1h'] = oneHour;
+  // A block that wrote nothing but the default 5m tier names no tier — the same
+  // silence every record kept before the split existed, and the same money. One
+  // that wrote the 1h tier names the tier holding most of the write, which is
+  // what a report labels the charge with; tokens the split does not cover are
+  // billed at that tier too.
+  const cacheWriteTtl: CacheWriteTtl | undefined = oneHour === 0 ? undefined : oneHour > fiveMinutes ? '1h' : '5m';
+  return {
+    ...(cacheWriteTtl === undefined ? {} : { cacheWriteTtl }),
+    cacheWriteTiers: tiers,
+  };
 }
 
-/** What one `usage` block contributes to a record: buckets, and the write tier. */
-function billedUsage(usage: Record<string, unknown>): Pick<UsageRecord, 'tokens' | 'cacheWriteTtl'> {
-  const ttl = cacheWriteTtlOf(usage);
-  return { tokens: usageBuckets(usage), ...(ttl === undefined ? {} : { cacheWriteTtl: ttl }) };
+/** What one `usage` block contributes to a record: buckets, and how its write split. */
+function billedUsage(
+  usage: Record<string, unknown>,
+): Pick<UsageRecord, 'tokens' | 'cacheWriteTtl' | 'cacheWriteTiers'> {
+  return { tokens: usageBuckets(usage), ...cacheWriteTiersOf(usage) };
 }
 
 /** One session file's facts. */

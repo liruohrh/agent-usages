@@ -67,9 +67,23 @@ export interface UsageRecord {
    *
    * Absent means the vendor's default tier (`5m`), which is what the component's
    * own `rate` prices; only a longer-lived, separately priced tier needs to be
-   * named here.
+   * named here. When the request wrote several tiers at once this names the one
+   * that holds most of the write, which is what a report labels the charge with.
    */
   cacheWriteTtl?: CacheWriteTtl | undefined;
+  /**
+   * How this request's cache writes split across TTL tiers, when the provider says.
+   *
+   * One request can write its prompt into several tiers at the same time, and the
+   * tiers are priced differently, so the split — not a single tier — is what makes
+   * the charge exact. The counts need not add up to
+   * {@link TokenBuckets.cacheWrite}: a vendor may report only the tiers it names,
+   * and whatever is left over is billed at {@link UsageRecord.cacheWriteTtl}.
+   * Absent means the whole write belongs to that one tier, which is what an
+   * adapter that reports no split means — and it keeps the charge on the path it
+   * took before this field existed.
+   */
+  cacheWriteTiers?: Readonly<Partial<Record<CacheWriteTtl, number>>> | undefined;
   /** Sequence number inside the agent's own log, when it has one. */
   seq?: number | undefined;
   /** Turn number, when the agent tracks turns. */

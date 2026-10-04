@@ -365,3 +365,124 @@ describe('cache-write TTL multipliers', () => {
     expect(cost?.charges).toBeUndefined();
   });
 });
+
+describe('mixed cache-write TTL tiers', () => {
+  /**
+   * An anthropic-shaped write card: 6.25 per million for the default (5m) tier,
+   * ×1.6 (the published 2 ÷ 1.25) for a one-hour write.
+   */
+  const write = (overrides: Partial<RateComponent> = {}): RateComponent => ({
+    ...perMillion('input-write', 'write', 'cacheWrite', '6.25'),
+    ttlMultipliers: { '1h': '1.6' },
+    ...overrides,
+  });
+
+  it('charges each tier at its own price instead of the highest one', () => {
+    // A request that wrote one million tokens into each tier: 1M × 6.25 for the
+    // 5m write plus 1M × (6.25 × 1.6) for the 1h one.
+    const charge = chargeComponent(
+      write(),
+      { ...emptyBuckets(), cacheWrite: 2_000_000 },
+      { cacheWriteTtl: '1h', cacheWriteTiers: { '5m': 1_000_000, '1h': 1_000_000 } },
+    );
+    expect(charge.total).toBe(16_250_000_000n);
+    expect(charge.baseTokens).toBe(2_000_000);
+    expect(charge.excessTokens).toBe(0);
+    // The report still labels the charge with the tier most of the write used.
+    expect(charge.ttlTier).toBe('1h');
+    expect(charge.ttlTokens).toBe(2_000_000);
+    expect(charge.ttlMultiplier).toBe(1_600_000_000n);
+  });
+
+  it('bills the tokens no tier names at the reported tier, dropping none', () => {
+    // 200k at 5m, 800k at 1h, and 200k the log left unattributed, billed at 1h:
+    // 1.25 + 8 + 2 USD. Every token of the record is charged exactly once.
+    const charge = chargeComponent(
+      write(),
+      { ...emptyBuckets(), cacheWrite: 1_200_000 },
+      { cacheWriteTtl: '1h', cacheWriteTiers: { '5m': 200_000, '1h': 800_000 } },
+    );
+    expect(charge.total).toBe(11_250_000_000n);
+    expect(charge.baseTokens + charge.excessTokens).toBe(1_200_000);
+  });
+
+  it('never charges more writes than the record billed', () => {
+    // A log that over-attributes both tiers: the surplus is dropped, not billed.
+    const charge = chargeComponent(
+      write(),
+      { ...emptyBuckets(), cacheWrite: 1_000_000 },
+      { cacheWriteTtl: '1h', cacheWriteTiers: { '5m': 800_000, '1h': 800_000 } },
+    );
+    // 800k × 6.25 for the 5m tranche, then the 200k left over at the 1h rate.
+    expect(charge.total).toBe(7_000_000_000n);
+    expect(charge.baseTokens + charge.excessTokens).toBe(1_000_000);
+  });
+
+  it('crosses the long-context threshold once, not once per tier', () => {
+    const card = write({ aboveThreshold: { tokens: 1_000_000, rate: '12.5' } });
+    const charge = chargeComponent(
+      card,
+      { ...emptyBuckets(), cacheWrite: 1_500_000 },
+      { cacheWriteTtl: '1h', cacheWriteTiers: { '5m': 500_000, '1h': 1_000_000 } },
+    );
+    // 500k × 6.25 + 500k × 10 + 500k × (12.5 × 1.6).
+    expect(charge.total).toBe(18_125_000_000n);
+    expect(charge.baseTokens).toBe(1_000_000);
+    expect(charge.excessTokens).toBe(500_000);
+    expect(charge.excessRate).toBe(20_000_000_000n);
+    expect(charge.base + charge.excess).toBe(charge.total);
+  });
+
+  it('reports no single excess rate when two tiers bill the excess', () => {
+    const card = write({ aboveThreshold: { tokens: 200_000, rate: '12.5' } });
+    const charge = chargeComponent(
+      card,
+      { ...emptyBuckets(), cacheWrite: 1_500_000 },
+      { cacheWriteTtl: '1h', cacheWriteTiers: { '5m': 500_000, '1h': 1_000_000 } },
+    );
+    // 200k × 6.25 + 300k × 12.5 + 1M × (12.5 × 1.6) = 1.25 + 3.75 + 20 USD.
+    expect(charge.total).toBe(25_000_000_000n);
+    expect(charge.baseTokens).toBe(200_000);
+    expect(charge.excessTokens).toBe(1_300_000);
+    expect(charge.excessRate).toBeNull();
+    expect(charge.base + charge.excess).toBe(charge.total);
+  });
+
+  it('leaves a one-tier split exactly where the untiered charge was', () => {
+    const tokens = { ...emptyBuckets(), cacheWrite: 1_000_000 };
+    const plain = chargeComponent(write(), tokens, { cacheWriteTtl: '1h' });
+    const single = chargeComponent(write(), tokens, { cacheWriteTtl: '1h', cacheWriteTiers: { '1h': 1_000_000 } });
+    const empty = chargeComponent(write(), tokens, { cacheWriteTtl: '1h', cacheWriteTiers: {} });
+    for (const charge of [single, empty]) {
+      expect(charge.total).toBe(plain.total);
+      expect(charge.baseTokens).toBe(plain.baseTokens);
+      expect(charge.excessTokens).toBe(plain.excessTokens);
+      expect(charge.ttlTier).toBe(plain.ttlTier);
+      expect(charge.ttlTokens).toBe(plain.ttlTokens);
+    }
+  });
+
+  it('carries a record’s split through costOf, and charges less than one tier would', () => {
+    const tokens = { ...emptyBuckets(), cacheWrite: 300_000 };
+    const split = contextEngine.costOf(
+      record({
+        time: CONTEXT_AT.any,
+        model: 'context-model',
+        tokens,
+        cacheWriteTtl: '1h',
+        cacheWriteTiers: { '5m': 100_000, '1h': 200_000 },
+      }),
+    );
+    const oneTier = contextEngine.costOf(
+      record({ time: CONTEXT_AT.any, model: 'context-model', tokens, cacheWriteTtl: '1h' }),
+    );
+    // 100k × 5 + 100k × 10 + 100k × 14, against 200k × 10 + 100k × 14 unsplit.
+    expect(split?.amounts.get('input-write')).toBe(2_900_000_000n);
+    expect(oneTier?.amounts.get('input-write')).toBe(3_400_000_000n);
+    const charge = split?.charges?.get('input-write');
+    expect(charge?.baseTokens).toBe(200_000);
+    expect(charge?.excessTokens).toBe(100_000);
+    expect(charge?.ttlTier).toBe('1h');
+    expect(charge?.excessRate).toBe(14_000_000_000n);
+  });
+});

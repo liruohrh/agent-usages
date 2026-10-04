@@ -168,6 +168,104 @@ describe('reading a Claude Code home', () => {
     const records = data.sessions.flatMap((session) => session.records);
     expect(records.find((record) => record.tokens.cacheWrite === 500)?.cacheWriteTtl).toBeUndefined();
   });
+
+  it('carries both tiers of a mixed cache write, not just the larger one', async () => {
+    // One request wrote both tiers: the 5m share must be billed as 5m even though
+    // the record's headline tier is 1h, so the split travels with the record.
+    const project = join(home, 'projects', '-tmp-demo');
+    const id = 'eeeeeeee-1111-4111-8111-000000000003';
+    await writeFile(
+      join(project, `${id}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        uuid: 'ttl-3',
+        parentUuid: null,
+        sessionId: id,
+        timestamp: '2026-09-23T00:00:07.000Z',
+        cwd: '/tmp/demo',
+        message: {
+          id: 'msg-ttl-split',
+          model: 'claude-opus-5',
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 3_000,
+            cache_creation: { ephemeral_5m_input_tokens: 1_000, ephemeral_1h_input_tokens: 2_000 },
+          },
+        },
+      })}\n`,
+    );
+    const data = await claudeAgent.load({ home });
+    const record = data.sessions.flatMap((session) => session.records).find((entry) => entry.id.endsWith(':msg-ttl-split'));
+    expect(record?.tokens.cacheWrite).toBe(3_000);
+    expect(record?.cacheWriteTiers).toEqual({ '5m': 1_000, '1h': 2_000 });
+    // The tier holding most of the write is the one a report labels it with.
+    expect(record?.cacheWriteTtl).toBe('1h');
+  });
+
+  it('names the 5m tier when the 5m share is the larger one', async () => {
+    const project = join(home, 'projects', '-tmp-demo');
+    const id = 'eeeeeeee-1111-4111-8111-000000000004';
+    await writeFile(
+      join(project, `${id}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        uuid: 'ttl-4',
+        parentUuid: null,
+        sessionId: id,
+        timestamp: '2026-09-23T00:00:08.000Z',
+        cwd: '/tmp/demo',
+        message: {
+          id: 'msg-ttl-5m-majority',
+          model: 'claude-opus-5',
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 3_000,
+            cache_creation: { ephemeral_5m_input_tokens: 2_000, ephemeral_1h_input_tokens: 1_000 },
+          },
+        },
+      })}\n`,
+    );
+    const data = await claudeAgent.load({ home });
+    const record = data.sessions
+      .flatMap((session) => session.records)
+      .find((entry) => entry.id.endsWith(':msg-ttl-5m-majority'));
+    expect(record?.cacheWriteTiers).toEqual({ '5m': 2_000, '1h': 1_000 });
+    // The old single-tier rule would have called this whole write a 1h one.
+    expect(record?.cacheWriteTtl).toBe('5m');
+  });
+
+  it('leaves a usage block with no breakdown without a split', async () => {
+    const project = join(home, 'projects', '-tmp-demo');
+    const id = 'eeeeeeee-1111-4111-8111-000000000005';
+    await writeFile(
+      join(project, `${id}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        uuid: 'ttl-5',
+        parentUuid: null,
+        sessionId: id,
+        timestamp: '2026-09-23T00:00:09.000Z',
+        cwd: '/tmp/demo',
+        message: {
+          id: 'msg-ttl-none',
+          model: 'claude-opus-5',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 700 },
+        },
+      })}\n`,
+    );
+    const data = await claudeAgent.load({ home });
+    const record = data.sessions.flatMap((session) => session.records).find((entry) => entry.id.endsWith(':msg-ttl-none'));
+    expect(record?.tokens.cacheWrite).toBe(700);
+    expect(record?.cacheWriteTiers).toBeUndefined();
+    expect(record?.cacheWriteTtl).toBeUndefined();
+  });
   it('keeps the fuller record when one message.id appears twice', async () => {
     // A replayed request can repeat a message id with a different usage; the
     // entry that finished (a `stop_reason`) and reported more output wins.
