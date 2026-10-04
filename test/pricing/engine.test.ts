@@ -10,7 +10,13 @@ import { describe, expect, it } from 'vitest';
 
 import { emptyBuckets } from '../../src/core/buckets.ts';
 import { bareModelName, chargeComponent, createPricingEngine, isPeak, zoneTime } from '../../src/pricing/index.ts';
-import type { RateComponent } from '../../src/pricing/index.ts';
+import type {
+  InputTier,
+  ModelPrice,
+  PeakWindow,
+  PricingProvider,
+  RateComponent,
+} from '../../src/pricing/index.ts';
 import {
   CONTEXT_AT,
   CONTEXT_THRESHOLD,
@@ -20,7 +26,7 @@ import {
   stubProvider,
   TEST_CURRENCY,
 } from '../support/stub-pricing.ts';
-import { record } from '../support/dataset.ts';
+import { buckets, record } from '../support/dataset.ts';
 
 const engine = createPricingEngine(stubProvider());
 const contextEngine = createPricingEngine(contextProvider());
@@ -137,6 +143,173 @@ describe('tier selection', () => {
     // The stub's window is written in UTC; 09:00 UTC is 17:00 in Shanghai.
     expect(isPeak(STUB_AT.earlyPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 0)).toBe(true);
     expect(isPeak(STUB_AT.earlyPeak, [{ fromHour: 9, toHour: 12, weekdays: null }], 480)).toBe(false);
+  });
+});
+
+/** The instant the size-tier stubs' one period covers. */
+const SIZE_AT = Date.parse('2026-03-01T00:00:00Z');
+
+/** A flat card quoted per million tokens: miss, cache hit, output. */
+function card(miss: string, hit: string, output: string): RateComponent[] {
+  return [
+    perMillion('input-miss', 'miss', 'input', miss),
+    perMillion('input-hit', 'hit', 'cacheRead', hit),
+    perMillion('output', 'out', 'output', output),
+  ];
+}
+
+/**
+ * A provider whose one model reprices the whole request by its own size.
+ *
+ * The bounds copy the two published shapes: OpenAI's `≤272K` / `>272K` (the low
+ * band ends at the vendor's own 272,000, so exactly 272,000 stays cheap) and
+ * Zhipu's `<32K` / `≥32K` (the low band ends at 31,999, because the page puts
+ * exactly 32,000 in the high band).
+ * @param tiers - the size bands, in file order.
+ * @param windows - peak windows, when the tiers also carry peak cards.
+ */
+function sizeProvider(tiers: readonly InputTier[], windows: readonly PeakWindow[] = []): PricingProvider {
+  const models: ModelPrice[] = [
+    {
+      model: 'size-model',
+      aliases: ['size-model'],
+      periods: [
+        {
+          id: '2026-01-01',
+          label: 'size tiers',
+          from: Date.parse('2026-01-01T00:00:00Z'),
+          to: null,
+          offPeak: [],
+          peak: windows.length === 0 ? null : (tiers[0]?.peak ?? null),
+          peakWindows: windows,
+          inputTiers: tiers,
+          utcOffset: 0,
+          currency: TEST_CURRENCY.code,
+          source: 'test',
+          note: 'size tiers',
+        },
+      ],
+    },
+  ];
+  return {
+    id: 'stub-size',
+    label: 'Stub Size Vendor',
+    models: () => models,
+    find: (model) => models.find((price) => price.aliases.includes(model.trim().toLowerCase())),
+  };
+}
+
+/** OpenAI's shape: 1/2/4 below the bound, 10/20/40 above it. */
+const SIZE_TIERS: readonly InputTier[] = [
+  { label: '输入 ≤272K', upTo: 272_000, offPeak: card('1', '2', '4'), peak: null },
+  { label: '输入 >272K', upTo: null, offPeak: card('10', '20', '40'), peak: null },
+];
+
+/** Zhipu's shape: the low band ends at 31,999 because `≥32K` starts the high one. */
+const ZHIPU_TIERS: readonly InputTier[] = [
+  { label: '输入 <32K', upTo: 31_999, offPeak: card('1', '2', '4'), peak: null },
+  { label: '输入 ≥32K', upTo: null, offPeak: card('10', '20', '40'), peak: null },
+];
+
+/** GLM-4.7's three rows: two share the input bound and split on output length. */
+const THREE_TIERS: readonly InputTier[] = [
+  { label: '输入 <32K、输出 <0.2K', upTo: 31_999, outputUpTo: 199, offPeak: card('2', '0.4', '8'), peak: null },
+  { label: '输入 <32K、输出 ≥0.2K', upTo: 31_999, offPeak: card('3', '0.6', '14'), peak: null },
+  { label: '输入 ≥32K', upTo: null, offPeak: card('4', '0.8', '16'), peak: null },
+];
+
+describe('whole-request size tiers', () => {
+  const size = createPricingEngine(sizeProvider(SIZE_TIERS));
+
+  it('bills the whole request at the band it falls into, not just the excess', () => {
+    // 300K input is a 300K bill at 10 ($3), not 272K at 1 plus 28K at 10 ($0.552).
+    const cost = size.costOf(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 300_000 }) }));
+    expect(cost?.amounts.get('input-miss')).toBe(3_000_000_000n);
+    // The graduated card that looks similar charges the same threshold quite
+    // differently, which is why `aboveThreshold` could not express this rule.
+    const graduated = chargeComponent(
+      { ...perMillion('input-miss', 'miss', 'input', '1'), aboveThreshold: { tokens: 272_000, rate: '10' } },
+      buckets({ input: 300_000 }),
+    );
+    expect(graduated.total).toBe(552_000_000n);
+  });
+
+  it('keeps a request below the bound on the low card', () => {
+    const cost = size.costOf(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 100_000 }) }));
+    expect(cost?.amounts.get('input-miss')).toBe(100_000_000n);
+  });
+
+  it('puts exactly the bound in the low band, since the vendor wrote `>272K`', () => {
+    const at = size.resolve(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 272_000 }) }));
+    const above = size.resolve(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 272_001 }) }));
+    expect(at?.inputTier?.index).toBe(0);
+    expect(above?.inputTier?.index).toBe(1);
+    // One token over the line reprices the whole request.
+    expect(above?.components[0]?.rate).toBe('10');
+  });
+
+  it('puts exactly 32K in the high band, since the vendor wrote `≥32K`', () => {
+    const zhipu = createPricingEngine(sizeProvider(ZHIPU_TIERS));
+    const below = zhipu.resolve(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 31_999 }) }));
+    const at = zhipu.resolve(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 32_000 }) }));
+    expect(below?.inputTier?.index).toBe(0);
+    expect(at?.inputTier?.index).toBe(1);
+  });
+
+  it('reports which band the record hit, and leaves it off untiered periods', () => {
+    const hit = size.resolve(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 300_000 }) }));
+    expect(hit?.inputTier).toEqual({ index: 1, label: '输入 >272K', upTo: null, outputUpTo: null });
+    // Absent, not `index: 0`: "no size bands here" must stay tellable apart from
+    // "this request landed in the first band".
+    expect(engine.resolve(record({ time: STUB_AT.early, model: 'flat-model' }))?.inputTier).toBeUndefined();
+  });
+
+  it('does not count cache reads towards the band', () => {
+    // The band is chosen by the cache-miss input alone, so a mostly-cached 500K
+    // prompt stays on the low card — the reading each note publishes.
+    const mostlyCached = buckets({ input: 1_000, cacheRead: 500_000 });
+    expect(size.resolve(record({ time: SIZE_AT, model: 'size-model', tokens: mostlyCached }))?.inputTier?.index).toBe(0);
+  });
+
+  it('picks the middle band of a three-band table by output length', () => {
+    const three = createPricingEngine(sizeProvider(THREE_TIERS));
+    const short = three.costOf(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 10_000, output: 199 }) }));
+    const longer = three.costOf(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 10_000, output: 200 }) }));
+    const wide = three.costOf(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 32_000, output: 200 }) }));
+    expect(short?.amounts.get('input-miss')).toBe(20_000_000n);
+    expect(longer?.amounts.get('input-miss')).toBe(30_000_000n);
+    // A 32K input takes the third band whatever the completion looks like.
+    expect(wide?.amounts.get('input-miss')).toBe(128_000_000n);
+  });
+
+  it('applies the peak card of the band that matched', () => {
+    // Peak pricing and size bands are independent: the clock picks a line inside
+    // the card the size picked, which is the order the resolution reports.
+    const windows = [{ fromHour: 9, toHour: 12, weekdays: null }];
+    const tiered: readonly InputTier[] = [
+      { label: '输入 ≤200K', upTo: 200_000, offPeak: card('1', '2', '4'), peak: card('2', '4', '8') },
+      { label: '输入 >200K', upTo: null, offPeak: card('10', '20', '40'), peak: card('20', '40', '80') },
+    ];
+    const both = createPricingEngine(sizeProvider(tiered, windows));
+    const resolved = both.resolve(record({ time: STUB_AT.earlyPeak, model: 'size-model', tokens: buckets({ input: 300_000 }) }));
+    expect(resolved?.tier).toBe('peak');
+    expect(resolved?.reason).toBe('peak-window');
+    expect(resolved?.inputTier?.index).toBe(1);
+    expect(resolved?.components[0]?.rate).toBe('20');
+  });
+
+  it('refuses to price a size the last band does not cover', () => {
+    // Parsed price lists always end open, so this only reaches a hand-built
+    // provider — and an unpriced record beats a silently zero-cost one.
+    const bounded = createPricingEngine(sizeProvider([{ label: 'only', upTo: 1_000, offPeak: card('1', '2', '4'), peak: null }]));
+    expect(bounded.resolve(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 2_000 }) }))).toBeUndefined();
+    expect(bounded.resolve(record({ time: SIZE_AT, model: 'size-model', tokens: buckets({ input: 1_000 }) }))?.inputTier?.index).toBe(0);
+  });
+
+  it('describes the bands, so a reader sees which ones exist', () => {
+    const period = size.provider.models()[0]?.periods[0];
+    expect(period).toBeDefined();
+    expect(size.describeTiers(period!)).toBe('输入 ≤272K、输入 >272K');
   });
 });
 

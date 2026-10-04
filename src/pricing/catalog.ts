@@ -25,6 +25,7 @@ import { ConfigError } from '../i18n/errors.ts';
 import type {
   AboveThreshold,
   BillingBasis,
+  InputTier,
   ModelPrice,
   PeakWindow,
   PricePeriod,
@@ -73,6 +74,15 @@ function number(value: unknown, path: string): number {
     throw new ConfigError(path, 'configExpectsNumber', { value: JSON.stringify(value) });
   }
   return value;
+}
+
+/** Read a positive safe integer. */
+function positiveInteger(value: unknown, path: string): number {
+  const parsed = number(value, path);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new ConfigError(path, 'configPositiveInteger', { value: String(parsed) });
+  }
+  return parsed;
 }
 
 /** Read a required boolean. */
@@ -205,6 +215,72 @@ function component(value: unknown, path: string): RateComponent {
   return parsed;
 }
 
+/**
+ * Read one whole-request size tier.
+ *
+ * Every field but the output bound and the peak card is required, so a tier
+ * always says what it covers and what it costs. Both bounds are inclusive token
+ * counts: a vendor band written `≥32K` is entered at exactly 32,000 tokens, which
+ * is why the band below it ends at 31,999 rather than at the page's rounded `32K`
+ * — see {@link checkInputTiers} for the ordering rules that keep the bands a
+ * partition.
+ */
+function inputTier(value: unknown, path: string): InputTier {
+  const node = object(value, path);
+  if (node['upTo'] === undefined) throw new ConfigError(`${path}.upTo`, 'configMissingField', { field: 'upTo' });
+  const upTo = node['upTo'] === null ? null : positiveInteger(node['upTo'], `${path}.upTo`);
+  const output = node['outputUpTo'];
+  const outputUpTo = output === null || output === undefined ? undefined : positiveInteger(output, `${path}.outputUpTo`);
+  const peak = node['peak'] === null || node['peak'] === undefined
+    ? null
+    : array(node['peak'], `${path}.peak`).map((entry, index) => component(entry, `${path}.peak[${index}]`));
+  return {
+    label: text(node['label'], `${path}.label`),
+    upTo,
+    ...(outputUpTo === undefined ? {} : { outputUpTo }),
+    offPeak: array(node['offPeak'], `${path}.offPeak`).map((entry, index) => component(entry, `${path}.offPeak[${index}]`)),
+    peak,
+  };
+}
+
+/**
+ * Check a period's size tiers are a usable partition.
+ *
+ * Three rules, each of which a vendor's own table satisfies: every band but the
+ * last names an inclusive upper bound and the last stays open, so every request
+ * falls into exactly one band; no band sits entirely inside an earlier one — the
+ * usual way is `upTo` ascending, but two bands may share an input bound and
+ * separate on output, as Zhipu's three-row GLM-4.7 table does; and each tier's
+ * peak card agrees with the period's windows, because a band that silently
+ * lacked the peak rate would bill peak hours at the off-peak price.
+ * @param tiers - the parsed tiers, in file order.
+ * @param peakWindows - the period's windows, which decide whether tiers carry peak rates.
+ * @param path - the period's path, for the error message.
+ * @throws {ConfigError} on an empty list, an open band that is not last, a band
+ * shadowed by an earlier one, or a peak card that disagrees with the windows.
+ */
+function checkInputTiers(tiers: readonly InputTier[], peakWindows: readonly PeakWindow[], path: string): void {
+  if (tiers.length === 0) throw new ConfigError(`${path}.inputTiers`, 'configTiersEmpty', {});
+  const peakWanted = peakWindows.length > 0;
+  tiers.forEach((tier, index) => {
+    const at = `${path}.inputTiers[${index}]`;
+    if (index === tiers.length - 1 ? tier.upTo !== null : tier.upTo === null) {
+      throw new ConfigError(`${at}.upTo`, 'configTiersNotOpenEnded', {});
+    }
+    if ((tier.peak !== null) !== peakWanted) throw new ConfigError(`${at}.peak`, 'configTiersPeakMismatch', {});
+    // A band that an earlier band already accepts in full could never match, so
+    // the table would be lying about which rate applies.
+    for (const earlier of tiers.slice(0, index)) {
+      const insideInput = earlier.upTo === null || (tier.upTo !== null && earlier.upTo >= tier.upTo);
+      const insideOutput =
+        earlier.outputUpTo === undefined || (tier.outputUpTo !== undefined && earlier.outputUpTo >= tier.outputUpTo);
+      if (insideInput && insideOutput) {
+        throw new ConfigError(at, 'configTiersUnsorted', { previous: earlier.label, current: tier.label });
+      }
+    }
+  });
+}
+
 /** A peak window in the period's own timezone. */
 function peakWindow(value: unknown, path: string): PeakWindow {
   const node = object(value, path);
@@ -234,10 +310,26 @@ function period(value: unknown, path: string): PricePeriod {
   }
   const peak = node['peak'] === null || node['peak'] === undefined ? null : array(node['peak'], `${path}.peak`).map((entry, index) => component(entry, `${path}.peak[${index}]`));
   const peakWindows = array(node['peakWindows'] ?? [], `${path}.peakWindows`).map((entry, index) => peakWindow(entry, `${path}.peakWindows[${index}]`));
-  // A tiered period needs windows to decide the tier, and a flat one must not
-  // carry them: otherwise a rate card would silently never apply.
-  if (peak === null && peakWindows.length > 0) throw new ConfigError(`${path}.peakWindows`, 'configWindowsWithoutPeak', {});
-  if (peak !== null && peakWindows.length === 0) throw new ConfigError(`${path}.peak`, 'configPeakWithoutWindows', {});
+  const offPeak = array(node['offPeak'], `${path}.offPeak`).map((entry, index) => component(entry, `${path}.offPeak[${index}]`));
+  const tiersValue = node['inputTiers'];
+  const inputTiers = tiersValue === null || tiersValue === undefined
+    ? undefined
+    : array(tiersValue, `${path}.inputTiers`).map((entry, index) => inputTier(entry, `${path}.inputTiers[${index}]`));
+  if (inputTiers === undefined) {
+    // A tiered period needs windows to decide the tier, and a flat one must not
+    // carry them: otherwise a rate card would silently never apply.
+    if (peak === null && peakWindows.length > 0) throw new ConfigError(`${path}.peakWindows`, 'configWindowsWithoutPeak', {});
+    if (peak !== null && peakWindows.length === 0) throw new ConfigError(`${path}.peak`, 'configPeakWithoutWindows', {});
+  } else {
+    // The bands *are* the rate card, so the period's own has to stay empty: two
+    // cards in one period would silently disagree about which one applies. The
+    // windows stay where they are — they are the clock rule — and each band
+    // answers them with its own peak card.
+    if (offPeak.length > 0 || peak !== null) {
+      throw new ConfigError(`${path}.offPeak`, 'configTiersReplaceRates', {});
+    }
+    checkInputTiers(inputTiers, peakWindows, path);
+  }
   const from = stamped(node['from'], `${path}.from`);
   const to = node['to'] === null || node['to'] === undefined ? null : stamped(node['to'], `${path}.to`);
   if (to !== null && to.instant <= from.instant) throw new ConfigError(`${path}.to`, 'configToNotAfterFrom', {});
@@ -266,9 +358,10 @@ function period(value: unknown, path: string): PricePeriod {
     to: to === null ? null : to.instant,
     // The period's clock is the offset its own start carries.
     utcOffset: from.utcOffset,
-    offPeak: array(node['offPeak'], `${path}.offPeak`).map((entry, index) => component(entry, `${path}.offPeak[${index}]`)),
+    offPeak,
     peak,
     peakWindows,
+    ...(inputTiers === undefined ? {} : { inputTiers }),
     ...(holidayCalendar === undefined ? {} : { holidayCalendar }),
     currency,
     source,

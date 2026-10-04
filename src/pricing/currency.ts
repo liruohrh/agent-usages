@@ -435,6 +435,17 @@ export function convertProvider(provider: PricingProvider, target: CurrencyInfo,
       currency: target.code,
       offPeak: period.offPeak.map(convert),
       peak: period.peak === null ? null : period.peak.map(convert),
+      // A size tier's card is a rate card like any other, so its rates convert
+      // too; dropping them would bill a tiered period in the vendor's currency.
+      ...(period.inputTiers === undefined
+        ? {}
+        : {
+            inputTiers: period.inputTiers.map((tier) => ({
+              ...tier,
+              offPeak: tier.offPeak.map(convert),
+              peak: tier.peak === null ? null : tier.peak.map(convert),
+            })),
+          }),
     })),
   }));
   return {

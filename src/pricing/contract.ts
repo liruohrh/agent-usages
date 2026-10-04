@@ -17,6 +17,11 @@
  *   (`input-miss`, `input-hit`, `output`, …) with a rate and the bucket it
  *   charges. A vendor that bills a bucket this tool has never heard of adds a
  *   component; a vendor that does not bill cache writes simply omits one.
+ *
+ * A price also changes for two vendor-specific reasons, both of which are data
+ * rather than engine rules: the *time* a request happened (peak windows, and the
+ * periods themselves) and the *size* of the request (`inputTiers`, which reprice
+ * the whole request rather than its excess — see {@link InputTier}).
  */
 
 import type { CalendarId, HolidayCalendar } from '../core/calendar.ts';
@@ -92,6 +97,47 @@ export interface RateComponent {
 }
 
 /**
+ * A whole-request size tier: the request is billed entirely under one card.
+ *
+ * Some vendors price a request by how large it is — OpenAI's long-context card
+ * (above 272K input tokens) and Zhipu's input-length bands (32K and up). The rule
+ * is a reprice of the *whole* request: a 300K-token request is billed at the
+ * long-context card for all 300K tokens, not at the cheap card for the first
+ * 272K and the long one above. That is the opposite of {@link AboveThreshold},
+ * which keeps the base rate for the first `tokens` units and only reprices the
+ * excess.
+ *
+ * Bounds are inclusive on both axes, because a token count is an integer: a
+ * vendor band written `≥32K` is entered at exactly 32,000 tokens, so the band
+ * below it ends at 31,999 rather than at the page's rounded `32K`.
+ */
+export interface InputTier {
+  /** Label for humans, e.g. `输入 <32K`. */
+  label: string;
+  /**
+   * Largest input this tier covers, inclusive; `null` for the open-ended final
+   * tier.
+   *
+   * Compared against the record's own `tokens.input` — see
+   * {@link PricePeriod.inputTiers} for why that is the quantity.
+   */
+  upTo: number | null;
+  /**
+   * Largest output this tier covers, inclusive; absent (or `null`) when the tier
+   * does not bound the completion.
+   *
+   * Zhipu publishes one card whose rows differ by *both* lengths — input under
+   * 32K with a short completion, input under 32K with a longer one — so that
+   * table cannot be transcribed with the input bound alone.
+   */
+  outputUpTo?: number | undefined;
+  /** Rates charged inside this tier. */
+  offPeak: readonly RateComponent[];
+  /** Peak rates inside this tier; `null` when the period has no peak rule. */
+  peak: readonly RateComponent[] | null;
+}
+
+/**
  * Which rate within a period applies to a given instant.
  *
  * Most vendors have a single flat rate. Vendors with time-of-day pricing supply
@@ -127,6 +173,24 @@ export interface PricePeriod {
   peak: readonly RateComponent[] | null;
   /** Peak windows in the period's own wall-clock time. */
   peakWindows: readonly PeakWindow[];
+  /**
+   * Whole-request size tiers, in ascending order; absent on a single-card period.
+   *
+   * A vendor that reprices a request by how large it is publishes one card per
+   * size band and bills the request entirely under the band it falls into. The
+   * bands partition the size space: every tier but the last names an inclusive
+   * `upTo`, and only the last may leave it open (`null`). When this field is
+   * present the period's own `offPeak`/`peak` are empty — the tiers *are* the
+   * rate card, so the money has exactly one source.
+   *
+   * The quantity compared is the record's own `tokens.input`, the cache-miss
+   * prompt tokens: that is the bucket a vendor's own breakdown calls "input", and
+   * a log reports it exactly. Cache reads are a bucket of their own, priced at
+   * their own rate on every card, so counting them here would move a request into
+   * a higher band on the strength of tokens the vendor's table prices
+   * separately — and the note on each price list says which reading was taken.
+   */
+  inputTiers?: readonly InputTier[] | undefined;
   /**
    * Holiday calendar whose days are off-peak for the whole day.
    *
@@ -189,13 +253,34 @@ export type PriceResolution =
   /** No period covered or followed the instant; the latest earlier period was used. */
   | 'fallback-earlier';
 
+/** The size tier a record's own length fell into. */
+export interface ResolvedInputTier {
+  /** Position within {@link PricePeriod.inputTiers}. */
+  index: number;
+  /** The tier's own label, e.g. `输入 ≥32K`. */
+  label: string;
+  /** Inclusive input bound the tier named, or `null` when it was open-ended. */
+  upTo: number | null;
+  /** Inclusive output bound the tier named, or `null` when it named none. */
+  outputUpTo: number | null;
+}
+
 /** The rates chosen for one request. */
 export interface ResolvedRate {
   /** Model whose schedule applied (may differ when a fallback was used). */
   model: string;
   /** The selected period. */
   period: PricePeriod;
-  /** Tier within the period: `peak`, `off-peak`, or `flat`. */
+  /**
+   * The size tier the record fell into, when the period publishes them.
+   *
+   * Absent — not `index: 0` — on a period without tiers, so a reader can tell
+   * "this period has no size tiers" from "this record happened to land in the
+   * first one". Which card the money came from is {@link ResolvedRate.tier} and
+   * {@link ResolvedRate.components}; this only names the size band that chose it.
+   */
+  inputTier?: ResolvedInputTier | undefined;
+  /** Time-of-day tier within the card: `peak`, `off-peak`, or `flat`. */
   tier: 'peak' | 'off-peak' | 'flat';
   /** Why that tier: a peak window, a holiday, everything else, or no tiers. */
   reason: TierReason;

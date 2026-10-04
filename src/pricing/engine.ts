@@ -11,7 +11,11 @@
  *    is ever silently guessed without {@link PriceResolution} saying so.
  * 2. **Which tier applies.** Peak windows are wall-clock properties of the
  *    period's *own* timezone, so the answer never depends on the machine's zone
- *    or on daylight-saving rules the vendor never mentioned.
+ *    or on daylight-saving rules the vendor never mentioned. A period may also
+ *    publish whole-request size tiers, in which case the record's own input
+ *    length picks the card first and the clock only picks a line inside it — the
+ *    whole request is repriced, never just the excess (that is
+ *    `aboveThreshold`, a component-level rule).
  *
  * The arithmetic is the component list's job: each component names a token basis
  * and a rate per N tokens, so a vendor that bills a bucket nobody else bills just
@@ -27,6 +31,7 @@ import {
   type BillingBasis,
   type ComponentCharge,
   type CostBreakdown,
+  type InputTier,
   type ModelPrice,
   type PeakWindow,
   type PricePeriod,
@@ -36,6 +41,7 @@ import {
   type PricingProvider,
   type RateComponent,
   type RecordCost,
+  type ResolvedInputTier,
   type ResolvedRate,
 } from './contract.ts';
 
@@ -165,6 +171,39 @@ export function basisQuantity(basis: BillingBasis, tokens: TokenBuckets): number
       throw new Error(`basisQuantity: unhandled basis ${String(unreachable)}`);
     }
   }
+}
+
+/**
+ * The size tier a record's own length falls into.
+ *
+ * Tiers are a partition in file order, so the first one whose bounds contain the
+ * request is the answer; `null` bounds are open-ended, and a missing output bound
+ * accepts any completion. Bounds are inclusive because token counts are integers:
+ * a vendor band written `≥32K` is entered at exactly 32,000 tokens, which is why
+ * the band below it ends at 31,999 rather than at the page's rounded `32K`.
+ *
+ * @param tiers - the period's tiers, ascending and covering the whole range.
+ * @param tokens - the record's own buckets, which is what the vendor's "input
+ * length" means here (see {@link PricePeriod.inputTiers}).
+ * @returns the matching tier and its position, or `undefined` when none covers
+ * the request — possible only for a hand-built provider, since a parsed price
+ * list must end in an open tier.
+ */
+function inputTierAt(
+  tiers: readonly InputTier[],
+  tokens: TokenBuckets,
+): { tier: InputTier; index: number } | undefined {
+  for (const [index, tier] of tiers.entries()) {
+    const withinInput = tier.upTo === null || tokens.input <= tier.upTo;
+    const withinOutput = tier.outputUpTo === undefined || tokens.output <= tier.outputUpTo;
+    if (withinInput && withinOutput) return { tier, index };
+  }
+  return undefined;
+}
+
+/** Describe a resolved size tier for reports: its position, label, and bounds. */
+function describeInputTier(tier: InputTier, index: number): ResolvedInputTier {
+  return { index, label: tier.label, upTo: tier.upTo, outputUpTo: tier.outputUpTo ?? null };
 }
 
 /** Which {@link CostTotals} counter a component's tokens belong to. */
@@ -591,9 +630,26 @@ class Engine implements PricingEngine {
 
     const { period } = selected;
     const resolution: PriceResolution = selected.resolution;
-    const tiered = period.peak !== null && period.peakWindows.length > 0;
-    if (!tiered) {
-      return { model, period, tier: 'flat', reason: 'flat', components: period.offPeak, resolution };
+    // The request's own size picks *which* card applies; the clock then picks a
+    // line inside that card. A period without size tiers has one card, which is
+    // the shape every vendor but these two still publishes.
+    let offPeak = period.offPeak;
+    let peakCard = period.peak;
+    let inputTier: ResolvedInputTier | undefined;
+    if (period.inputTiers !== undefined) {
+      const found = inputTierAt(period.inputTiers, record.tokens);
+      // A parsed price list always covers the request (its last tier is
+      // open-ended); a provider built in memory need not, and refusing to price
+      // beats inventing a zero.
+      if (found === undefined) return undefined;
+      offPeak = found.tier.offPeak;
+      peakCard = found.tier.peak;
+      inputTier = describeInputTier(found.tier, found.index);
+    }
+    const price = { model, period, ...(inputTier === undefined ? {} : { inputTier }) };
+    const timeTiered = peakCard !== null && period.peakWindows.length > 0;
+    if (!timeTiered) {
+      return { ...price, tier: 'flat', reason: 'flat', components: offPeak, resolution };
     }
     // A holiday is off-peak for the whole day, whatever the clock says: the
     // calendars this tool knows are the ones whose days off are *not* working
@@ -603,13 +659,12 @@ class Engine implements PricingEngine {
     const holiday = this.holidayAt(record.time, period);
     const peak = holiday === undefined && isPeak(record.time, period.peakWindows, period.utcOffset);
     return {
-      model,
-      period,
+      ...price,
       tier: peak ? 'peak' : 'off-peak',
       reason: holiday === undefined ? (peak ? 'peak-window' : 'off-window') : 'holiday',
       ...(holiday === undefined ? {} : { holiday }),
-      // `peak` is non-null whenever `tiered` is true.
-      components: peak ? (period.peak as readonly RateComponent[]) : period.offPeak,
+      // `peak` is non-null whenever `timeTiered` is true.
+      components: peak ? (peakCard as readonly RateComponent[]) : offPeak,
       resolution,
     };
   }
@@ -656,26 +711,39 @@ class Engine implements PricingEngine {
 
   describeTiers(period: PricePeriod): string {
     const labels = t().period;
-    if (period.peak === null || period.peakWindows.length === 0) return labels.flat;
-    const windows = period.peakWindows
-      .map((window) => `${clockLabel(window.fromHour * 3600)}-${clockLabel(window.toHour * 3600)}`)
-      .join(labels.listJoin);
-    const everyDay = period.peakWindows.every((window) => window.weekdays === null);
-    const weekdaysOnly = period.peakWindows.every(
-      (window) =>
-        window.weekdays !== null &&
-        window.weekdays.length === 5 &&
-        !window.weekdays.includes(0) &&
-        !window.weekdays.includes(6),
-    );
-    const days = everyDay ? labels.everyDay : weekdaysOnly ? labels.weekdays : labels.someDays;
-    const base = labels.tiers(days, windows, offsetLabel(period.utcOffset));
-    // A period that respects a holiday calendar says so where the rule is read:
-    // the peak windows stop applying on those days, which is half the price.
-    if (period.holidayCalendar === undefined) return base;
-    const calendar = this.options.holidays;
-    const name = calendar === undefined ? t().period.holidaysUnknown : t().period.holidays(calendar.from, calendar.to);
-    return `${base}；${t().period.holidaysOffPeak(name)}`;
+    const parts: string[] = [];
+    if (period.peak !== null && period.peakWindows.length > 0) {
+      const windows = period.peakWindows
+        .map((window) => `${clockLabel(window.fromHour * 3600)}-${clockLabel(window.toHour * 3600)}`)
+        .join(labels.listJoin);
+      const everyDay = period.peakWindows.every((window) => window.weekdays === null);
+      const weekdaysOnly = period.peakWindows.every(
+        (window) =>
+          window.weekdays !== null &&
+          window.weekdays.length === 5 &&
+          !window.weekdays.includes(0) &&
+          !window.weekdays.includes(6),
+      );
+      const days = everyDay ? labels.everyDay : weekdaysOnly ? labels.weekdays : labels.someDays;
+      const base = labels.tiers(days, windows, offsetLabel(period.utcOffset));
+      // A period that respects a holiday calendar says so where the rule is read:
+      // the peak windows stop applying on those days, which is half the price.
+      parts.push(
+        period.holidayCalendar === undefined
+          ? base
+          : `${base}；${t().period.holidaysOffPeak(
+              this.options.holidays === undefined
+                ? t().period.holidaysUnknown
+                : t().period.holidays(this.options.holidays.from, this.options.holidays.to),
+            )}`,
+      );
+    }
+    // The size bands read as their own labels, which the price list transcribes
+    // from the vendor's page (`输入 <32K`, `输入 >272K`): each says both what it
+    // covers and that it is a length band, so no second sentence is needed to
+    // tell them from the peak windows above.
+    if (period.inputTiers !== undefined) parts.push(period.inputTiers.map((tier) => tier.label).join(labels.listJoin));
+    return parts.length === 0 ? labels.flat : parts.join('；');
   }
 
   describeBasis(basis: BillingBasis): string {

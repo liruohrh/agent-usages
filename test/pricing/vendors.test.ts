@@ -26,8 +26,8 @@ import {
   shippedPricingText,
   type ProviderConfig,
 } from '../../src/pricing/catalog.ts';
-import type { PricePeriod, PricingProvider } from '../../src/pricing/index.ts';
-import { createPricingEngine, selectCurrency } from '../../src/pricing/index.ts';
+import type { InputTier, PricePeriod, PricingProvider, RateComponent } from '../../src/pricing/index.ts';
+import { convertProvider, createPricingEngine, currencyOf, selectCurrency } from '../../src/pricing/index.ts';
 import { record } from '../support/dataset.ts';
 
 /** The shipped file, parsed once. */
@@ -73,16 +73,30 @@ function periodIn(id: string, model: string, currency: string): PricePeriod {
   return found;
 }
 
+/**
+ * The card a period publishes for the smallest request.
+ *
+ * A period with whole-request size bands keeps its rates inside them — the bands
+ * *are* the rate card — so "the model's rates" means the first band's for those
+ * models. That is the row a vendor page prints first, and the one these
+ * assertions pinned before the bands existed.
+ * @param entry - the period to read.
+ * @returns its first band's card, or its own when it has no bands.
+ */
+function smallestBand(entry: PricePeriod): readonly RateComponent[] {
+  return entry.inputTiers?.[0]?.offPeak ?? entry.offPeak;
+}
+
 /** One component of one model's card in a currency, by component id. */
 function componentIn(id: string, model: string, currency: string, wanted: string) {
-  const found = periodIn(id, model, currency).offPeak.find((entry) => entry.id === wanted);
+  const found = smallestBand(periodIn(id, model, currency)).find((entry) => entry.id === wanted);
   if (found === undefined) throw new Error(`${id}/${model} ${currency} has no ${wanted} component`);
   return found;
 }
 
 /** One component of one model's first card, by component id. */
 function component(id: string, model: string, wanted: string) {
-  const found = period(id, model).offPeak.find((entry) => entry.id === wanted);
+  const found = smallestBand(period(id, model)).find((entry) => entry.id === wanted);
   if (found === undefined) throw new Error(`${id}/${model} has no ${wanted} component`);
   return found;
 }
@@ -99,7 +113,21 @@ function rateIn(id: string, model: string, currency: string, part: string): stri
 
 /** The component ids of a model's card, in file order. */
 function components(id: string, model: string): string[] {
-  return period(id, model).offPeak.map((entry) => entry.id);
+  return smallestBand(period(id, model)).map((entry) => entry.id);
+}
+
+/** One model's whole-request size bands in a currency, which must have them. */
+function tiersIn(id: string, model: string, currency: string): readonly InputTier[] {
+  const found = periodIn(id, model, currency).inputTiers;
+  if (found === undefined) throw new Error(`${id}/${model} ${currency} has no inputTiers`);
+  return found;
+}
+
+/** The rates of one band, in component order. */
+function bandRates(id: string, model: string, currency: string, band: number): string[] {
+  const found = tiersIn(id, model, currency)[band];
+  if (found === undefined) throw new Error(`${id}/${model} ${currency} has no band ${band}`);
+  return found.offPeak.map((entry) => entry.rate);
 }
 
 /** The four vendors added on top of DeepSeek. */
@@ -253,7 +281,8 @@ describe('provenance', () => {
     for (const id of ADDED) {
       for (const model of provider(id).models) {
         for (const entry of model.periods) {
-          for (const part of entry.offPeak) {
+          const cards = [entry.offPeak, ...(entry.inputTiers ?? []).flatMap((band) => [band.offPeak, band.peak ?? []])];
+          for (const part of cards.flat()) {
             expect(typeof part.rate).toBe('string');
             expect(part.per).toBe(1_000_000);
           }
@@ -398,14 +427,104 @@ describe('billing bases', () => {
 
   it('adds no threshold the vendors did not publish as a graduated tranche', () => {
     // OpenAI's >272K tier and Zhipu's >=32K tier reprice the whole request; a
-    // graduated tranche is a different rule, so none of these cards carries one.
+    // graduated tranche is a different rule, so none of these cards carries one —
+    // including the bands those whole-request tables are transcribed into.
     for (const id of ADDED) {
       for (const model of provider(id).models) {
-        for (const entry of period(id, model.model).offPeak) {
-          expect(entry.aboveThreshold).toBeUndefined();
+        for (const entry of model.periods) {
+          const cards = [entry.offPeak, ...(entry.inputTiers ?? []).flatMap((band) => [band.offPeak, band.peak ?? []])];
+          for (const component of cards.flat()) {
+            expect(component.aboveThreshold).toBeUndefined();
+          }
         }
       }
     }
+  });
+});
+
+describe('whole-request size tiers', () => {
+  it('transcribes OpenAI\'s long-context row as a second whole-request band', () => {
+    // The standard row is 4 / 0.4 / 5 / 20 and the >272K row 8 / 0.8 / 10 / 30;
+    // the second reprices the whole request, so it is a band and not a tranche.
+    expect(tiersIn('openai', 'gpt-5.6-sol', 'USD').map((band) => band.upTo)).toEqual([272_000, null]);
+    expect(bandRates('openai', 'gpt-5.6-sol', 'USD', 0)).toEqual(['4', '0.4', '5', '20']);
+    expect(bandRates('openai', 'gpt-5.6-sol', 'USD', 1)).toEqual(['8', '0.8', '10', '30']);
+    // No other OpenAI row on the page has a second price for length.
+    for (const model of provider('openai').models) {
+      if (model.model === 'gpt-5.6-sol') continue;
+      for (const entry of model.periods) expect(entry.inputTiers).toBeUndefined();
+    }
+  });
+
+  it('bands the three Zhipu rows the Chinese page bands, and only those', () => {
+    // GLM-5.1 6/24/1.3 → 8/28/2 and GLM-5 4/18/1 → 6/22/1.5, both entered at ≥32K.
+    expect(tiersIn('zhipu', 'glm-5.1', 'CNY').map((band) => band.upTo)).toEqual([31_999, null]);
+    expect(bandRates('zhipu', 'glm-5.1', 'CNY', 1)).toEqual(['8', '2', '28']);
+    expect(bandRates('zhipu', 'glm-5', 'CNY', 1)).toEqual(['6', '1.5', '22']);
+    // GLM-5.3 / 5.2 / 5.3-flash rows carry one price, so they stay single-card.
+    for (const model of ['glm-5.3', 'glm-5.2', 'glm-5.3-flash']) {
+      for (const entry of periods('zhipu', model)) expect(entry.inputTiers).toBeUndefined();
+    }
+  });
+
+  it('transcribes GLM-4.7\'s three rows, output bound included', () => {
+    const bands = tiersIn('zhipu', 'glm-4.7', 'CNY');
+    expect(bands.map((band) => [band.upTo, band.outputUpTo ?? null])).toEqual([
+      [31_999, 199],
+      [31_999, null],
+      [null, null],
+    ]);
+    expect([0, 1, 2].map((band) => bandRates('zhipu', 'glm-4.7', 'CNY', band))).toEqual([
+      ['2', '0.4', '8'],
+      ['3', '0.6', '14'],
+      ['4', '0.8', '16'],
+    ]);
+  });
+
+  it('keeps the dollar lists single-card, as Z.ai publishes them', () => {
+    // The international table has no length bands, so `--currency USD` must not
+    // inherit the Chinese site's tiers.
+    for (const model of ['glm-5.1', 'glm-5', 'glm-4.7']) {
+      expect(periodIn('zhipu', model, 'USD').inputTiers).toBeUndefined();
+      expect(periodIn('zhipu', model, 'CNY').inputTiers).toBeDefined();
+    }
+  });
+
+  it('splits the bands exactly where each vendor page does', () => {
+    const zhipu = createPricingEngine(lookup('zhipu'));
+    const bandOf = (input: number): number | undefined =>
+      zhipu.resolve(record({ time: AT, model: 'glm-5', tokens: { ...emptyBuckets(), input } }))?.inputTier?.index;
+    // The Chinese page puts exactly 32,000 in the ≥32K band.
+    expect(bandOf(31_999)).toBe(0);
+    expect(bandOf(32_000)).toBe(1);
+    // OpenAI's page says >272K, so the bound itself stays on the standard card.
+    const openai = createPricingEngine(lookup('openai'));
+    const openaiBand = (input: number): number | undefined =>
+      openai.resolve(record({ time: AT, model: 'gpt-5.6-sol', tokens: { ...emptyBuckets(), input } }))?.inputTier?.index;
+    expect(openaiBand(272_000)).toBe(0);
+    expect(openaiBand(272_001)).toBe(1);
+  });
+
+  it('reprices a whole request through the shipped CNY card', () => {
+    const engine = createPricingEngine(lookup('zhipu'));
+    const cost = (input: number): bigint | undefined =>
+      engine.costOf(record({ time: AT, model: 'glm-5', tokens: { ...emptyBuckets(), input, output: 1_000 } }))?.total;
+    // ≥32K: 32,000 × ¥6/M + 1,000 × ¥22/M, the whole request on the long card.
+    expect(cost(32_000)).toBe(214_000_000n);
+    // One token below the line the same request is much cheaper — and it is the
+    // whole quantity that moved, not the 1 token over it.
+    expect(cost(31_999)).toBe(145_996_000n);
+  });
+
+  it('converts a band\'s rates with the rest of the card', () => {
+    // `convertProvider` rewrites published rates into the display currency. A
+    // band's card is a rate card, so leaving it behind would bill the long band
+    // in the vendor's own currency: $8 / $0.8 / 7 → ¥56 / ¥5.6.
+    const cny = createPricingEngine(convertProvider(lookup('openai'), currencyOf('CNY'), '7'));
+    const long = cny.resolve(record({ time: AT, model: 'gpt-5.6-sol', tokens: { ...emptyBuckets(), input: 300_000 } }));
+    expect(long?.components.map((entry) => entry.rate)).toEqual(['56', '5.6', '70', '210']);
+    const short = cny.resolve(record({ time: AT, model: 'gpt-5.6-sol', tokens: { ...emptyBuckets(), input: 1_000 } }));
+    expect(short?.components.map((entry) => entry.rate)).toEqual(['28', '2.8', '35', '140']);
   });
 });
 
@@ -541,5 +660,106 @@ describe('model aliases', () => {
   it('knows nothing about ids no source prices', () => {
     expect(lookup('openai').find('codex-auto-review')).toBeUndefined();
     expect(lookup('anthropic').find('claude-nonexistent-9')).toBeUndefined();
+  });
+});
+
+describe('size-band validation', () => {
+  /** A minimal document whose one period carries the given bands and extras. */
+  function documentWith(inputTiers: unknown, extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      version: 1,
+      updatedAt: '2026-10-04',
+      note: null,
+      providers: [
+        {
+          id: 'p',
+          label: 'P',
+          models: [
+            {
+              model: 'm',
+              aliases: ['m'],
+              periods: [
+                {
+                  id: 'snap',
+                  label: 'snap',
+                  from: '2026-01-01T00:00:00Z',
+                  to: null,
+                  currency: 'USD',
+                  offPeak: [],
+                  inputTiers,
+                  source: 'https://example.com/pricing',
+                  note: 'test',
+                  ...extra,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  /** One band, as the file writes it. */
+  function band(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      label: 'band',
+      upTo: null,
+      offPeak: [{ id: 'input-miss', label: 'miss', basis: 'input', rate: '1', per: 1_000_000 }],
+      ...overrides,
+    };
+  }
+
+  it('reads the bands the two vendors publish, and refuses an empty list', () => {
+    const config = parsePricingConfig(
+      documentWith([band({ label: '输入 <32K', upTo: 31_999 }), band({ label: '输入 ≥32K' })]),
+    );
+    expect(config.providers[0]?.models[0]?.periods[0]?.inputTiers?.map((tier) => tier.upTo)).toEqual([31_999, null]);
+    // Not a silent no-op: an empty list would leave the period with no rates.
+    expect(() => parsePricingConfig(documentWith([]))).toThrow(/inputTiers 至少要写一档/);
+    // Both bounds are positive integers, and `upTo` is required.
+    expect(() => parsePricingConfig(documentWith([band({ upTo: 'all' })]))).toThrow(/应为数字/);
+    expect(() => parsePricingConfig(documentWith([band({ upTo: 0 })]))).toThrow(/应为正整数/);
+    expect(() => parsePricingConfig(documentWith([{ label: 'band', offPeak: [] }]))).toThrow(/缺少字段 upTo/);
+  });
+
+  it('insists the last band is open and no band is shadowed', () => {
+    // Open bands cover every larger request, so only the last one may be open.
+    expect(() => parsePricingConfig(documentWith([band({ upTo: 1_000 })]))).toThrow(/最后一档必须是开区间/);
+    expect(() =>
+      parsePricingConfig(documentWith([band({ upTo: null }), band({ upTo: 1_000 })])),
+    ).toThrow(/最后一档必须是开区间/);
+    // Ascending bounds are the ordinary partition, and the open band closes it.
+    const ascending = [band({ upTo: 1_000 }), band({ upTo: 32_000 }), band()];
+    expect(parsePricingConfig(documentWith(ascending)).providers[0]?.models[0]?.periods[0]?.inputTiers).toHaveLength(3);
+    // A band an earlier one already covers entirely could never match. With the
+    // open band pinned last, that is a shared input bound whose output bound does
+    // not widen — GLM-4.7's three rows are the live case in the other direction.
+    const shared = [band({ upTo: 31_999, outputUpTo: 199 }), band({ upTo: 31_999 }), band()];
+    expect(parsePricingConfig(documentWith(shared)).providers[0]?.models[0]?.periods[0]?.inputTiers).toHaveLength(3);
+    expect(() =>
+      parsePricingConfig(
+        documentWith([band({ upTo: 31_999 }), band({ upTo: 31_999, outputUpTo: 199 }), band()]),
+      ),
+    ).toThrow(/分档要按上界升序/);
+  });
+
+  it('replaces the period card and keeps the peak rule consistent', () => {
+    const component = band().offPeak as unknown[];
+    // The bands are the rate card, so the period must not carry a second one.
+    expect(() =>
+      parsePricingConfig(documentWith([band()], { offPeak: component })),
+    ).toThrow(/写了 inputTiers 就不能再写 offPeak\/peak/);
+    // The windows stay period-level (they are the clock rule) and each band
+    // answers them with its own peak card, so a band without one is an error…
+    const windows = [{ fromHour: 9, toHour: 12, weekdays: null }];
+    expect(() => parsePricingConfig(documentWith([band()], { peakWindows: windows }))).toThrow(
+      /档位的 peak 要和区间的 peakWindows 一致/,
+    );
+    // …and a band with a peak card but no windows is too.
+    expect(() => parsePricingConfig(documentWith([band({ peak: component })]))).toThrow(
+      /档位的 peak 要和区间的 peakWindows 一致/,
+    );
+    const both = documentWith([band({ peak: component })], { peakWindows: windows });
+    expect(parsePricingConfig(both).providers[0]?.models[0]?.periods[0]?.inputTiers?.[0]?.peak).toHaveLength(1);
   });
 });
