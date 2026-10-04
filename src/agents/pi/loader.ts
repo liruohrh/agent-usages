@@ -438,7 +438,9 @@ function defaultSources(env: NodeJS.ProcessEnv): readonly string[] {
 export const piAgent: AgentAdapter = {
   id: 'pi',
   label: 'pi (coding agent)',
-  sessionNoun: t().errors.piSessionNoun,
+  get sessionNoun(): string {
+    return t().errors.piSessionNoun;
+  },
   envVars: [ENV_AGENT_DIR, ENV_SESSION_DIR],
   defaultSources,
   hasData: async (source) => {

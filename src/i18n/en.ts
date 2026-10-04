@@ -449,9 +449,9 @@ export const en: Messages = {
     piHomeNotAbsolute: (p: { value: string }) => `the pi data directory must be an absolute path, got ${p.value}`,
     piNoData: (p: { source: string }) =>
       `no pi sessions under ${p.source}; point --home at pi's agent directory (default ~/.pi/agent) or set PI_CODING_AGENT_DIR`,
-    claudeSessionUnreadable: (p: { path: string }) => `could not read the Claude Code session file: ${p.path}`,
-    claudeHomeNotAbsolute: (p: { value: string }) => `the Claude Code config directory must be an absolute path, got ${p.value}`,
-    claudeNoData: (p: { source: string }) =>
+    claudecodeSessionUnreadable: (p: { path: string }) => `could not read the Claude Code session file: ${p.path}`,
+    claudecodeHomeNotAbsolute: (p: { value: string }) => `the Claude Code config directory must be an absolute path, got ${p.value}`,
+    claudecodeNoData: (p: { source: string }) =>
       `no Claude Code sessions under ${p.source}; point --home at the config directory (default ~/.claude) or set CLAUDE_CONFIG_DIR`,
     codexSessionUnreadable: (p: { path: string }) => `could not read the Codex rollout file: ${p.path}`,
     codexHomeNotAbsolute: (p: { value: string }) => `the Codex home must be an absolute path, got ${p.value}`,
@@ -469,12 +469,12 @@ export const en: Messages = {
       'A subagent is its own rollout; the parent link lives in the child’s session_meta.source.subagent.thread_spawn, and its session_id names the parent — hence identity comes from id.',
       'See docs/agents/codex.md for the official DeepSeek wiring (base_url=https://api.deepseek.com/, wire_api="responses").',
     ],
-    claudeSessionNoun: 'sessions',
-    claudeNotes: (): readonly string[] => [
+    claudecodeSessionNoun: 'sessions',
+    claudecodeNotes: (): readonly string[] => [
       'Usage comes from Claude Code’s own session files: ~/.claude/projects/<cwd>/<session>.jsonl, where assistant entries carry that request’s usage (cache read/write and thinking tokens included).',
       'A subagent is its own file under the session-named subagents/ directory; the parent does not repeat its usage, so each side is billed once.',
       'A `[1m]`-style suffix on a model name is stripped before matching the price table.',
-      'See docs/agents/claude.md for the official DeepSeek wiring (ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic).',
+      'See docs/agents/claudecode.md for the official DeepSeek wiring (ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic).',
     ],
     piSessionNoun: 'sessions',
     piNotes: (): readonly string[] => [

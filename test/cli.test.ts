@@ -1474,6 +1474,15 @@ describe('language', () => {
     expect((await cli(['update', 'nope'], env)).stderr).toMatch(/unknown update target/);
   });
 
+  it('reads every adapter word per call, not at import time', async () => {
+    // The language is chosen after the adapters are loaded, so a value an adapter
+    // captured while being imported answered in the default language whatever the
+    // configuration said. `sessionNoun` is the one word an adapter owns itself.
+    const { stdout } = await cli(['agents', '--json'], homeWith('en'));
+    const parsed = JSON.parse(stdout) as { agents: { id: string; sessionNoun: string }[] };
+    expect(parsed.agents.map((row) => row.sessionNoun)).toEqual(parsed.agents.map(() => 'sessions'));
+  });
+
   it('keeps the numbers and identifiers identical across languages', async () => {
     // The point of the separation: only prose changes. What still is prose inside
     // JSON — the range label and a warning's sentence — is excluded on purpose;

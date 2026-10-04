@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { claudeAgent } from '../../src/agents/claude/loader.ts';
+import { claudecodeAgent } from '../../src/agents/claudecode/loader.ts';
 
 const SESSION = '112307e5-1035-404c-8fea-b6650edc8080';
 const AGENT = 'af8b105c79ddcebf5';
@@ -133,7 +133,7 @@ describe('reading a Claude Code home', () => {
         },
       })}\n`,
     );
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const records = data.sessions.flatMap((session) => session.records);
     expect(records.find((record) => record.tokens.cacheWrite === 3_000)?.cacheWriteTtl).toBe('1h');
   });
@@ -164,7 +164,7 @@ describe('reading a Claude Code home', () => {
         },
       })}\n`,
     );
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const records = data.sessions.flatMap((session) => session.records);
     expect(records.find((record) => record.tokens.cacheWrite === 500)?.cacheWriteTtl).toBeUndefined();
   });
@@ -197,7 +197,7 @@ describe('reading a Claude Code home', () => {
         },
       })}\n`,
     );
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const record = data.sessions.flatMap((session) => session.records).find((entry) => entry.id.endsWith(':msg-ttl-split'));
     expect(record?.tokens.cacheWrite).toBe(3_000);
     expect(record?.cacheWriteTiers).toEqual({ '5m': 1_000, '1h': 2_000 });
@@ -231,7 +231,7 @@ describe('reading a Claude Code home', () => {
         },
       })}\n`,
     );
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const record = data.sessions
       .flatMap((session) => session.records)
       .find((entry) => entry.id.endsWith(':msg-ttl-5m-majority'));
@@ -260,7 +260,7 @@ describe('reading a Claude Code home', () => {
         },
       })}\n`,
     );
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const record = data.sessions.flatMap((session) => session.records).find((entry) => entry.id.endsWith(':msg-ttl-none'));
     expect(record?.tokens.cacheWrite).toBe(700);
     expect(record?.cacheWriteTiers).toBeUndefined();
@@ -291,20 +291,20 @@ describe('reading a Claude Code home', () => {
       `${[entry('p1', '2026-09-23T00:30:01.000Z', 1, false), entry('p2', '2026-09-23T00:30:02.000Z', 40, true)].join('\n')}\n`,
     );
 
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const session = data.sessions.find((candidate) => candidate.id === id);
     expect(session?.records).toHaveLength(1);
     expect(session?.records[0]?.tokens.output).toBe(40);
   });
 
   it('names a session from custom-title.json', async () => {
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const session = data.sessions.find((candidate) => candidate.id === SESSION);
     expect(session?.title).toBe('我的会话');
   });
 
   it('bills assistant entries and strips the model suffix', async () => {
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const session = data.sessions.find((candidate) => candidate.id === SESSION);
     expect(session?.records).toHaveLength(1);
     expect(session?.records[0]?.model).toBe('deepseek-flash');
@@ -320,7 +320,7 @@ describe('reading a Claude Code home', () => {
   });
 
   it('reads a subagent from the session-named directory', async () => {
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const child = data.sessions.find((candidate) => candidate.id === AGENT);
     const parent = data.sessions.find((candidate) => candidate.id === SESSION);
     expect(child?.isSubagent).toBe(true);
@@ -350,7 +350,7 @@ describe('reading a Claude Code home', () => {
     ].join('\n');
     await writeFile(join(project, `${forkId}.jsonl`), `${fork}\n`);
 
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const forked = data.sessions.find((session) => session.id === forkId);
     const source = data.sessions.find((session) => session.id === SESSION);
     // Only the call the fork made itself is billed here.
@@ -381,20 +381,20 @@ describe('reading a Claude Code home', () => {
       join(project, `${branchId}.jsonl`),
       `${[shared('c1', '2026-09-23T00:20:01.000Z', 'b1'), shared('c2', '2026-09-23T00:20:02.000Z', 'b2')].join('\n')}\n`,
     );
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const branched = data.sessions.find((session) => session.id === branchId);
     expect(branched?.extra?.['branchPoints']).toBe(1);
   });
 
   it('groups sessions under the project their cwd names', async () => {
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     expect(data.agent).toBe('claudecode');
     expect(data.projects).toHaveLength(1);
     expect(data.projects[0]?.path).toBe('/tmp/demo');
     expect(data.projects[0]?.name).toBe('demo');
     expect(data.stats.records).toBe(2);
-    expect(await claudeAgent.hasData(home)).toBe(true);
-    expect(await claudeAgent.hasData(join(home, 'nope'))).toBe(false);
+    expect(await claudecodeAgent.hasData(home)).toBe(true);
+    expect(await claudecodeAgent.hasData(join(home, 'nope'))).toBe(false);
   });
 });
 
@@ -436,7 +436,7 @@ describe('one session with two logs', () => {
       ].join('\n') + '\n',
     );
 
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const rows = data.sessions.filter((session) => session.id === id);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.records.map((candidate) => candidate.id)).toEqual([`${id}:msg-orig`, `${id}:msg-new`]);
@@ -453,7 +453,7 @@ describe('titling a Claude Code session', () => {
 
   /** The title the loader gave one session id. */
   async function titleOf(id: string): Promise<string | null | undefined> {
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     return data.sessions.find((candidate) => candidate.id === id)?.title;
   }
 
@@ -519,7 +519,7 @@ describe('titling a Claude Code session', () => {
       }),
     ]);
 
-    const data = await claudeAgent.load({ home });
+    const data = await claudecodeAgent.load({ home });
     const titles = data.sessions.filter((session) => session.id === onlyScaffolding || session.id === empty);
     expect(titles.map((session) => session.title)).toEqual([null, null]);
   });

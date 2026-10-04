@@ -226,8 +226,9 @@ describe('--agent all', () => {
     expect(parsed.agent).toBe('claudecode');
     expect(parsed.projects[0]?.agents).toEqual(['claudecode']);
     const { stdout } = await cli(['usage', '--no-update'], { DSH_HOME: join(home, 'nowhere') });
-    // A single-agent report keeps its unmarked rendering.
-    expect(stdout).not.toContain('· claude');
+    // A single-agent report keeps its unmarked rendering. (The id, not a prefix
+    // of it: `· claude` would also match `· claudecode`.)
+    expect(stdout).not.toContain('· claudecode');
   });
 
   it('accepts a comma-separated list and repeated flags alike', async () => {

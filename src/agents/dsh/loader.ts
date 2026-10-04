@@ -483,7 +483,9 @@ export function resolveDshHome(configured?: string, env: NodeJS.ProcessEnv = pro
 export const dshAgent: AgentAdapter = {
   id: 'dsh',
   label: 'DeepSeek Harness (DSH)',
-  sessionNoun: t().errors.dshSessionNoun,
+  get sessionNoun(): string {
+    return t().errors.dshSessionNoun;
+  },
   envVars: ['DSH_HOME'],
   defaultSources,
   hasData: async (source) => {

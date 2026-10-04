@@ -20,7 +20,7 @@ pnpm web:snapshot     # → web/mock/dashboard.snapshot.json（约 650 KB）
 
 ## CI 那份：合成 fixture（**入库**）
 
-`fixtures/claude/` 是一份**手写的假数据**——两个项目、三个会话、一个子代理，路径都写成
+`fixtures/claudecode/` 是一份**手写的假数据**——两个项目、三个会话、一个子代理，路径都写成
 `/ws/...`，人名、标题、金额都不来自任何真实使用。`ci.snapshot.json` 是它扫出来的快照，
 两者都进版本库，因为里面没有真实信息；CI 的冒烟测试跑的就是这一份（`pnpm web:smoke` 默认仍用
 你本机那份）。
@@ -29,7 +29,7 @@ pnpm web:snapshot     # → web/mock/dashboard.snapshot.json（约 650 KB）
 # 改完 fixtures/ 之后重新生成（--home 必须是绝对路径：适配器只接受绝对路径；
 # --home 只允许配一个 agent，这里正好一个）
 node src/serve/main.ts --write-snapshot web/mock/ci.snapshot.json \
-  --home "$PWD/web/mock/fixtures/claude" --agent claudecode
+  --home "$PWD/web/mock/fixtures/claudecode" --agent claudecode
 # 快照里的 sourceFile / source 是本机绝对路径，入库前必须替换成中性路径，
 # 否则就把开发机的目录结构写进了版本库（下面的脚本把当前仓库根换掉）：
 python3 - <<'EOF'

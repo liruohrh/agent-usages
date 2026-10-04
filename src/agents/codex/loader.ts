@@ -711,7 +711,9 @@ function defaultSources(env: NodeJS.ProcessEnv): readonly string[] {
 export const codexAgent: AgentAdapter = {
   id: 'codex',
   label: 'Codex CLI',
-  sessionNoun: t().errors.codexSessionNoun,
+  get sessionNoun(): string {
+    return t().errors.codexSessionNoun;
+  },
   envVars: [ENV_HOME],
   defaultSources,
   hasData: async (source) => (await findRollouts(join(source, 'sessions'))).length > 0,

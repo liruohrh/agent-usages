@@ -52,7 +52,13 @@ export interface AgentAdapter {
   aliases?: readonly string[] | undefined;
   /** Human-readable name. */
   label: string;
-  /** What this agent calls a session, for display (`会话`). */
+  /**
+   * What this agent calls a session, for display (`会话`).
+   *
+   * Adapters expose this as a getter rather than a captured string: the language
+   * is chosen after the adapters are loaded, so a value read at import time
+   * would answer in the default language whatever the user asked for.
+   */
   sessionNoun: string;
   /**
    * Environment variables that override where the data lives, in precedence

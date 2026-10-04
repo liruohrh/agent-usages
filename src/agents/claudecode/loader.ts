@@ -425,7 +425,7 @@ async function walk(
     // A session that never billed a request (an aborted run) is still a session,
     // but only if it has anything at all to say.
     if (session === undefined) {
-      warnings.push(new UserError('claudeSessionUnreadable', { path: relative(source, file).split(sep).join('/') }));
+      warnings.push(new UserError('claudecodeSessionUnreadable', { path: relative(source, file).split(sep).join('/') }));
       return;
     }
   }
@@ -521,7 +521,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const source = options.home ?? defaultSources(env)[0] ?? '';
   const warnings: Warning[] = [];
   if (options.home !== undefined && !isAbsolute(options.home)) {
-    throw new UserError('claudeHomeNotAbsolute', { value: JSON.stringify(options.home) });
+    throw new UserError('claudecodeHomeNotAbsolute', { value: JSON.stringify(options.home) });
   }
 
   const projectsRoot = projectsRootOf(source);
@@ -536,7 +536,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     if (found.length > 0) walked.set(projectKey, found);
   }
   if (walked.size === 0) {
-    throw new Error(renderDiagnostic('claudeNoData', { source }));
+    throw new Error(renderDiagnostic('claudecodeNoData', { source }));
   }
   const btw = await countSideQuestions(join(source, 'history.jsonl'));
   if (btw > 0) warnings.push(new UserError('sideQuestionsUncounted', { count: String(btw), agent: 'Claude Code' }));
@@ -699,13 +699,15 @@ function defaultSources(env: NodeJS.ProcessEnv): readonly string[] {
   return named.length > 0 ? named : [join(homedir(), '.claude')];
 }
 
-export const claudeAgent: AgentAdapter = {
+export const claudecodeAgent: AgentAdapter = {
   id: 'claudecode',
   // `claude` is the vendor; the agent is Claude Code, so the id follows `codex`.
   // The old id keeps working — it is in scripts and in muscle memory.
   aliases: ['claude'],
   label: 'Claude Code',
-  sessionNoun: t().errors.claudeSessionNoun,
+  get sessionNoun(): string {
+    return t().errors.claudecodeSessionNoun;
+  },
   envVars: [ENV_CONFIG_DIR],
   defaultSources,
   hasData: async (source) => {
@@ -717,5 +719,5 @@ export const claudeAgent: AgentAdapter = {
     return false;
   },
   load,
-  notes: () => t().errors.claudeNotes(),
+  notes: () => t().errors.claudecodeNotes(),
 };

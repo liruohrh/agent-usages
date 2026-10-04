@@ -1,14 +1,14 @@
 {
-  "generatedAt": 1791136776823,
+  "generatedAt": 1791138607008,
   "mode": "live",
-  "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
-  "scannedAt": 1791136776817,
-  "scanMs": 22,
+  "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode",
+  "scannedAt": 1791138607002,
+  "scanMs": 19,
   "loadedAgents": [
     {
       "id": "claudecode",
       "label": "Claude Code",
-      "source": "/home/demo/agent-usages/web/mock/fixtures/claude"
+      "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode"
     }
   ],
   "currency": "CNY",
@@ -22,7 +22,7 @@
     {
       "id": "claudecode",
       "label": "Claude Code",
-      "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
+      "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode",
       "sessions": 3,
       "subagentSessions": 1,
       "activeSessions": 3,
@@ -222,7 +222,7 @@
         {
           "id": "claudecode",
           "label": "Claude Code",
-          "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
+          "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode",
           "sessions": 1,
           "subagentSessions": 0,
           "activeSessions": 1,
@@ -331,7 +331,7 @@
             {
               "id": "claudecode",
               "label": "Claude Code",
-              "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
+              "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode",
               "sessions": 1,
               "subagentSessions": 0,
               "activeSessions": 1,
@@ -414,7 +414,7 @@
               "projectId": "-ws-other",
               "projectName": "other",
               "workspace": "/ws/other",
-              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-other/22222222-2222-4222-8222-222222222222.jsonl",
+              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claudecode/projects/-ws-other/22222222-2222-4222-8222-222222222222.jsonl",
               "title": null,
               "cwd": "/ws/other",
               "createdAt": 1790316005000,
@@ -526,7 +526,7 @@
           "projectId": "-ws-other",
           "projectName": "other",
           "workspace": "/ws/other",
-          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-other/22222222-2222-4222-8222-222222222222.jsonl",
+          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claudecode/projects/-ws-other/22222222-2222-4222-8222-222222222222.jsonl",
           "title": null,
           "cwd": "/ws/other",
           "createdAt": 1790316005000,
@@ -812,7 +812,7 @@
         {
           "id": "claudecode",
           "label": "Claude Code",
-          "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
+          "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode",
           "sessions": 2,
           "subagentSessions": 1,
           "activeSessions": 2,
@@ -921,7 +921,7 @@
             {
               "id": "claudecode",
               "label": "Claude Code",
-              "source": "/home/demo/agent-usages/web/mock/fixtures/claude",
+              "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode",
               "sessions": 2,
               "subagentSessions": 1,
               "activeSessions": 2,
@@ -1004,7 +1004,7 @@
               "projectId": "-ws-demo-app",
               "projectName": "demo-app",
               "workspace": "/ws/demo-app",
-              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111.jsonl",
+              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claudecode/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111.jsonl",
               "title": "demo work",
               "cwd": "/ws/demo-app",
               "createdAt": 1790128801000,
@@ -1112,7 +1112,7 @@
               "projectId": "-ws-demo-app",
               "projectName": "demo-app",
               "workspace": "/ws/demo-app",
-              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111/subagents/agent-a1.jsonl",
+              "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claudecode/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111/subagents/agent-a1.jsonl",
               "title": "review the diff",
               "cwd": "/ws/demo-app",
               "createdAt": 1790129100000,
@@ -1224,7 +1224,7 @@
           "projectId": "-ws-demo-app",
           "projectName": "demo-app",
           "workspace": "/ws/demo-app",
-          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111.jsonl",
+          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claudecode/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111.jsonl",
           "title": "demo work",
           "cwd": "/ws/demo-app",
           "createdAt": 1790128801000,
@@ -1332,7 +1332,7 @@
           "projectId": "-ws-demo-app",
           "projectName": "demo-app",
           "workspace": "/ws/demo-app",
-          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claude/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111/subagents/agent-a1.jsonl",
+          "sourceFile": "/home/demo/agent-usages/web/mock/fixtures/claudecode/projects/-ws-demo-app/11111111-1111-4111-8111-111111111111/subagents/agent-a1.jsonl",
           "title": "review the diff",
           "cwd": "/ws/demo-app",
           "createdAt": 1790129100000,
