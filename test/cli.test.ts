@@ -757,7 +757,11 @@ describe('serve', () => {
   }
 
   it('opens the report in the browser, from a file the user can keep', async () => {
-    const { code, stdout } = await cli(['usage', '--range', 'month', '--open'], { AGENT_USAGES_NO_BROWSER: '1' });
+    // The fixture's request is dated 2026-09-11, so the range is spelled out rather
+    // than left as `month`: a relative preset stops covering the fixture the moment
+    // the clock rolls over, and these tests went red on 2026-10-01 for exactly that
+    // reason (`EXIT_NO_DATA`, exit 2) — nothing to do with the report.
+    const { code, stdout } = await cli(['usage', '--range', '2026-09-01..', '--open'], { AGENT_USAGES_NO_BROWSER: '1' });
     expect(code).toBe(0);
     const written = /已写入 (.+)$/m.exec(stdout)?.[1]?.trim();
     expect(written, stdout.slice(0, 200)).toBeDefined();
@@ -770,7 +774,8 @@ describe('serve', () => {
 
   it('lets --html name the path --open shows', async () => {
     const target = join(home, 'opened-report.html');
-    const { code, stdout } = await cli(['usage', '--range', 'month', '--open', '--html', target], {
+    // Same reason as above: an explicit range that contains the fixture's request.
+    const { code, stdout } = await cli(['usage', '--range', '2026-09-01..', '--open', '--html', target], {
       AGENT_USAGES_NO_BROWSER: '1',
     });
     expect(code).toBe(0);
