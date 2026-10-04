@@ -1,9 +1,13 @@
 # 刷新汇率表。
 #
-# 只自动更新汇率：价格表是人工从厂商页面抄录的（HTML 无法可靠解析），改价格仍然
-# 走人工提交 + `check-config`。汇率有现成 API，所以让它自己跑。
+# 只做一件事：拉最新汇率、写回 `config/rates.json`、有变化就提交。
 #
-# 时间定在欧洲央行发布参考汇率（约 16:00 CET = 15:00 UTC）之后，每天一次。
+# 不在这里跑测试或 `check-config`：`update rates --write-config` 自己就会解析校验拉到的数据，
+# 而它的产物只是一个数据文件——真正的把关在 `test.yml`（每次 push 都跑，包括这个 bot 的提交）。
+# 一个每天跑的数据刷新任务不该顺带跑整套面板测试。
+#
+# 价格表是人工从厂商页面抄录的（HTML 无法可靠解析），改价格仍然走人工提交。
+# 时间定在欧洲央行发布参考汇率（约 16:00 CET = 15:00 UTC）之后，每天一次；
 # 也可以在 Actions 页面手动触发。
 name: 刷新汇率表
 
@@ -32,18 +36,12 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # 运行 CLI 需要那五个运行时依赖（commander、express…），所以这一步省不掉。
       - run: pnpm install --frozen-lockfile
 
-      # 拉最新汇率并写回仓库里的配置文件；任一源都失败时命令返回非零，任务失败。
+      # 拉最新汇率并写回仓库里的配置文件：拉到的数据先解析校验，任一源都失败时命令返回非零。
       - name: 更新 config/rates.json
         run: node src/cli/index.ts update rates --force --write-config
-
-      # 写回的必须是合法配置，测试也必须仍然通过，否则不提交。
-      - name: 校验配置
-        run: node src/cli/index.ts check-config
-
-      - name: 跑测试
-        run: CI=true pnpm test
 
       - name: 有变化才提交
         run: |
