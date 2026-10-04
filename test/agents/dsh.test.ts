@@ -564,6 +564,43 @@ describe('session log reading', () => {
       tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 0, reasoning: 5 },
     });
   });
+
+  it('prefers the highest versioned stream over older ones and the seed', async () => {
+    // The version in the file name tracks DSH's log format, and the reader used to
+    // hold a hand-written list of them — so a release that started writing
+    // `session.v4.jsonl.zstd` produced **a session with no usage at all** (a 1.2 MB
+    // log reported zero tokens; reported 2026-09-30, fixed 2026-10-04).
+    const dir = join(home, 'sessions', '--home-user-ws-example-app--', SID.subB);
+    await rm(join(dir, 'session.jsonl'), { force: true });
+    const { zstdCompressSync } = await import('node:zlib');
+    const header = (cwd: string): string =>
+      JSON.stringify({ type: 'session', version: 0, id: SID.subB, createdAt: 1, cwd, delegationDepth: 1, parentSession: SID.spanning });
+    const event = (seq: number, input: number): string =>
+      JSON.stringify({
+        type: 'assistant/message',
+        seq,
+        time: AT.septemberOffPeak,
+        data: {
+          turn: 1,
+          step: 1,
+          message: { source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
+          usage: { inputTokens: input, outputTokens: 50, cacheReadTokens: 10, cacheWriteTokens: 0, reasoningTokens: 5 },
+        },
+      });
+    await writeFile(join(dir, 'session.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header(APP_DIR)}\n`)));
+    await writeFile(join(dir, 'session.v3.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header(APP_DIR)}\n${event(2, 300)}\n`)));
+    await writeFile(join(dir, 'session.v4.jsonl.zstd'), zstdCompressSync(Buffer.from(`${header(APP_DIR)}\n${event(2, 100)}\n`)));
+
+    const located = await locateSessionLogs(home);
+    expect(located.find((log) => log.directoryName === SID.subB)?.path).toMatch(/session\.v4\.jsonl\.zstd$/);
+
+    const scan = await readSessionLog(join(dir, 'session.v4.jsonl.zstd'));
+    expect(scan.records).toHaveLength(1);
+    expect(scan.records[0]).toMatchObject({
+      model: 'deepseek-v4-flash',
+      tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 0, reasoning: 5 },
+    });
+  });
 });
 
 describe('delegation', () => {

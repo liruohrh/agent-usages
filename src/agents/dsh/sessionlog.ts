@@ -34,19 +34,28 @@ import type { TokenBuckets, UsageRecord } from '../../core/types.ts';
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 
 /**
- * Log file names in preference order.
+ * The session log names this reader accepts.
  *
- * DSH currently writes the live stream to `session.v3.jsonl.zstd` and leaves a
- * small seed file at `session.jsonl.zstd`; older releases wrote the whole stream
- * to `session.jsonl.zstd`. Only one file per session directory is read, so a
- * seed file is never mistaken for the stream.
+ * DSH names the live stream after its format version — `session.v3.jsonl.zstd` when
+ * this was written, `session.v4.jsonl.zstd` in the data that produced the bug report
+ * — and leaves a small unversioned seed file beside it. Listing the versions by hand
+ * meant a new one silently produced **a session with no usage at all**: a 1.2 MB `v4`
+ * log reported zero tokens until the name was recognised (measured 2026-09-30, fixed
+ * 2026-10-04). So match the shape instead, prefer the highest version, and let the
+ * seed be the fallback.
  */
-const LOG_FILE_PREFERENCE: readonly string[] = [
-  'session.v3.jsonl.zstd',
-  'session.v3.jsonl',
-  'session.jsonl.zstd',
-  'session.jsonl',
-];
+const LOG_NAME = /^session(?:\.v(\d+))?\.jsonl(\.zstd)?$/;
+
+/** Order two log names: newest version first, then zstd, then plain. */
+function compareLogNames(left: string, right: string): number {
+  const rank = (name: string): [number, number] => {
+    const match = LOG_NAME.exec(name);
+    return [match?.[1] === undefined ? 0 : Number(match[1]), match?.[2] === '.zstd' ? 1 : 0];
+  };
+  const [leftVersion, leftPacked] = rank(left);
+  const [rightVersion, rightPacked] = rank(right);
+  return rightVersion - leftVersion || rightPacked - leftPacked || (left < right ? -1 : 1);
+}
 
 /** What a session log's header (and early events) reveal about delegation. */
 export interface SessionLogInfo {
@@ -292,9 +301,9 @@ export interface LocatedSessionLog {
  * decoder — which is why the header's own `cwd` is used for attribution rather
  * than the directory name.
  *
- * One log per session directory is returned: when both the `session.v3` stream
- * and the legacy `session.jsonl` seed exist, the former wins, so the seed can
- * never masquerade as an empty session.
+ * One log per session directory is returned: the highest `session.v<N>` stream wins
+ * over the unversioned seed, so a header-only seed can never masquerade as an empty
+ * session.
  *
  * @param home - DSH home directory.
  * @returns every log found, or an empty list when the directory is absent.
@@ -325,7 +334,7 @@ export async function locateSessionLogs(home: string): Promise<LocatedSessionLog
       } catch {
         continue;
       }
-      const best = LOG_FILE_PREFERENCE.find((name) => entries.includes(name));
+      const best = entries.filter((name) => LOG_NAME.test(name)).sort(compareLogNames)[0];
       if (best !== undefined) found.push({ directoryName: sessionDir, path: join(dir, best) });
     }
   }
