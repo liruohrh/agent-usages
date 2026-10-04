@@ -1,7 +1,7 @@
 {
   "version": 1,
   "updatedAt": "2026-10-04",
-  "note": "厂商发布的价格表：DeepSeek 有中文站人民币、英文站美元两套；openai / anthropic / moonshot / zhipu 四家只有一套 USD 统一价，取自已核对的 LiteLLM 机器可读价格表。`defaultFor` 声明这张表默认服务哪个 agent（dsh → deepseek、codex → openai、claude → anthropic）；moonshot / zhipu 没有天然默认的 agent，要用 `--provider moonshot` / `--provider zhipu` 指定。改这里即可更新价格，不需要发版；提交后各端会在下一次检查时拉取。",
+  "note": "厂商发布的价格表。deepseek：中文站人民币、英文站美元各一套，来自官方定价页与其存档。openai / anthropic / moonshot / zhipu：四家的价目已升级为厂商定价页（developers.openai.com、platform.claude.com、platform.kimi.com、docs.bigmodel.cn），抓取日期 2026-10-04；厂商只发人民币的（moonshot、zhipu）该区间 currency 就是 CNY，不做换算。厂商页未列出的少数型号仍保留 LiteLLM 聚合源并在 note 里写明。`defaultFor` 声明这张表默认服务哪个 agent（dsh → deepseek、codex → openai、claude → anthropic）；moonshot / zhipu 没有天然默认的 agent，要用 `--provider moonshot` / `--provider zhipu` 指定。改这里即可更新价格，不需要发版；提交后各端会在下一次检查时拉取。",
   "providers": [
     {
       "id": "deepseek",
@@ -1203,8 +1203,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1224,6 +1224,13 @@
                   "per": 1000000
                 },
                 {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "2.5",
+                  "per": 1000000
+                },
+                {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
@@ -1231,8 +1238,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-6.1-sol` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `openai/gpt-6.1-sol`（2 / 10 / 0.1）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-6.1-sol` 行：输入 $2、缓存输入 $0.1、缓存写入 $2.5、输出 $10（每百万 tokens）。厂商页把「缓存写入」单列成价（= 1.25×输入价），所以本表为它设独立的 cacheWrite 组件：这块费用在旧版表里按「OpenAI 不收缓存写入费」被省掉了，厂商页显示 gpt-5.6 及更新的型号确实收。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1244,8 +1251,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1265,6 +1272,13 @@
                   "per": 1000000
                 },
                 {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "12.5",
+                  "per": 1000000
+                },
+                {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
@@ -1272,8 +1286,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-6-astra` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `openai/gpt-6-astra`（10 / 50 / 1）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-6-astra` 行：输入 $10、缓存输入 $1、缓存写入 $12.5、输出 $50（每百万 tokens）。厂商页把「缓存写入」单列成价（= 1.25×输入价），所以本表为它设独立的 cacheWrite 组件：这块费用在旧版表里按「OpenAI 不收缓存写入费」被省掉了，厂商页显示 gpt-5.6 及更新的型号确实收。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1285,8 +1299,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1306,6 +1320,13 @@
                   "per": 1000000
                 },
                 {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "2.5",
+                  "per": 1000000
+                },
+                {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
@@ -1313,8 +1334,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-6-sol` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `openai/gpt-6-sol`（2 / 10 / 0.2）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-6-sol` 行：输入 $2、缓存输入 $0.2、缓存写入 $2.5、输出 $10（每百万 tokens）。厂商页把「缓存写入」单列成价（= 1.25×输入价），所以本表为它设独立的 cacheWrite 组件：这块费用在旧版表里按「OpenAI 不收缓存写入费」被省掉了，厂商页显示 gpt-5.6 及更新的型号确实收。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1326,8 +1347,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1347,6 +1368,13 @@
                   "per": 1000000
                 },
                 {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "0.125",
+                  "per": 1000000
+                },
+                {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
@@ -1354,8 +1382,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-6-luna` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `openai/gpt-6-luna`（0.1 / 0.5 / 0.01）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-6-luna` 行：输入 $0.1、缓存输入 $0.01、缓存写入 $0.125、输出 $0.5（每百万 tokens）。厂商页把「缓存写入」单列成价（= 1.25×输入价），所以本表为它设独立的 cacheWrite 组件：这块费用在旧版表里按「OpenAI 不收缓存写入费」被省掉了，厂商页显示 gpt-5.6 及更新的型号确实收。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1367,8 +1395,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1388,6 +1416,13 @@
                   "per": 1000000
                 },
                 {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "5",
+                  "per": 1000000
+                },
+                {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
@@ -1395,49 +1430,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-5.6-sol` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `openai/gpt-5.6-sol` 为 2 / 10 / 0.2，与本表不同：该站在第三方托管路由上报价，本表采用 LiteLLM 的厂商直连条目。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
-            }
-          ]
-        },
-        {
-          "model": "gpt-5.6-luna",
-          "aliases": [
-            "gpt-5.6-luna",
-            "openai/gpt-5.6-luna"
-          ],
-          "periods": [
-            {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
-              "from": "2026-01-01T00:00:00Z",
-              "to": null,
-              "currency": "USD",
-              "offPeak": [
-                {
-                  "id": "input-miss",
-                  "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "0.2",
-                  "per": 1000000
-                },
-                {
-                  "id": "input-hit",
-                  "label": "缓存命中输入",
-                  "basis": "cacheRead",
-                  "rate": "0.02",
-                  "per": 1000000
-                },
-                {
-                  "id": "output",
-                  "label": "输出（含 reasoning）",
-                  "basis": "output",
-                  "rate": "1.2",
-                  "per": 1000000
-                }
-              ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-5.6-luna` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `openai/gpt-5.6-luna`（0.2 / 1.2 / 0.02）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-5.6-sol` 行：输入 $4、缓存输入 $0.4、缓存写入 $5、输出 $20（每百万 tokens）。这一行验证了聚合源的争议：OpenRouter 把该模型报成 $2 / $0.2 / $10，与厂商页不符，本表以厂商页为准；LiteLLM 的 4 / 0.4 / 5 / 20 与厂商页一致。厂商页对 `gpt-5.6-sol` 另给 >272K 输入的长上下文档：输入 $8、缓存输入 $0.8、缓存写入 $10、输出 $30。它是「按输入长度整段重新定价」，而本引擎的 aboveThreshold 只把超出阈值的部分加价，语义不同，故未建模：>272K 的请求会按上表低价低估。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1449,8 +1443,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1470,6 +1464,13 @@
                   "per": 1000000
                 },
                 {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "2.5",
+                  "per": 1000000
+                },
+                {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
@@ -1477,21 +1478,21 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-5.6-terra` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `openai/gpt-5.6-terra`（2 / 12 / 0.2）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-5.6-terra` 行：输入 $2、缓存输入 $0.2、缓存写入 $2.5、输出 $12（每百万 tokens）。厂商页把「缓存写入」单列成价（= 1.25×输入价），所以本表为它设独立的 cacheWrite 组件：这块费用在旧版表里按「OpenAI 不收缓存写入费」被省掉了，厂商页显示 gpt-5.6 及更新的型号确实收。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
         {
-          "model": "gpt-5.6",
+          "model": "gpt-5.6-luna",
           "aliases": [
-            "gpt-5.6",
-            "openai/gpt-5.6"
+            "gpt-5.6-luna",
+            "openai/gpt-5.6-luna"
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1500,26 +1501,33 @@
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
                   "basis": "input",
-                  "rate": "4",
+                  "rate": "0.2",
                   "per": 1000000
                 },
                 {
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.4",
+                  "rate": "0.02",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "0.25",
                   "per": 1000000
                 },
                 {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
-                  "rate": "20",
+                  "rate": "1.2",
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-5.6` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 未收录 `openai/gpt-5.6`。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-5.6-luna` 行：输入 $0.2、缓存输入 $0.02、缓存写入 $0.25、输出 $1.2（每百万 tokens）。厂商页把「缓存写入」单列成价（= 1.25×输入价），所以本表为它设独立的 cacheWrite 组件：这块费用在旧版表里按「OpenAI 不收缓存写入费」被省掉了，厂商页显示 gpt-5.6 及更新的型号确实收。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1531,8 +1539,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1559,8 +1567,90 @@
                   "per": 1000000
                 }
               ],
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-5.5` 行：输入 $5、缓存输入 $0.5、缓存写入 -、输出 $30（每百万 tokens）。厂商页把该行写作 `gpt-5.5 (<272K context length)`，缓存写入列是 `-`（该型号不单独收缓存写入费），长上下文表也未列 gpt-5.5，故不设 cacheWrite 组件、不设长上下文档。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
+            }
+          ]
+        },
+        {
+          "model": "gpt-5.3-codex",
+          "aliases": [
+            "gpt-5.3-codex",
+            "openai/gpt-5.3-codex"
+          ],
+          "periods": [
+            {
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
+              "from": "2026-01-01T00:00:00Z",
+              "to": null,
+              "currency": "USD",
+              "offPeak": [
+                {
+                  "id": "input-miss",
+                  "label": "输入（未命中缓存）",
+                  "basis": "input",
+                  "rate": "1.75",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.175",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出（含 reasoning）",
+                  "basis": "output",
+                  "rate": "14",
+                  "per": 1000000
+                }
+              ],
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "note": "厂商页（https://developers.openai.com/api/docs/pricing，由 platform.openai.com/docs/pricing 重定向，抓取于 2026-10-04）标准档表格的 `gpt-5.3-codex` 行：输入 $1.75、缓存输入 $0.175、缓存写入 -、输出 $14（每百万 tokens）。该行在厂商页的「专用模型」表（Codex 分类）里，该表只有 输入 / 缓存输入 / 输出 三列，没有缓存写入列，故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 batch / flex（半价）、fast、ultrafast（加价）等档位，按量记录不区分，本表只收标准档。货币 USD，与厂商页逐字一致。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
+            }
+          ]
+        },
+        {
+          "model": "gpt-5.6",
+          "aliases": [
+            "gpt-5.6",
+            "openai/gpt-5.6"
+          ],
+          "periods": [
+            {
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
+              "from": "2026-01-01T00:00:00Z",
+              "to": null,
+              "currency": "USD",
+              "offPeak": [
+                {
+                  "id": "input-miss",
+                  "label": "输入（未命中缓存）",
+                  "basis": "input",
+                  "rate": "4",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.4",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出（含 reasoning）",
+                  "basis": "output",
+                  "rate": "20",
+                  "per": 1000000
+                }
+              ],
               "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`gpt-5.5` 条目，`litellm_provider: openai`，即 OpenAI 直连价）。不设 cacheWrite 组件：按 OpenAI 不单独收缓存写入费处理（LiteLLM 对 gpt-5.6 及更新型号另列 cache creation 价 = 1.25 × 输入价，本表未采用）。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `openai/gpt-5.5`（5 / 30 / 0.5）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：gpt-5.6-sol（本表 4 / 20 / 0.4，OpenRouter 2 / 10 / 0.2，差 2 倍）。"
+              "note": "厂商页标准档（https://developers.openai.com/api/docs/pricing，抓取于 2026-10-04）没有 `gpt-5.6` 这一行——只有 `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 三个变体，也没有出现在长上下文表里。本条因此保留 LiteLLM 的 `gpt-5.6` 条目：输入 $4、缓存输入 $0.4、输出 $20（每百万 tokens，USD）；LiteLLM 另给了 cache creation $5，但厂商页查不到该型号，故本表不设 cacheWrite 组件。来源仍是聚合源 https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json（交叉核对源 https://openrouter.ai/api/v1/models）。reasoning tokens 已含在 output 内。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         }
@@ -1583,8 +1673,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1600,7 +1690,7 @@
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.5",
+                  "rate": "0.50",
                   "per": 1000000
                 },
                 {
@@ -1608,7 +1698,10 @@
                   "label": "缓存写入（默认 5 分钟档）",
                   "basis": "cacheWrite",
                   "rate": "6.25",
-                  "per": 1000000
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
                 },
                 {
                   "id": "output",
@@ -1618,8 +1711,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`claude-opus-5` 条目，`litellm_provider: anthropic`）。cache 读、cache 写是各自独立的组件：`input-hit` 为缓存读取价，`input-write` 为 LiteLLM 给出的默认（5 分钟档）缓存写入价；LiteLLM 不区分 5 分钟/1 小时写入档，故未写 ttlMultipliers。reasoning tokens 已含在 output 内，不重复计费。别名 `claude-opus-5[1m]` 是 Claude Code 的 1M 上下文标记：LiteLLM/OpenRouter 都没有该模型 >200k 的加价字段，因此按同价计费，未写 aboveThreshold。OpenRouter 的 `anthropic/claude-opus-5`（5 / 25 / 0.5）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。"
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Opus 5」行：输入 $5、输出 $25、5 分钟缓存写入 $6.25、1 小时缓存写入 $10、缓存命中 $0.50（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（10 ÷ 6.25）。reasoning tokens 已含在 output 内，不重复计费。别名 `claude-opus-5[1m]` 是 Claude Code 的 1M 上下文标记：厂商页写明 「Claude 4.6 and later models … include the full 1M token context window at standard pricing」，长上下文按标准价，故不设 aboveThreshold。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1631,8 +1724,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1648,7 +1741,7 @@
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.2",
+                  "rate": "0.20",
                   "per": 1000000
                 },
                 {
@@ -1656,7 +1749,10 @@
                   "label": "缓存写入（默认 5 分钟档）",
                   "basis": "cacheWrite",
                   "rate": "5",
-                  "per": 1000000
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
                 },
                 {
                   "id": "output",
@@ -1666,8 +1762,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`claude-opus-5-5` 条目，`litellm_provider: anthropic`）。cache 读、cache 写是各自独立的组件：`input-hit` 为缓存读取价，`input-write` 为 LiteLLM 给出的默认（5 分钟档）缓存写入价；LiteLLM 不区分 5 分钟/1 小时写入档，故未写 ttlMultipliers。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 未收录 `anthropic/claude-opus-5-5`。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。"
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Opus 5.5」行：输入 $4、输出 $20、5 分钟缓存写入 $5、1 小时缓存写入 $8、缓存命中 $0.20（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（8 ÷ 5）。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1679,8 +1775,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1696,7 +1792,7 @@
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.5",
+                  "rate": "0.50",
                   "per": 1000000
                 },
                 {
@@ -1704,7 +1800,10 @@
                   "label": "缓存写入（默认 5 分钟档）",
                   "basis": "cacheWrite",
                   "rate": "6.25",
-                  "per": 1000000
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
                 },
                 {
                   "id": "output",
@@ -1714,8 +1813,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`claude-opus-4-8` 条目，`litellm_provider: anthropic`）。cache 读、cache 写是各自独立的组件：`input-hit` 为缓存读取价，`input-write` 为 LiteLLM 给出的默认（5 分钟档）缓存写入价；LiteLLM 不区分 5 分钟/1 小时写入档，故未写 ttlMultipliers。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 未收录 `anthropic/claude-opus-4-8`。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。"
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Opus 4.8」行：输入 $5、输出 $25、5 分钟缓存写入 $6.25、1 小时缓存写入 $10、缓存命中 $0.50（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（10 ÷ 6.25）。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1727,8 +1826,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1744,7 +1843,7 @@
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.5",
+                  "rate": "0.50",
                   "per": 1000000
                 },
                 {
@@ -1752,7 +1851,10 @@
                   "label": "缓存写入（默认 5 分钟档）",
                   "basis": "cacheWrite",
                   "rate": "6.25",
-                  "per": 1000000
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
                 },
                 {
                   "id": "output",
@@ -1762,8 +1864,59 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`claude-opus-4-7` 条目，`litellm_provider: anthropic`）。cache 读、cache 写是各自独立的组件：`input-hit` 为缓存读取价，`input-write` 为 LiteLLM 给出的默认（5 分钟档）缓存写入价；LiteLLM 不区分 5 分钟/1 小时写入档，故未写 ttlMultipliers。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 未收录 `anthropic/claude-opus-4-7`。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。"
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Opus 4.7」行：输入 $5、输出 $25、5 分钟缓存写入 $6.25、1 小时缓存写入 $10、缓存命中 $0.50（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（10 ÷ 6.25）。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
+            }
+          ]
+        },
+        {
+          "model": "claude-opus-4-6",
+          "aliases": [
+            "claude-opus-4-6",
+            "anthropic/claude-opus-4-6"
+          ],
+          "periods": [
+            {
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
+              "from": "2026-01-01T00:00:00Z",
+              "to": null,
+              "currency": "USD",
+              "offPeak": [
+                {
+                  "id": "input-miss",
+                  "label": "输入（未命中缓存）",
+                  "basis": "input",
+                  "rate": "5",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.50",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "6.25",
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
+                },
+                {
+                  "id": "output",
+                  "label": "输出（含 reasoning）",
+                  "basis": "output",
+                  "rate": "25",
+                  "per": 1000000
+                }
+              ],
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Opus 4.6」行：输入 $5、输出 $25、5 分钟缓存写入 $6.25、1 小时缓存写入 $10、缓存命中 $0.50（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（10 ÷ 6.25）。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1775,8 +1928,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1792,15 +1945,18 @@
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.2",
+                  "rate": "0.20",
                   "per": 1000000
                 },
                 {
                   "id": "input-write",
                   "label": "缓存写入（默认 5 分钟档）",
                   "basis": "cacheWrite",
-                  "rate": "2.5",
-                  "per": 1000000
+                  "rate": "2.50",
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
                 },
                 {
                   "id": "output",
@@ -1810,8 +1966,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`claude-sonnet-5-5` 条目，`litellm_provider: anthropic`）。cache 读、cache 写是各自独立的组件：`input-hit` 为缓存读取价，`input-write` 为 LiteLLM 给出的默认（5 分钟档）缓存写入价；LiteLLM 不区分 5 分钟/1 小时写入档，故未写 ttlMultipliers。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 未收录 `anthropic/claude-sonnet-5-5`。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。"
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Sonnet 5.5」行：输入 $2、输出 $10、5 分钟缓存写入 $2.50、1 小时缓存写入 $4、缓存命中 $0.20（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（4 ÷ 2.50）。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1823,8 +1979,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1840,15 +1996,18 @@
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.2",
+                  "rate": "0.20",
                   "per": 1000000
                 },
                 {
                   "id": "input-write",
                   "label": "缓存写入（默认 5 分钟档）",
                   "basis": "cacheWrite",
-                  "rate": "2.5",
-                  "per": 1000000
+                  "rate": "2.50",
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
                 },
                 {
                   "id": "output",
@@ -1858,8 +2017,59 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`claude-sonnet-5` 条目，`litellm_provider: anthropic`）。cache 读、cache 写是各自独立的组件：`input-hit` 为缓存读取价，`input-write` 为 LiteLLM 给出的默认（5 分钟档）缓存写入价；LiteLLM 不区分 5 分钟/1 小时写入档，故未写 ttlMultipliers。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `anthropic/claude-sonnet-5`（2 / 10 / 0.2）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。"
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Sonnet 5」行：输入 $2、输出 $10、5 分钟缓存写入 $2.50、1 小时缓存写入 $4、缓存命中 $0.20（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（4 ÷ 2.50）。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
+            }
+          ]
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "aliases": [
+            "claude-sonnet-4-6",
+            "anthropic/claude-sonnet-4-6"
+          ],
+          "periods": [
+            {
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
+              "from": "2026-01-01T00:00:00Z",
+              "to": null,
+              "currency": "USD",
+              "offPeak": [
+                {
+                  "id": "input-miss",
+                  "label": "输入（未命中缓存）",
+                  "basis": "input",
+                  "rate": "3",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.30",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "3.75",
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
+                },
+                {
+                  "id": "output",
+                  "label": "输出（含 reasoning）",
+                  "basis": "output",
+                  "rate": "15",
+                  "per": 1000000
+                }
+              ],
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Sonnet 4.6」行：输入 $3、输出 $15、5 分钟缓存写入 $3.75、1 小时缓存写入 $6、缓存命中 $0.30（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（6 ÷ 3.75）。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1871,8 +2081,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -1888,7 +2098,7 @@
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.1",
+                  "rate": "0.10",
                   "per": 1000000
                 },
                 {
@@ -1896,7 +2106,10 @@
                   "label": "缓存写入（默认 5 分钟档）",
                   "basis": "cacheWrite",
                   "rate": "1.25",
-                  "per": 1000000
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "1.6"
+                  }
                 },
                 {
                   "id": "output",
@@ -1906,8 +2119,8 @@
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`claude-haiku-4-5` 条目，`litellm_provider: anthropic`）。cache 读、cache 写是各自独立的组件：`input-hit` 为缓存读取价，`input-write` 为 LiteLLM 给出的默认（5 分钟档）缓存写入价；LiteLLM 不区分 5 分钟/1 小时写入档，故未写 ttlMultipliers。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 未收录 `anthropic/claude-haiku-4-5`。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。"
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "note": "厂商页（https://platform.claude.com/docs/en/about-claude/pricing，抓取于 2026-10-04）价格表的「Claude Haiku 4.5」行：输入 $1、输出 $5、5 分钟缓存写入 $1.25、1 小时缓存写入 $2、缓存命中 $0.10（每百万 tokens）。货币 USD，与厂商页逐字一致。厂商的缓存乘数表写明 5m 写入 = 1.25×输入价、1h 写入 = 2×输入价、缓存命中 = 0.1×输入价，因此 `input-write` 的 ttlMultipliers 记 1h = 1.6（2 ÷ 1.25）。reasoning tokens 已含在 output 内，不重复计费。厂商页另有 Fast mode 档（Opus 5.5 / Opus 5 / Opus 4.8 的加价档，例如 Opus 5 为 $10 / $50）和 Batch 档（五折）；按量记录不区分这两种档位，本表只收标准档。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         }
@@ -1926,36 +2139,46 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
-              "currency": "USD",
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
                   "basis": "input",
-                  "rate": "3",
+                  "rate": "20",
                   "per": 1000000
                 },
                 {
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.3",
+                  "rate": "2",
                   "per": 1000000
+                },
+                {
+                  "id": "input-write",
+                  "label": "缓存写入（默认 5 分钟档）",
+                  "basis": "cacheWrite",
+                  "rate": "20",
+                  "per": 1000000,
+                  "ttlMultipliers": {
+                    "1h": "2"
+                  }
                 },
                 {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
-                  "rate": "15",
+                  "rate": "100",
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`moonshot/kimi-k3` 条目，`litellm_provider: moonshot`，即 Moonshot 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 与 OpenRouter 中都是 null（源未给价），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `moonshotai/kimi-k3` 为 0.72 / 13 / 0.7，与本表不同：该站在第三方托管路由上报价，本表采用 LiteLLM 的厂商直连条目。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：kimi-k3（本表 3 / 15 / 0.3，OpenRouter 0.72 / 13 / 0.7）、kimi-k2.7-code（0.95 / 4 / 0.19 对 0.6712 / 3.35 / 0.18）、kimi-k2.5（0.6 / 3 / 0.1 对 0.45 / 2.25 / 0.07）——OpenRouter 上的低价多来自第三方托管，本表取厂商直连价。"
+              "source": "https://platform.kimi.com/docs/pricing/chat",
+              "note": "厂商页（https://platform.kimi.com/docs/pricing/chat，由 platform.moonshot.cn/docs/pricing/chat 重定向，抓取于 2026-10-04）K3 系列表格的 `kimi-k3` 行：缓存写入（TTL 5min）¥20、缓存写入（TTL 1h）¥40、输入（缓存命中）¥2、输入（缓存未命中）¥20、输出 ¥100（每百万 tokens）。货币 CNY：厂商页只发人民币，未换算成 USD。厂商页写明「对于 K3 系列模型，缓存写入按 TTL（5min / 1h）单独计费」，所以 cacheWrite 是独立组件，且 `input-hit` 只按命中价收、不重复收写入费；ttlMultipliers 记 1h = 2（40 ÷ 20）。reasoning tokens 已含在 output 内。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -1967,36 +2190,77 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
-              "currency": "USD",
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "0.95",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "6.50",
                   "per": 1000000
                 },
                 {
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.19",
+                  "rate": "1.30",
                   "per": 1000000
                 },
                 {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
-                  "rate": "4",
+                  "rate": "27.00",
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`moonshot/kimi-k2.7-code` 条目，`litellm_provider: moonshot`，即 Moonshot 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 与 OpenRouter 中都是 null（源未给价），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `moonshotai/kimi-k2.7-code` 为 0.6712 / 3.35 / 0.18，与本表不同：该站在第三方托管路由上报价，本表采用 LiteLLM 的厂商直连条目。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：kimi-k3（本表 3 / 15 / 0.3，OpenRouter 0.72 / 13 / 0.7）、kimi-k2.7-code（0.95 / 4 / 0.19 对 0.6712 / 3.35 / 0.18）、kimi-k2.5（0.6 / 3 / 0.1 对 0.45 / 2.25 / 0.07）——OpenRouter 上的低价多来自第三方托管，本表取厂商直连价。"
+              "source": "https://platform.kimi.com/docs/pricing/chat",
+              "note": "厂商页（https://platform.kimi.com/docs/pricing/chat，由 platform.moonshot.cn/docs/pricing/chat 重定向，抓取于 2026-10-04）K2 系列表格的 `kimi-k2.7-code` 行：输入（缓存命中）¥1.30、输入（缓存未命中）¥6.50、输出 ¥27.00（每百万 tokens）。货币 CNY：厂商页只发人民币，未换算成 USD（工具按 config/rates.json 折算显示）。该表格没有单独的缓存写入列，而厂商的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
+            }
+          ]
+        },
+        {
+          "model": "kimi-k2.7-code-highspeed",
+          "aliases": [
+            "kimi-k2.7-code-highspeed",
+            "moonshot/kimi-k2.7-code-highspeed"
+          ],
+          "periods": [
+            {
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
+              "from": "2026-01-01T00:00:00Z",
+              "to": null,
+              "currency": "CNY",
+              "offPeak": [
+                {
+                  "id": "input-miss",
+                  "label": "输入（未命中缓存）",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "13.00",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "2.60",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出（含 reasoning）",
+                  "basis": "output",
+                  "rate": "54.00",
+                  "per": 1000000
+                }
+              ],
+              "source": "https://platform.kimi.com/docs/pricing/chat",
+              "note": "厂商页（https://platform.kimi.com/docs/pricing/chat，由 platform.moonshot.cn/docs/pricing/chat 重定向，抓取于 2026-10-04）K2 系列表格的 `kimi-k2.7-code-highspeed` 行：输入（缓存命中）¥2.60、输入（缓存未命中）¥13.00、输出 ¥54.00（每百万 tokens）。货币 CNY：厂商页只发人民币，未换算成 USD（工具按 config/rates.json 折算显示）。该表格没有单独的缓存写入列，而厂商的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -2008,36 +2272,36 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
-              "currency": "USD",
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "0.95",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "6.50",
                   "per": 1000000
                 },
                 {
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.16",
+                  "rate": "1.10",
                   "per": 1000000
                 },
                 {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
-                  "rate": "4",
+                  "rate": "27.00",
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`moonshot/kimi-k2.6` 条目，`litellm_provider: moonshot`，即 Moonshot 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 与 OpenRouter 中都是 null（源未给价），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `moonshotai/kimi-k2.6`（0.95 / 4 / 0.16）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：kimi-k3（本表 3 / 15 / 0.3，OpenRouter 0.72 / 13 / 0.7）、kimi-k2.7-code（0.95 / 4 / 0.19 对 0.6712 / 3.35 / 0.18）、kimi-k2.5（0.6 / 3 / 0.1 对 0.45 / 2.25 / 0.07）——OpenRouter 上的低价多来自第三方托管，本表取厂商直连价。"
+              "source": "https://platform.kimi.com/docs/pricing/chat",
+              "note": "厂商页（https://platform.kimi.com/docs/pricing/chat，由 platform.moonshot.cn/docs/pricing/chat 重定向，抓取于 2026-10-04）K2 系列表格的 `kimi-k2.6` 行：输入（缓存命中）¥1.10、输入（缓存未命中）¥6.50、输出 ¥27.00（每百万 tokens）。货币 CNY：厂商页只发人民币，未换算成 USD（工具按 config/rates.json 折算显示）。该表格没有单独的缓存写入列，而厂商的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -2049,8 +2313,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -2058,7 +2322,7 @@
                 {
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
-                  "basis": "input",
+                  "basis": "inputAndCacheWrite",
                   "rate": "0.6",
                   "per": 1000000
                 },
@@ -2078,7 +2342,7 @@
                 }
               ],
               "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`moonshot/kimi-k2.5` 条目，`litellm_provider: moonshot`，即 Moonshot 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 与 OpenRouter 中都是 null（源未给价），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `moonshotai/kimi-k2.5` 为 0.45 / 2.25 / 0.07，与本表不同：该站在第三方托管路由上报价，本表采用 LiteLLM 的厂商直连条目。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：kimi-k3（本表 3 / 15 / 0.3，OpenRouter 0.72 / 13 / 0.7）、kimi-k2.7-code（0.95 / 4 / 0.19 对 0.6712 / 3.35 / 0.18）、kimi-k2.5（0.6 / 3 / 0.1 对 0.45 / 2.25 / 0.07）——OpenRouter 上的低价多来自第三方托管，本表取厂商直连价。"
+              "note": "厂商页（https://platform.kimi.com/docs/pricing/chat，抓取于 2026-10-04）的 K2 系列表格只列 `kimi-k2.7-code`、`kimi-k2.7-code-highspeed`、`kimi-k2.6`，没有 `kimi-k2.5`（页面只保留在架模型的价目）。本条因此保留 LiteLLM 的 `moonshot/kimi-k2.5` 条目：输入（未命中）$0.6、输入（缓存命中）$0.1、输出 $3（每百万 tokens，USD）。来源仍是聚合源 https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json。reasoning tokens 已含在 output 内。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         }
@@ -2097,36 +2361,36 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
-              "currency": "USD",
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "1.4",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "8",
                   "per": 1000000
                 },
                 {
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.26",
+                  "rate": "2",
                   "per": 1000000
                 },
                 {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
-                  "rate": "4.4",
+                  "rate": "28",
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`zai/glm-5.3` 条目，`litellm_provider: zai`，即 Z.ai 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 中明确为 0（写入不单独收费），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `z-ai/glm-5.3` 为 1.4 / 4.4 / 0.14，与本表不同：该站在第三方托管路由上报价，本表采用 LiteLLM 的厂商直连条目。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：glm-5.2（本表 1.4 / 4.4 / 0.26，OpenRouter 0.3 / 3.49 / 0.26）、glm-5（1 / 3.2 / 0.2 对 0.6 / 1.92 / 0.12）、glm-5.3（缓存读 0.26 对 0.14）。"
+              "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+              "note": "厂商页（https://docs.bigmodel.cn/cn/guide/start/pricing，抓取于 2026-10-04）「旗舰模型 / 文本模型」表的 `GLM-5.3` 行：输入 ¥8、输出 ¥28、缓存命中 ¥2（每百万 tokens）。货币 CNY：厂商页只发人民币，未做任何换算（工具会按 config/rates.json 的汇率折算显示）。厂商页的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，没有按 token 的缓存写入价、缓存存储当前限时免费，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。中文站之外，国际站 Z.ai 另有一套 USD 价目（GLM-5.3 / GLM-5.2 / GLM-5.1 为 $1.4 / $4.4 / 缓存读 $0.26，GLM-5 为 $1 / $3.2 / $0.2，GLM-4.7 为 $0.6 / $2.2 / $0.11，见 https://docs.z.ai/guides/overview/pricing）；本表用智谱中文站的 CNY 价。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -2138,36 +2402,36 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
-              "currency": "USD",
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "1.4",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "8",
                   "per": 1000000
                 },
                 {
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.26",
+                  "rate": "2",
                   "per": 1000000
                 },
                 {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
-                  "rate": "4.4",
+                  "rate": "28",
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`zai/glm-5.2` 条目，`litellm_provider: zai`，即 Z.ai 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 中明确为 0（写入不单独收费），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `z-ai/glm-5.2` 为 0.3 / 3.49 / 0.26，与本表不同：该站在第三方托管路由上报价，本表采用 LiteLLM 的厂商直连条目。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：glm-5.2（本表 1.4 / 4.4 / 0.26，OpenRouter 0.3 / 3.49 / 0.26）、glm-5（1 / 3.2 / 0.2 对 0.6 / 1.92 / 0.12）、glm-5.3（缓存读 0.26 对 0.14）。"
+              "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+              "note": "厂商页（https://docs.bigmodel.cn/cn/guide/start/pricing，抓取于 2026-10-04）「旗舰模型 / 文本模型」表的 `GLM-5.2` 行：输入 ¥8、输出 ¥28、缓存命中 ¥2（每百万 tokens）。货币 CNY：厂商页只发人民币，未做任何换算（工具会按 config/rates.json 的汇率折算显示）。厂商页的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，没有按 token 的缓存写入价、缓存存储当前限时免费，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。中文站之外，国际站 Z.ai 另有一套 USD 价目（GLM-5.3 / GLM-5.2 / GLM-5.1 为 $1.4 / $4.4 / 缓存读 $0.26，GLM-5 为 $1 / $3.2 / $0.2，GLM-4.7 为 $0.6 / $2.2 / $0.11，见 https://docs.z.ai/guides/overview/pricing）；本表用智谱中文站的 CNY 价。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -2179,36 +2443,159 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
-              "currency": "USD",
+              "currency": "CNY",
               "offPeak": [
                 {
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "1.4",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "6",
                   "per": 1000000
                 },
                 {
                   "id": "input-hit",
                   "label": "缓存命中输入",
                   "basis": "cacheRead",
-                  "rate": "0.26",
+                  "rate": "1.3",
                   "per": 1000000
                 },
                 {
                   "id": "output",
                   "label": "输出（含 reasoning）",
                   "basis": "output",
-                  "rate": "4.4",
+                  "rate": "24",
                   "per": 1000000
                 }
               ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`zai/glm-5.1` 条目，`litellm_provider: zai`，即 Z.ai 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 中明确为 0（写入不单独收费），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `z-ai/glm-5.1`（1.4 / 4.4 / 0.26）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：glm-5.2（本表 1.4 / 4.4 / 0.26，OpenRouter 0.3 / 3.49 / 0.26）、glm-5（1 / 3.2 / 0.2 对 0.6 / 1.92 / 0.12）、glm-5.3（缓存读 0.26 对 0.14）。"
+              "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+              "note": "厂商页（https://docs.bigmodel.cn/cn/guide/start/pricing，抓取于 2026-10-04）「旗舰模型 / 文本模型」表的 `GLM-5.1` 行：输入 ¥6、输出 ¥24、缓存命中 ¥1.3（每百万 tokens）。货币 CNY：厂商页只发人民币，未做任何换算（工具会按 config/rates.json 的汇率折算显示）。厂商页的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，没有按 token 的缓存写入价、缓存存储当前限时免费，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。中文站之外，国际站 Z.ai 另有一套 USD 价目（GLM-5.3 / GLM-5.2 / GLM-5.1 为 $1.4 / $4.4 / 缓存读 $0.26，GLM-5 为 $1 / $3.2 / $0.2，GLM-4.7 为 $0.6 / $2.2 / $0.11，见 https://docs.z.ai/guides/overview/pricing）；本表用智谱中文站的 CNY 价。厂商页对 GLM-5.1 分两档：输入长度 [0, 32K) 为 ¥6 / ¥24 / 缓存命中 ¥1.3，输入长度 ≥32K 为 ¥8 / ¥28 / ¥2。后者是「整段请求按长档重新定价」而不是「超出 32K 的部分加价」，本引擎的 aboveThreshold 只加价超出部分，故本表只记 [0, 32K) 档：≥32K 的长请求会被低估，未编造组合价。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
+            }
+          ]
+        },
+        {
+          "model": "glm-5",
+          "aliases": [
+            "glm-5",
+            "zai/glm-5"
+          ],
+          "periods": [
+            {
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
+              "from": "2026-01-01T00:00:00Z",
+              "to": null,
+              "currency": "CNY",
+              "offPeak": [
+                {
+                  "id": "input-miss",
+                  "label": "输入（未命中缓存）",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "4",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "1",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出（含 reasoning）",
+                  "basis": "output",
+                  "rate": "18",
+                  "per": 1000000
+                }
+              ],
+              "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+              "note": "厂商页（https://docs.bigmodel.cn/cn/guide/start/pricing，抓取于 2026-10-04）「旗舰模型 / 文本模型」表的 `GLM-5` 行：输入 ¥4、输出 ¥18、缓存命中 ¥1（每百万 tokens）。货币 CNY：厂商页只发人民币，未做任何换算（工具会按 config/rates.json 的汇率折算显示）。厂商页的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，没有按 token 的缓存写入价、缓存存储当前限时免费，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。中文站之外，国际站 Z.ai 另有一套 USD 价目（GLM-5.3 / GLM-5.2 / GLM-5.1 为 $1.4 / $4.4 / 缓存读 $0.26，GLM-5 为 $1 / $3.2 / $0.2，GLM-4.7 为 $0.6 / $2.2 / $0.11，见 https://docs.z.ai/guides/overview/pricing）；本表用智谱中文站的 CNY 价。厂商页对 GLM-5 分两档：输入长度 [0, 32K) 为 ¥4 / ¥18 / 缓存命中 ¥1，输入长度 ≥32K 为 ¥6 / ¥22 / ¥1.5。同 GLM-5.1：整段重定价无法用本引擎的 tranche 语义表达，本表只记 [0, 32K) 档，≥32K 的请求会被低估。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
+            }
+          ]
+        },
+        {
+          "model": "glm-4.7",
+          "aliases": [
+            "glm-4.7",
+            "zai/glm-4.7"
+          ],
+          "periods": [
+            {
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
+              "from": "2026-01-01T00:00:00Z",
+              "to": null,
+              "currency": "CNY",
+              "offPeak": [
+                {
+                  "id": "input-miss",
+                  "label": "输入（未命中缓存）",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "2",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.4",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出（含 reasoning）",
+                  "basis": "output",
+                  "rate": "8",
+                  "per": 1000000
+                }
+              ],
+              "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+              "note": "厂商页（https://docs.bigmodel.cn/cn/guide/start/pricing，抓取于 2026-10-04）「旗舰模型 / 文本模型」表的 `GLM-4.7` 行：输入 ¥2、输出 ¥8、缓存命中 ¥0.4（每百万 tokens）。货币 CNY：厂商页只发人民币，未做任何换算（工具会按 config/rates.json 的汇率折算显示）。厂商页的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，没有按 token 的缓存写入价、缓存存储当前限时免费，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。中文站之外，国际站 Z.ai 另有一套 USD 价目（GLM-5.3 / GLM-5.2 / GLM-5.1 为 $1.4 / $4.4 / 缓存读 $0.26，GLM-5 为 $1 / $3.2 / $0.2，GLM-4.7 为 $0.6 / $2.2 / $0.11，见 https://docs.z.ai/guides/overview/pricing）；本表用智谱中文站的 CNY 价。厂商页对 GLM-4.7 分三档：输入 [0, 32K) 且输出 [0, 0.2K) 为 ¥2 / ¥8 / 缓存命中 ¥0.4；输入 [0, 32K) 且输出 ≥0.2K 为 ¥3 / ¥14 / ¥0.6；输入 [32K, 200K) 为 ¥4 / ¥16 / ¥0.8。三档同时取决于输入与输出长度，本引擎表达不了这种整段重定价，故只记厂商列出的第一档（最小档），未编造组合价。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
+            }
+          ]
+        },
+        {
+          "model": "glm-5.3-flash",
+          "aliases": [
+            "glm-5.3-flash",
+            "zai/glm-5.3-flash"
+          ],
+          "periods": [
+            {
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
+              "from": "2026-01-01T00:00:00Z",
+              "to": null,
+              "currency": "CNY",
+              "offPeak": [
+                {
+                  "id": "input-miss",
+                  "label": "输入（未命中缓存）",
+                  "basis": "inputAndCacheWrite",
+                  "rate": "0.8",
+                  "per": 1000000
+                },
+                {
+                  "id": "input-hit",
+                  "label": "缓存命中输入",
+                  "basis": "cacheRead",
+                  "rate": "0.23",
+                  "per": 1000000
+                },
+                {
+                  "id": "output",
+                  "label": "输出（含 reasoning）",
+                  "basis": "output",
+                  "rate": "2.8",
+                  "per": 1000000
+                }
+              ],
+              "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+              "note": "厂商页（https://docs.bigmodel.cn/cn/guide/start/pricing，抓取于 2026-10-04）「旗舰模型 / 文本模型」表的 `GLM-5.3-FLASH` 行：输入 ¥0.8、输出 ¥2.8、缓存命中 ¥0.23（每百万 tokens）。货币 CNY：厂商页只发人民币，未做任何换算（工具会按 config/rates.json 的汇率折算显示）。厂商页的计费式是「未命中缓存的输入 + 缓存命中 + 输出 + 缓存存储」，没有按 token 的缓存写入价、缓存存储当前限时免费，因此缓存写入 token 按未命中输入价计（basis: inputAndCacheWrite），不设 cacheWrite 组件。中文站之外，国际站 Z.ai 另有一套 USD 价目（GLM-5.3 / GLM-5.2 / GLM-5.1 为 $1.4 / $4.4 / 缓存读 $0.26，GLM-5 为 $1 / $3.2 / $0.2，GLM-4.7 为 $0.6 / $2.2 / $0.11，见 https://docs.z.ai/guides/overview/pricing）；本表用智谱中文站的 CNY 价。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         },
@@ -2220,8 +2607,8 @@
           ],
           "periods": [
             {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
+              "id": "snapshot-2026-10-04",
+              "label": "统一价（厂商页快照）",
               "from": "2026-01-01T00:00:00Z",
               "to": null,
               "currency": "USD",
@@ -2229,7 +2616,7 @@
                 {
                   "id": "input-miss",
                   "label": "输入（未命中缓存）",
-                  "basis": "input",
+                  "basis": "inputAndCacheWrite",
                   "rate": "1.2",
                   "per": 1000000
                 },
@@ -2249,130 +2636,7 @@
                 }
               ],
               "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`zai/glm-5-code` 条目，`litellm_provider: zai`，即 Z.ai 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 中明确为 0（写入不单独收费），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 未收录 `z-ai/glm-5-code`。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：glm-5.2（本表 1.4 / 4.4 / 0.26，OpenRouter 0.3 / 3.49 / 0.26）、glm-5（1 / 3.2 / 0.2 对 0.6 / 1.92 / 0.12）、glm-5.3（缓存读 0.26 对 0.14）。"
-            }
-          ]
-        },
-        {
-          "model": "glm-5",
-          "aliases": [
-            "glm-5",
-            "zai/glm-5"
-          ],
-          "periods": [
-            {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
-              "from": "2026-01-01T00:00:00Z",
-              "to": null,
-              "currency": "USD",
-              "offPeak": [
-                {
-                  "id": "input-miss",
-                  "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "1",
-                  "per": 1000000
-                },
-                {
-                  "id": "input-hit",
-                  "label": "缓存命中输入",
-                  "basis": "cacheRead",
-                  "rate": "0.2",
-                  "per": 1000000
-                },
-                {
-                  "id": "output",
-                  "label": "输出（含 reasoning）",
-                  "basis": "output",
-                  "rate": "3.2",
-                  "per": 1000000
-                }
-              ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`zai/glm-5` 条目，`litellm_provider: zai`，即 Z.ai 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 中明确为 0（写入不单独收费），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `z-ai/glm-5` 为 0.6 / 1.92 / 0.12，与本表不同：该站在第三方托管路由上报价，本表采用 LiteLLM 的厂商直连条目。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：glm-5.2（本表 1.4 / 4.4 / 0.26，OpenRouter 0.3 / 3.49 / 0.26）、glm-5（1 / 3.2 / 0.2 对 0.6 / 1.92 / 0.12）、glm-5.3（缓存读 0.26 对 0.14）。"
-            }
-          ]
-        },
-        {
-          "model": "glm-5.3-flash",
-          "aliases": [
-            "glm-5.3-flash",
-            "zai/glm-5.3-flash"
-          ],
-          "periods": [
-            {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
-              "from": "2026-01-01T00:00:00Z",
-              "to": null,
-              "currency": "USD",
-              "offPeak": [
-                {
-                  "id": "input-miss",
-                  "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "0.15",
-                  "per": 1000000
-                },
-                {
-                  "id": "input-hit",
-                  "label": "缓存命中输入",
-                  "basis": "cacheRead",
-                  "rate": "0.03",
-                  "per": 1000000
-                },
-                {
-                  "id": "output",
-                  "label": "输出（含 reasoning）",
-                  "basis": "output",
-                  "rate": "0.5",
-                  "per": 1000000
-                }
-              ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`zai/glm-5.3-flash` 条目，`litellm_provider: zai`，即 Z.ai 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 中明确为 0（写入不单独收费），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `z-ai/glm-5.3-flash`（0.15 / 0.5 / 0.03）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：glm-5.2（本表 1.4 / 4.4 / 0.26，OpenRouter 0.3 / 3.49 / 0.26）、glm-5（1 / 3.2 / 0.2 对 0.6 / 1.92 / 0.12）、glm-5.3（缓存读 0.26 对 0.14）。"
-            }
-          ]
-        },
-        {
-          "model": "glm-4.7",
-          "aliases": [
-            "glm-4.7",
-            "zai/glm-4.7"
-          ],
-          "periods": [
-            {
-              "id": "litellm-2026-10-04",
-              "label": "统一价（LiteLLM 快照，USD / 百万 tokens）",
-              "from": "2026-01-01T00:00:00Z",
-              "to": null,
-              "currency": "USD",
-              "offPeak": [
-                {
-                  "id": "input-miss",
-                  "label": "输入（未命中缓存）",
-                  "basis": "input",
-                  "rate": "0.6",
-                  "per": 1000000
-                },
-                {
-                  "id": "input-hit",
-                  "label": "缓存命中输入",
-                  "basis": "cacheRead",
-                  "rate": "0.11",
-                  "per": 1000000
-                },
-                {
-                  "id": "output",
-                  "label": "输出（含 reasoning）",
-                  "basis": "output",
-                  "rate": "2.2",
-                  "per": 1000000
-                }
-              ],
-              "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-              "note": "数字来自 LiteLLM 价格表（`zai/glm-4.7` 条目，`litellm_provider: zai`，即 Z.ai 官方直连价）。cache 读有独立价；cache write 在 LiteLLM 中明确为 0（写入不单独收费），故不设 cacheWrite 组件。reasoning tokens 已含在 output 内，不重复计费。OpenRouter 的 `z-ai/glm-4.7`（0.6 / 2.2 / 0.11）与之一致（同一批抓取，2026-10-04）。统一价，不分峰谷。单区间快照：LiteLLM 不记录价格的生效日期，这里只声明一个自 2026-01-01 起、无结束的区间；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。货币 USD（工具按 config/rates.json 的汇率折算显示）。数字来自 LiteLLM/OpenRouter 这类聚合表，未与厂商定价页核对（本沙箱取不到厂商页）。与 OpenRouter 不一致、已按 LiteLLM 取值的条目：glm-5.2（本表 1.4 / 4.4 / 0.26，OpenRouter 0.3 / 3.49 / 0.26）、glm-5（1 / 3.2 / 0.2 对 0.6 / 1.92 / 0.12）、glm-5.3（缓存读 0.26 对 0.14）。"
+              "note": "厂商页查不到 `glm-5-code`：智谱中文站（https://docs.bigmodel.cn/cn/guide/start/pricing）的模型表只到 GLM-5.3 / 5.2 / 5.1 / 5-Turbo / 5 / 4.7 等，国际站 Z.ai（https://docs.z.ai/guides/overview/pricing）也没有这一行。本条因此保留 LiteLLM 的 `zai/glm-5-code` 条目：输入 $1.2、缓存读 $0.3、输出 $5（每百万 tokens，USD）。来源仍是聚合源 https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json。reasoning tokens 已含在 output 内。厂商页只给当前价、不保留历史，所以这里仍是单区间快照：自 2026-01-01 起、无结束；更早的记录由引擎按「其后第一个区间」计价并在报告中标注。"
             }
           ]
         }
