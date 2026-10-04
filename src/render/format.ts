@@ -815,6 +815,10 @@ export function formatUsageReport(
   const [first] = sections;
   if (first === undefined) return '';
   const { source, rate: rateLine } = provenanceOf(first.result, options.pricingLabel);
+  // One rate card for several vendors understates the money — 37×–45× on the real data
+  // this was measured against (2026-10-04) — so the header points at the warning instead
+  // of letting a reader take the total for "the cost" and stop there.
+  const mixedPricing = first.result.warnings.some((warning) => warning.code === 'pricingMixedAgents');
   const labels = t();
   // A report that merged agents names all of them, because "which agent is
   // this?" is exactly the question the merge exists to answer; a single-agent
@@ -832,7 +836,7 @@ export function formatUsageReport(
     sections.length === 1
       ? headerLine(labels.header.range, first.range.label)
       : headerLine(labels.header.windows, sections.map((section) => section.label).join(' / ')),
-    headerLine(labels.header.pricing, source),
+    headerLine(labels.header.pricing, mixedPricing ? labels.header.pricingMixed(source) : source),
     ...(rateLine === undefined ? [] : [headerLine(labels.header.rate, rateLine)]),
   ].join('\n');
   const blocks = [header];

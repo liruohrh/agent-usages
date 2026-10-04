@@ -30,6 +30,7 @@ export const zh = {
     /** `dsh（DeepSeek Harness (DSH)）` — the agent and its display name. */
     agentName: (id: string, label: string) => `${id}（${label}）`,
     pricing: '计价来源',
+    pricingMixed: (source: string) => `${source} ⚠ 多 agent 混算，见末尾警告`,
     rate: '汇率',
   },
   /** The `总 / 自身 / 子代理` vocabulary. */

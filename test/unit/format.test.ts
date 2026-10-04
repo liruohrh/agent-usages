@@ -173,6 +173,18 @@ describe('formatUsageReport', () => {
     expect(text).toContain('计价来源  Stub Vendor（XTS）');
   });
 
+  it('points at the mixed-agent warning from the Pricing line', () => {
+    // The warning itself sits at the end of a long report; the header is where a reader
+    // stops. One rate card for several vendors is off by orders of magnitude, not percent
+    // (37×–45× on the real data, 2026-10-04), so the header has to say so.
+    const mixed = report({
+      warnings: [new UserError('pricingMixedAgents', { agents: 'claude, codex', provider: 'Stub Vendor' })],
+    });
+    const header = render(mixed).split('\n').slice(0, 8).join('\n');
+    expect(header).toContain('多 agent 混算');
+    expect(render(report()).split('\n').slice(0, 8).join('\n')).not.toContain('多 agent 混算');
+  });
+
   it('prints one compact metric line per node, with no numbers on name lines', () => {
     const text = render(
       report({

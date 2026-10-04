@@ -24,6 +24,7 @@ export const en: Messages = {
     windows: 'Windows',
     agentName: (id: string, label: string) => `${id} (${label})`,
     pricing: 'Pricing',
+    pricingMixed: (source: string) => `${source} ⚠ several agents, one rate card — see the notes`,
     rate: 'Rate',
   },
   scope: {
