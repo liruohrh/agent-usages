@@ -38,7 +38,6 @@ function provider(calendar?: 'cn') {
   return providerFromConfig({
     id: 'test',
     label: 'Test Vendor',
-    defaultModel: 'm',
     models: [
       {
         model: 'm',

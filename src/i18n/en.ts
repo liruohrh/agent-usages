@@ -24,7 +24,8 @@ export const en: Messages = {
     windows: 'Windows',
     agentName: (id: string, label: string) => `${id} (${label})`,
     pricing: 'Pricing',
-    pricingMixed: (source: string) => `${source} ⚠ several agents, one rate card — see the notes`,
+    /** Several tables priced one run: each model used the table that knows it. */
+    pricingByModel: (names: string) => `${names} (priced per model)`,
     rate: 'Rate',
   },
   scope: {
@@ -59,7 +60,6 @@ export const en: Messages = {
   resolution: {
     'fallback-later': ' ← this instant predates the band; the next band was used',
     'fallback-earlier': ' ← this instant follows the band; the last known band was used',
-    'fallback-default': ' ← no schedule for this model; the default model was used',
   },
   rate: {
     perMillion: (symbol: string) => (symbol.length === 0 ? 'per million tokens' : `${symbol} / million tokens`),
@@ -103,8 +103,6 @@ export const en: Messages = {
   price: {
     missing: (vendor: string, id: string, code: string) => `▸ ${vendor} (${id}) has no ${code} prices`,
     provider: (vendor: string, id: string, currencies: string) => `▸ ${vendor} (${id}, ${currencies} / million tokens)`,
-    defaultModel: 'Default model',
-    noDefaultModel: '(none; unknown models are left unpriced)',
     aliases: 'Aliases',
     window: 'In effect',
     tiers: 'Peak hours',
@@ -161,7 +159,7 @@ export const en: Messages = {
     program: 'Token usage and cost for coding agents',
     agent: 'agent (defaults to all: every installed agent; comma-separate or repeat, e.g. `dsh,codex`)',
     home: "the agent's data directory (defaults to its environment variable or standard location)",
-    provider: 'pricing provider (chosen from the agent by default; see `agents`)',
+    provider: 'pin prices to one table (default: pick the table per record, from its model; see `agents`)',
     json: 'print JSON',
     noUpdate: 'do not check for price or rate updates this run; use the local cache',
     usage: 'token usage and cost',
@@ -369,8 +367,6 @@ export const en: Messages = {
     unknownAgent: (p: { id: string; known: string }) => `unknown agent "${p.id}"; currently supported: ${p.known}`,
     unknownProvider: (p: { id: string; known: string }) =>
       `unknown pricing provider "${p.id}"; currently supported: ${p.known}`,
-    pricingMixedAgents: (p: { agents: string; provider: string }) =>
-      `this run mixes several agents (${p.agents}) yet prices them all with one rate card (${p.provider}); run one agent at a time, or name a provider with --provider`,
     multipleAgents: (p: { home: string; named: string }) =>
       `more than one agent matches ${p.home} (${p.named}); name one with --agent`,
     noUsageData: (p: { home: string; known: string }) =>
@@ -379,7 +375,7 @@ export const en: Messages = {
     servePortNotInteger: (p: { value: string }) => `--port wants an integer 0…65535, got ${p.value}`,
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh wants a non-negative number of seconds, got ${p.value}`,
     serveOptionUnsupported: (p: { option: string }) =>
-      `serve does not take ${p.option}: the dashboard picks its pricing provider per agent and always answers as a web page plus a JSON API; drop the flag and try again`,
+      `serve does not take ${p.option}: the dashboard picks its pricing table per model and always answers as a web page plus a JSON API; drop the flag and try again`,
     /* ---- dashboard warnings: they travel to the page, so they carry a code ---- */
     serveAgentNoRoot: (p: { agent: string }) =>
       `${p.agent}: no default data directory found, skipped (point --home at one to include it).`,

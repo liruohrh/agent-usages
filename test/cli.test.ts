@@ -1283,7 +1283,9 @@ describe('language', () => {
   it('localises the other commands and their help', async () => {
     const env = homeWith('en');
     expect((await cli(['usage', '--help'], env)).stdout).toContain('token usage and cost');
-    expect((await cli(['price', '--currency', 'USD', '--current'], env)).stdout).toContain('Default model');
+    // A price list is data, so the localised command still prints English words:
+    // the model id, its units, and the vendor page it came from.
+    expect((await cli(['price', '--currency', 'USD', '--current'], env)).stdout).toContain('deepseek-v4-pro');
     expect((await cli(['agents'], env)).stdout).toContain('Agents (--agent):');
     expect((await cli(['check-config'], env)).stdout).toContain('ok');
     expect((await cli(['update', 'nope'], env)).stderr).toMatch(/unknown update target/);

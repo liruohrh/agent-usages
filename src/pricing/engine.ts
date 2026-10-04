@@ -506,7 +506,6 @@ function mergeCharges(left: ComponentCharge, right: ComponentCharge): ComponentC
 /** The default engine implementation. */
 class Engine implements PricingEngine {
   readonly provider: PricingProvider;
-  private readonly fallbackModel: string | null;
   /** Everything the caller handed in, including the holiday calendar. */
   private readonly options: PricingEngineOptions;
   /** Period lookups keyed by model + how many period boundaries precede the instant. */
@@ -531,7 +530,6 @@ class Engine implements PricingEngine {
   constructor(provider: PricingProvider, options: PricingEngineOptions) {
     this.provider = provider;
     this.options = options;
-    this.fallbackModel = options.defaultModel === undefined ? provider.defaultModel : options.defaultModel;
     this.convertAt = options.convertAt;
   }
 
@@ -585,20 +583,14 @@ class Engine implements PricingEngine {
   }
 
   resolve(record: UsageRecord): ResolvedRate | undefined {
-    let selected = this.periodAt(record.model, record.time);
-    let model = this.scheduleFor(record.model)?.model;
-    let usedDefault = false;
-    if (selected === undefined && this.fallbackModel !== null) {
-      selected = this.periodAt(this.fallbackModel, record.time);
-      model = this.fallbackModel;
-      usedDefault = true;
-    }
+    const selected = this.periodAt(record.model, record.time);
+    const model = this.scheduleFor(record.model)?.model;
+    // No schedule for this model and no borrowed one: the record is unpriced, which
+    // the report counts and names rather than guessing a vendor's price for it.
     if (selected === undefined || model === undefined) return undefined;
 
     const { period } = selected;
-    // Borrowing another model's schedule is its own kind of approximation, so it
-    // replaces — rather than nests inside — the period's own resolution.
-    const resolution: PriceResolution = usedDefault ? 'fallback-default' : selected.resolution;
+    const resolution: PriceResolution = selected.resolution;
     const tiered = period.peak !== null && period.peakWindows.length > 0;
     if (!tiered) {
       return { model, period, tier: 'flat', reason: 'flat', components: period.offPeak, resolution };

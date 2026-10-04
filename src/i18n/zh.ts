@@ -30,7 +30,8 @@ export const zh = {
     /** `dsh（DeepSeek Harness (DSH)）` — the agent and its display name. */
     agentName: (id: string, label: string) => `${id}（${label}）`,
     pricing: '计价来源',
-    pricingMixed: (source: string) => `${source} ⚠ 多 agent 混算，见末尾警告`,
+    /** Several tables priced one run: each model used the table that knows it. */
+    pricingByModel: (names: string) => `${names}（按模型）`,
     rate: '汇率',
   },
   /** The `总 / 自身 / 子代理` vocabulary. */
@@ -78,7 +79,6 @@ export const zh = {
   resolution: {
     'fallback-later': ' ← 该时间早于本区间，按其后第一个区间的价格计算',
     'fallback-earlier': ' ← 该时间晚于本区间，按最后一个已知区间的价格计算',
-    'fallback-default': ' ← 该模型无价格表，按默认模型价格计算',
   },
   /** Prices and the rate card. */
   rate: {
@@ -140,8 +140,6 @@ export const zh = {
   price: {
     missing: (vendor: string, id: string, code: string) => `▸ ${vendor}（${id}）没有 ${code} 的价格`,
     provider: (vendor: string, id: string, currencies: string) => `▸ ${vendor}（${id}，${currencies} / 百万 tokens）`,
-    defaultModel: '默认价格模型',
-    noDefaultModel: '（无，未知模型不计价）',
     aliases: '别名',
     window: '生效',
     tiers: '峰谷',
@@ -212,7 +210,7 @@ export const zh = {
     program: '统计 coding agent 的 token 消耗与费用',
     agent: 'agent（默认 all：统计所有已安装的 agent；可用逗号或重复指定，如 `dsh,codex`）',
     home: 'agent 的数据目录（默认用该 agent 的环境变量或标准位置）',
-    provider: '计价来源（默认按 agent 选择；见 `agents`）',
+    provider: '把价格钉死在一张表上（默认按每条记录里的模型自动选表；见 `agents`）',
     json: '以 JSON 输出',
     noUpdate: '本次不检查价格表/汇率更新，直接用本地缓存',
     usage: '计算 token 消耗与费用',
@@ -435,8 +433,6 @@ export const zh = {
     /* ---- agents and providers ---- */
     unknownAgent: (p: { id: string; known: string }) => `未知的 agent "${p.id}"；当前支持：${p.known}`,
     unknownProvider: (p: { id: string; known: string }) => `未知的计价来源 "${p.id}"；当前支持：${p.known}`,
-    pricingMixedAgents: (p: { agents: string; provider: string }) =>
-      `这次统计混了多个 agent（${p.agents}），却共用一张价格表（${p.provider}）；要按厂商分开算钱，请分别用 --agent 跑，或用 --provider 指定一张表`,
     multipleAgents: (p: { home: string; named: string }) => `在 ${p.home} 同时匹配到多个 agent（${p.named}），请用 --agent 指定`,
     noUsageData: (p: { home: string; known: string }) =>
       `在 ${p.home} 没有找到可统计的用量数据；可用 --agent / --home 指定（当前支持：${p.known}）`,
@@ -445,7 +441,7 @@ export const zh = {
     servePortNotInteger: (p: { value: string }) => `--port 需要 0…65535 的整数，收到 ${p.value}`,
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh 需要非负秒数，收到 ${p.value}`,
     serveOptionUnsupported: (p: { option: string }) =>
-      `serve 不接受 ${p.option}：仪表盘的计价来源按 agent 自动选择，输出固定是网页与 JSON API；去掉这个参数再试`,
+      `serve 不接受 ${p.option}：仪表盘的计价来源按记录里的模型自动选择，输出固定是网页与 JSON API；去掉这个参数再试`,
     /* ---- dashboard warnings: they travel to the page, so they carry a code ---- */
     serveAgentNoRoot: (p: { agent: string }) =>
       `${p.agent}：找不到默认数据目录，已跳过（可用 --home 指定）。`,

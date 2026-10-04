@@ -3,7 +3,8 @@
  *
  * - `contract.ts` — what a pricing provider must implement.
  * - `engine.ts`   — the vendor-neutral period/tier resolution and arithmetic.
- * - `registry.ts` — which providers this build ships.
+ * - `routing.ts`  — one engine over many tables: the record's model picks the table.
+ * - `registry.ts` — which providers this build ships, and the engine to price with.
  * - `currency.ts` — display currency, exchange-rate tables, and converting a
  *   provider's published rates into the currency the report is shown in.
  * - `catalog.ts`  — the vendor price lists: shipped, cached, user-overridden.
@@ -52,8 +53,10 @@ export {
 export {
   DEFAULT_PRICING_PROVIDER,
   PRICING_PROVIDERS,
+  createRoutingEngine,
   findPricingProvider,
-  mixedAgentPricingWarning,
+  isRoutingEngine,
   requirePricingProvider,
-  resolvePricingProvider,
+  type RoutingEngine,
+  type RoutingOptions,
 } from './registry.ts';

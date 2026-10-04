@@ -173,16 +173,14 @@ describe('formatUsageReport', () => {
     expect(text).toContain('计价来源  Stub Vendor（XTS）');
   });
 
-  it('points at the mixed-agent warning from the Pricing line', () => {
-    // The warning itself sits at the end of a long report; the header is where a reader
-    // stops. One rate card for several vendors is off by orders of magnitude, not percent
-    // (37×–45× on the real data, 2026-10-04), so the header has to say so.
-    const mixed = report({
-      warnings: [new UserError('pricingMixedAgents', { agents: 'claude, codex', provider: 'Stub Vendor' })],
-    });
-    const header = render(mixed).split('\n').slice(0, 8).join('\n');
-    expect(header).toContain('多 agent 混算');
-    expect(render(report()).split('\n').slice(0, 8).join('\n')).not.toContain('多 agent 混算');
+  it('names every table that priced the run, and marks a per-model choice', () => {
+    // Prices are routed per record, so one run may use several tables; naming only
+    // one of them would misdescribe the money.
+    const one = render(report(), { pricingLabel: ['Stub Vendor'] });
+    expect(one.split('\n')[4]).toContain('Stub Vendor');
+    expect(one).not.toContain('按模型');
+    const several = render(report(), { pricingLabel: ['Stub Vendor', 'Other Vendor'] });
+    expect(several.split('\n')[4]).toContain('Stub Vendor · Other Vendor（按模型）');
   });
 
   it('prints one compact metric line per node, with no numbers on name lines', () => {

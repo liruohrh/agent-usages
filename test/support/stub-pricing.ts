@@ -99,7 +99,6 @@ export function stubProvider(): PricingProvider {
   return {
     id: 'stub',
     label: 'Stub Vendor',
-    defaultModel: 'flat-model',
     models: () => models,
     find: (model) => {
       const wanted = model.trim().toLowerCase();
@@ -162,7 +161,6 @@ export function contextProvider(): PricingProvider {
   return {
     id: 'stub-context',
     label: 'Stub Context Vendor',
-    defaultModel: 'context-model',
     models: () => models,
     find: (model) => {
       const wanted = model.trim().toLowerCase();

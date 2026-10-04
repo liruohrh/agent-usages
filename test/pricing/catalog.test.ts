@@ -41,11 +41,10 @@ describe('parsePricingConfig', () => {
   it('reads the shipped file into providers', () => {
     const config = parsePricingConfig(shipped());
     expect(config.version).toBe(1);
-    // DeepSeek stays first: it is the default for a run that names no provider.
-    // The four vendors after it are priced from an aggregator, not a vendor page.
+    // DeepSeek stays first, which is what `price` without `--provider` lists and
+    // the order a routed run reads when two tables know the same model.
     expect(config.providers.map((entry) => entry.id)).toEqual(['deepseek', 'openai', 'anthropic', 'moonshot', 'zhipu']);
     const deepseek = config.providers[0]!;
-    expect(deepseek.defaultModel).toBe('deepseek-flash');
     expect(deepseek.models.map((model) => model.model)).toEqual(['deepseek-flash', 'deepseek-v4-pro']);
   });
 
@@ -113,12 +112,6 @@ describe('parsePricingConfig', () => {
     const yuan = periods.filter((period) => period['currency'] === 'CNY');
     yuan[yuan.length - 1]!['to'] = '2026-10-01T00:00:00+08:00';
     expect(() => parsePricingConfig(document)).toThrow(/没有结束时间/);
-  });
-
-  it('rejects a default model that is not in the list', () => {
-    const document = shipped();
-    (document['providers'] as Record<string, unknown>[])[0]!['defaultModel'] = 'gpt-9';
-    expect(() => parsePricingConfig(document)).toThrow(/默认模型 gpt-9 不在模型列表里/);
   });
 
   it('rejects a document from a future schema', () => {

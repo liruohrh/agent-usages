@@ -133,17 +133,17 @@ describe('resolveConfig', () => {
   });
 
   it('prefers a fetched price file over the shipped one', async () => {
-    // A cached file whose only difference is a renamed default model: proving the
-    // cache is read, without inventing prices.
+    // A cached file whose only difference is a renamed vendor: proving the cache is
+    // read, without inventing prices.
     const shipped = JSON.parse(readFileSync(new URL('../../config/pricing.json', import.meta.url), 'utf8')) as Record<string, unknown>;
-    const providers = shipped['providers'] as { defaultModel: string }[];
-    providers[0]!.defaultModel = 'deepseek-v4-pro';
+    const providers = shipped['providers'] as { label: string }[];
+    providers[0]!.label = 'Cached DeepSeek';
     const config = await resolveConfig({
       noUpdate: true,
       env: envWith({ 'cache-pricing.json': { fetchedAt: 1, text: JSON.stringify(shipped) } }),
     });
     expect(config.warnings).toEqual([]);
-    expect(config.providers[0]?.defaultModel).toBe('deepseek-v4-pro');
+    expect(config.providers[0]?.label).toBe('Cached DeepSeek');
   });
 
   it('falls back to the shipped file when the cache is unusable', async () => {
@@ -151,7 +151,7 @@ describe('resolveConfig', () => {
       noUpdate: true,
       env: envWith({ 'cache-pricing.json': { fetchedAt: 1, text: '{"version":1}' } }),
     });
-    expect(config.providers[0]?.defaultModel).toBe('deepseek-flash');
+    expect(config.providers[0]?.label).toBe('DeepSeek');
     expect(config.warnings.map((warning) => warning.message).join('\n')).toMatch(/已缓存的价目表不可用/);
   });
 

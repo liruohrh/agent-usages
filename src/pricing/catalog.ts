@@ -334,9 +334,6 @@ export function validateProviders(providers: readonly ProviderConfig[]): void {
   if (providers.length === 0) throw new ConfigError('providers', 'configNeedsProvider', {});
   providers.forEach((entry, index) => {
     if (entry.models.length === 0) throw new ConfigError(`providers[${index}].models`, 'configNeedsModel', {});
-    if (entry.defaultModel !== null && !entry.models.some((model) => model.model === entry.defaultModel)) {
-      throw new ConfigError(`providers[${index}].defaultModel`, 'configDefaultModelMissing', { model: entry.defaultModel });
-    }
     entry.models.forEach((model, at) => {
       checkModelPeriods(model, `providers[${index}].models[${at}]`);
     });
@@ -360,10 +357,6 @@ export interface ProviderConfig {
   id: string;
   /** Human-readable name. */
   label: string;
-  /** Model used for records nothing else matches, or `null` to leave them unpriced. */
-  defaultModel: string | null;
-  /** Agent ids this provider is the natural default for (`codex` → OpenAI). */
-  defaultFor?: readonly string[] | undefined;
   /** Models with a published schedule. */
   models: ModelPrice[];
 }
@@ -396,23 +389,9 @@ export function parsePricingConfig(value: unknown): PricingConfig {
       modelPrice(model, `providers[${index}].models[${at}]`),
     );
     if (models.length === 0) throw new ConfigError(`providers[${index}].models`, 'configNeedsModel', {});
-    const defaultModel = optionalText(node['defaultModel'], `providers[${index}].defaultModel`);
-    if (defaultModel !== null && !models.some((entry) => entry.model === defaultModel)) {
-      throw new ConfigError(`providers[${index}].defaultModel`, 'configDefaultModelMissing', { model: defaultModel });
-    }
-    // Which agents this vendor is the natural default for. Optional: a provider that
-    // claims none is still reachable with `--provider`, it just never wins by default.
-    const defaultFor =
-      node['defaultFor'] === undefined
-        ? []
-        : array(node['defaultFor'], `providers[${index}].defaultFor`).map((agent, at) =>
-            text(agent, `providers[${index}].defaultFor[${at}]`),
-          );
     return {
       id: text(node['id'], `providers[${index}].id`),
       label: text(node['label'], `providers[${index}].label`),
-      defaultModel,
-      defaultFor,
       models,
     };
   });
@@ -429,8 +408,6 @@ export function providerFromConfig(entry: ProviderConfig): PricingProvider {
   return {
     id: entry.id,
     label: entry.label,
-    defaultModel: entry.defaultModel,
-    defaultFor: entry.defaultFor ?? [],
     models: () => entry.models,
     find: (model: string) => {
       const wanted = model.trim().toLowerCase();

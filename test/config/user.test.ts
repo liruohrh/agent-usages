@@ -97,7 +97,6 @@ describe('readUserConfig', () => {
             {
               id: 'deepseek',
               label: 'DeepSeek',
-              defaultModel: 'deepseek-flash',
               models: [
                 {
                   model: 'deepseek-flash',
@@ -235,7 +234,6 @@ describe('mergeProviders', () => {
       {
         id: 'deepseek',
         label: 'DeepSeek',
-        defaultModel: 'deepseek-flash',
         models: [
           {
             model: 'deepseek-flash',
@@ -260,7 +258,6 @@ describe('mergeProviders', () => {
       {
         id: 'deepseek',
         label: 'DeepSeek',
-        defaultModel: 'deepseek-flash',
         models: [
           {
             model: 'deepseek-flash',

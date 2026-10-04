@@ -620,7 +620,8 @@ describe('currency', () => {
 
 describe('unpriced records', () => {
   it('counts them instead of treating them as free', () => {
-    const strict = createPricingEngine({ ...stubProvider(), defaultModel: null });
+    // No table knows `unknown`: the record is unpriced rather than borrowing a rate.
+    const strict = createPricingEngine(stubProvider());
     const data = dataset([
       project({
         id: 'p',

@@ -4,17 +4,22 @@
  * Vendors are data, not code: every provider comes from `config/pricing.json`,
  * which ships with the tool and can be fetched at run time. Adding a vendor is a
  * matter of adding an entry there — the CLI, the accounting layer and the reports
- * pick it up automatically and `price --provider` starts listing it.
+ * pick it up automatically, `price --provider` starts listing it, and a record
+ * naming one of its models is priced by it without any call site changing.
+ *
+ * Which table a *record* is priced with is {@link createRoutingEngine}'s job: the
+ * model in the record decides, not the agent that wrote the log, because an agent
+ * is a harness rather than a vendor.
  */
 
-import { UserError, type Warning } from '../i18n/errors.ts';
+import { UserError } from '../i18n/errors.ts';
 import { shippedProviders } from './catalog.ts';
 import type { PricingProvider } from './contract.ts';
 
 /** Every pricing provider this build knows about, in display order. */
 export const PRICING_PROVIDERS: readonly PricingProvider[] = shippedProviders();
 
-/** Provider used when the user does not name one. */
+/** Provider used when nothing else names one (`price` without `--provider`). */
 export const DEFAULT_PRICING_PROVIDER = PRICING_PROVIDERS[0]?.id ?? 'deepseek';
 
 /**
@@ -43,53 +48,9 @@ export function requirePricingProvider(id: string, providers: readonly PricingPr
 }
 
 /**
- * Choose a pricing provider for a dataset.
+ * The engine that prices each record with the table that knows its model.
  *
- * The dataset records which agent produced it, and providers may declare which
- * agents they are the natural default for. Until a second provider exists this
- * simply resolves to the built-in default, but the seam is here so that adding
- * one does not require touching call sites.
- * @param requested - an explicit `--provider` value, when given.
- * @param agent - the agent id the dataset came from, when known.
- * @returns the provider to price with.
+ * Re-exported here because handing out pricing engines is what this module is for;
+ * the implementation and its options live in `routing.ts`.
  */
-export function resolvePricingProvider(
-  requested: string | undefined,
-  agent?: string,
-  providers: readonly PricingProvider[] = PRICING_PROVIDERS,
-): PricingProvider {
-  if (requested !== undefined) return requirePricingProvider(requested, providers);
-  // The two axes meet here: the dataset says which agent produced the usage, and a
-  // provider declares which agents it is the natural default for. A single-agent run
-  // gets that vendor's rates; anything else keeps the first provider, and
-  // {@link mixedAgentPricingWarning} says so rather than quietly billing one vendor's
-  // rates for another's tokens.
-  const wanted = agent?.trim().toLowerCase() ?? '';
-  const claimed =
-    wanted.length === 0
-      ? undefined
-      : providers.find((provider) => (provider.defaultFor ?? []).some((id) => id.trim().toLowerCase() === wanted));
-  if (claimed !== undefined) return claimed;
-  return requirePricingProvider(providers[0]?.id ?? DEFAULT_PRICING_PROVIDER, providers);
-}
-
-/**
- * A warning when one run mixes agents but prices them all with one rate card.
- *
- * Vendors publish different rates, so `dsh + codex + claude` costed with the
- * DeepSeek table is not "the cost": the token lines are still right, the money is
- * one vendor's opinion. This says which table was used and how to split the run —
- * a warning rather than an error, because a merged run is a legitimate question.
- * @param agents - the agent ids in the dataset, in display order.
- * @param provider - the provider the run ended up using.
- * @param requested - the explicit `--provider`, when the caller named one.
- * @returns the warning, or `undefined` when there is nothing to say.
- */
-export function mixedAgentPricingWarning(
-  agents: readonly string[],
-  provider: PricingProvider,
-  requested: string | undefined,
-): Warning | undefined {
-  if (requested !== undefined || agents.length <= 1) return undefined;
-  return new UserError('pricingMixedAgents', { agents: agents.join(', '), provider: provider.label });
-}
+export { createRoutingEngine, isRoutingEngine, type RoutingEngine, type RoutingOptions } from './routing.ts';

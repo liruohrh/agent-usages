@@ -125,21 +125,6 @@ const VENDOR_PAGE: Record<(typeof ADDED)[number], Partial<Record<'CNY' | 'USD', 
   },
 };
 
-/** The aggregator URL the few uncovered rows still point at. */
-const LITELLM = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
-
-/** Rows no vendor page lists, which therefore keep their aggregator provenance. */
-const AGGREGATOR_ROWS: [string, string][] = [
-  ['openai', 'gpt-5.6'],
-  ['moonshot', 'kimi-k2.5'],
-  ['zhipu', 'glm-5-code'],
-];
-
-/** Whether a row comes from the vendor's own page or from the aggregator. */
-function fromVendor(id: string, model: string): boolean {
-  return !AGGREGATOR_ROWS.some(([providerId, name]) => providerId === id && name === model);
-}
-
 /** An instant the real usage falls inside, so every card resolves exactly. */
 const AT = Date.parse('2026-09-30T12:00:00Z');
 
@@ -149,21 +134,12 @@ describe('the shipped vendor list', () => {
     expect(CONFIG.version).toBe(1);
   });
 
-  it('leaves unknown models unpriced for the new vendors', () => {
-    // A default model would borrow one model's price for another's tokens, which
-    // is a guess; `null` reports those records as unpriced instead. DeepSeek's own
-    // default predates that rule and stays as it is.
-    expect(provider('deepseek').defaultModel).toBe('deepseek-flash');
-    for (const id of ADDED) expect(provider(id).defaultModel).toBeNull();
-  });
-
-  it('names the agent each vendor is the natural default for', () => {
-    expect(provider('deepseek').defaultFor).toEqual(['dsh']);
-    expect(provider('openai').defaultFor).toEqual(['codex']);
-    expect(provider('anthropic').defaultFor).toEqual(['claude']);
-    // Kimi and GLM have no agent of their own; `--provider` is how they are picked.
-    expect(provider('moonshot').defaultFor).toEqual([]);
-    expect(provider('zhipu').defaultFor).toEqual([]);
+  it('carries no default model, so an unknown model is never guessed at', () => {
+    // Prices are routed per record; a record whose model no table lists is
+    // unpriced, not billed at some other model's rate.
+    for (const id of ['deepseek', ...ADDED] as const) {
+      expect(Object.keys(provider(id))).not.toContain('defaultModel');
+    }
   });
 });
 
@@ -172,11 +148,9 @@ describe('provenance', () => {
     for (const id of ADDED) {
       for (const model of provider(id).models) {
         for (const entry of model.periods) {
-          const expected = fromVendor(id, model.model)
-            ? VENDOR_PAGE[id][entry.currency as 'CNY' | 'USD']
-            : LITELLM;
-          expect(entry.source).toBe(expected);
-          if (entry.source === LITELLM) continue;
+          // Every row is on a vendor page now: a price nobody publishes is not
+          // carried at all, and the record that names it is reported unpriced.
+          expect(entry.source).toBe(VENDOR_PAGE[id][entry.currency as 'CNY' | 'USD']);
           expect(entry.note).toContain('抓取于 2026-10-04');
           expect(entry.note).toContain(entry.source.replace('https://', ''));
         }
@@ -197,15 +171,16 @@ describe('provenance', () => {
     }
   });
 
-  it('keeps the aggregator URL only for rows the vendor pages do not list', () => {
-    // The vendor pages have no row for these three, so they stay on LiteLLM and
-    // the note says so rather than pretending the vendor published them.
-    for (const [id, model] of AGGREGATOR_ROWS) {
-      expect(periods(id, model)).toHaveLength(1);
-      const entry = period(id, model);
-      expect(entry.source).toBe(LITELLM);
-      expect(entry.note).toContain('聚合源');
-      expect(entry.note).toContain('厂商页');
+  it('carries only models a vendor page publishes', () => {
+    // The three rows that only a community price list had (gpt-5.6, kimi-k2.5,
+    // glm-5-code) were removed rather than shipped on a second-hand number: their
+    // records are unpriced now.
+    for (const [id, model] of [
+      ['openai', 'gpt-5.6'],
+      ['moonshot', 'kimi-k2.5'],
+      ['zhipu', 'glm-5-code'],
+    ] as const) {
+      expect(provider(id).models.some((price) => price.model === model)).toBe(false);
     }
   });
 
@@ -214,10 +189,6 @@ describe('provenance', () => {
     // currency over identical windows, and the reader's currency picks one.
     for (const id of ['moonshot', 'zhipu'] as const) {
       for (const model of provider(id).models) {
-        if (!fromVendor(id, model.model)) {
-          expect(model.periods.map((entry) => entry.currency)).toEqual(['USD']);
-          continue;
-        }
         expect(model.periods.map((entry) => entry.currency)).toEqual(['CNY', 'USD']);
         const cny = periodIn(id, model.model, 'CNY');
         const usd = periodIn(id, model.model, 'USD');
@@ -261,7 +232,6 @@ describe('provenance', () => {
     for (const [id, wanted, expected] of cases) {
       const picked = selectCurrency(lookup(id), wanted);
       for (const model of picked.provider.models()) {
-        if (!fromVendor(id, model.model)) continue;
         expect([...new Set(model.periods.map((entry) => entry.currency))]).toEqual([expected]);
       }
     }
@@ -400,7 +370,7 @@ describe('billing bases', () => {
     for (const model of ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
       expect(components('openai', model)).toEqual(['input-miss', 'input-hit', 'input-write', 'output']);
     }
-    for (const model of ['gpt-5.5', 'gpt-5.3-codex', 'gpt-5.6']) {
+    for (const model of ['gpt-5.5', 'gpt-5.3-codex']) {
       expect(components('openai', model)).toEqual(['input-miss', 'input-hit', 'output']);
     }
   });
@@ -413,7 +383,7 @@ describe('billing bases', () => {
     // Both published lists carry the same write tier, so the basis does not
     // depend on which currency the reader asked for.
     expect(componentIn('moonshot', 'kimi-k3', 'USD', 'input-write').ttlMultipliers).toEqual({ '1h': '2' });
-    for (const model of ['kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'kimi-k2.5']) {
+    for (const model of ['kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6']) {
       expect(components('moonshot', model)).toEqual(['input-miss', 'input-hit', 'output']);
       expect(component('moonshot', model, 'input-miss').basis).toBe('inputAndCacheWrite');
     }

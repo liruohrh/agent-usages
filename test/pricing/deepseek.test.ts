@@ -258,10 +258,6 @@ describe('provider metadata', () => {
     }
   });
 
-  it('falls back to Flash for unknown models', () => {
-    expect(deepseekPricing.defaultModel).toBe('deepseek-flash');
-  });
-
   it('offers an every-day window and a weekday window', () => {
     const [flash] = DEEPSEEK_PRICES;
     const early = flash?.periods.find((period) => period.id === '2026-08-17');

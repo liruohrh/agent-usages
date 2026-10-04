@@ -428,7 +428,6 @@ export function mergeProviders(base: readonly ProviderConfig[], overrides: reado
       merged.push(override);
       continue;
     }
-    if (override.defaultModel !== null) existing.defaultModel = override.defaultModel;
     for (const model of override.models) {
       const known = existing.models.find((candidate) => candidate.model === model.model);
       if (known === undefined) {

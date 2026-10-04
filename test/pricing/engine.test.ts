@@ -99,16 +99,11 @@ describe('period selection', () => {
     expect(resolved?.resolution).toBe('fallback-earlier');
   });
 
-  it('uses the default model for an unknown model, and says so', () => {
-    const resolved = engine.resolve(record({ time: STUB_AT.early, model: 'unknown-model' }));
-    expect(resolved?.model).toBe('flat-model');
-    expect(resolved?.resolution).toBe('fallback-default');
-  });
-
-  it('returns undefined when there is no fallback either', () => {
-    const strict = createPricingEngine({ ...stubProvider(), defaultModel: null });
-    expect(strict.resolve(record({ time: STUB_AT.early, model: 'unknown-model' }))).toBeUndefined();
-    expect(strict.costOf(record({ time: STUB_AT.early, model: 'unknown-model' }))).toBeUndefined();
+  it('leaves a model with no schedule unpriced, with no borrowed rate', () => {
+    // There is no fallback: borrowing another model's price is a guess, and a
+    // guess is worse than an unpriced record (which the report counts and names).
+    expect(engine.resolve(record({ time: STUB_AT.early, model: 'unknown-model' }))).toBeUndefined();
+    expect(engine.costOf(record({ time: STUB_AT.early, model: 'unknown-model' }))).toBeUndefined();
   });
 });
 

@@ -57,15 +57,18 @@ import type { AgentAdapter } from '../agents/contract.ts';
 import { addCostTotals, costOf, zeroCostTotals } from '../report/accounting.ts';
 import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
-import { mixedAgentPricingWarning } from '../pricing/index.ts';
 import type { CostTotals, TokenBuckets, UsageDataset, UsageRecord } from '../core/types.ts';
 import { renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import { language, t } from '../i18n/index.ts';
 import {
   createPricingEngine,
+  createRoutingEngine,
+  convertProvider,
   currencyOf,
+  isRoutingEngine,
   providerCurrencies,
-  resolvePricingProvider,
+  rateFor,
+  selectCurrency,
   type PricingEngine,
 } from '../pricing/index.ts';
 import type { PricingProvider } from '../pricing/contract.ts';
@@ -715,10 +718,25 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     rate: RateInfo;
   }> => {
     const config = await resolveConfig({ noUpdate: options.noUpdate ?? true, env, now });
-    const provider = resolvePricingProvider(undefined, adapters[0]?.id, config.providers);
-    const engine = createPricingEngine(provider, config.holidays === undefined ? {} : { holidays: config.holidays });
-    const currency = providerCurrencies(provider)[0] ?? 'USD';
+    // One table per record, chosen by the model it names. The dashboard has no
+    // `--provider`, so it always routes; the tables' own currencies are reconciled
+    // below into the one the page displays.
+    const provider = config.providers[0]!;
+    const currency = [...new Set(config.providers.flatMap((table) => providerCurrencies(table)))][0] ?? 'USD';
     const symbol = currencyOf(currency).symbol;
+    const target = currencyOf(currency);
+    const holidays = config.holidays === undefined ? {} : { holidays: config.holidays };
+    const lists = new Map(config.providers.map((table) => [table, selectCurrency(table, currency)]));
+    const engine = createRoutingEngine(config.providers, {
+      engineFor: (table: PricingProvider) => {
+        const list = lists.get(table) ?? selectCurrency(table, currency);
+        const quoted = list.currencies[0] ?? currency;
+        // A table that never published the display currency is converted from the
+        // one it did publish, so every amount the page shows speaks the same one.
+        const { rate: tableRate } = rateFor({ base: quoted, target: currency, manualRate: undefined, table: config.rateTable });
+        return createPricingEngine(convertProvider(list.provider, target, tableRate), holidays);
+      },
+    });
     const context = { engine, pricingProvider: provider.id };
     const rate: RateInfo = {
       base: currency,
@@ -836,10 +854,6 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     // 实时模式只有这一条路：合并层把 N 份 dataset 合成一份（一份都没有时给空数据集）。
     // 它同时也是 CLI 用的那个函数，所以两个入口对"同一份数据属于哪个项目"只有一个答案。
     const dataset = await mergeDatasets(loaded, { projects: config.projects ?? [] });
-    // Same note as the CLI's: a dashboard that mixes vendors under one rate card must
-    // say so, or its totals read as "the cost" when they are one vendor's rates.
-    const mixedAgents = mixedAgentPricingWarning(dataset.agents, provider, undefined);
-    if (mixedAgents !== undefined) warnings.push(flattenWarning(mixedAgents));
     scan = { dataset, sources };
     scanWarnings = warnings;
     cache.clear();
@@ -879,13 +893,16 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     const spec = (rangeSpec ?? '').trim();
     const range = resolveRange(spec.length === 0 ? {} : { spec });
     const result = runQuery(scan.dataset, queryOf(range), context);
+    // Which tables priced this dashboard is only known after the query ran.
+    const used = isRoutingEngine(engine) ? engine.tablesUsed() : [engine.provider];
+    const tables = used.length === 0 ? [engine.provider] : used;
     const built = buildDashboard({
       datasets: [scan.dataset],
       mergedResult: result,
       range,
       engine,
-      pricingProvider: provider.id,
-      pricingLabel: provider.label,
+      pricingProvider: tables[0]!.id,
+      pricingLabel: tables.map((table) => table.label).join(' · '),
       currency,
       currencySymbol: symbol,
       source: options.home ?? describeSources(scan.sources),

@@ -21,8 +21,11 @@ import { AGENT_ADAPTERS, detectAgents, requireAgent, type AgentAdapter } from '.
 import {
   PRICING_PROVIDERS,
   createPricingEngine,
-  resolvePricingProvider,
+  createRoutingEngine,
+  isRoutingEngine,
+  requirePricingProvider,
   type PricingEngine,
+  type PricingProvider,
   type RateComponent,
 } from '../pricing/index.ts';
 import { listSessions, runQuery, type SessionListFilters, type UsageDimension, type UsageQuery } from '../report/index.ts';
@@ -31,7 +34,6 @@ import { resolveLanguage, setLanguage, t } from '../i18n/index.ts';
 import { openInBrowser } from '../serve/open.ts';
 import { renderDiagnostic, UserError, type Warning } from '../i18n/errors.ts';
 import { mergeDatasets } from '../core/merge.ts';
-import { mixedAgentPricingWarning } from '../pricing/index.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -56,7 +58,14 @@ import {
   selectCurrency,
   type DisplayResolution,
 } from '../pricing/currency.ts';
-import { formatSessionList, formatUsageReport, sessionListToJson, usageToJson, type ReportSection } from '../render/format.ts';
+import {
+  formatSessionList,
+  formatUsageReport,
+  pricingLabelText,
+  sessionListToJson,
+  usageToJson,
+  type ReportSection,
+} from '../render/format.ts';
 import { renderHtmlReport } from '../render/html.ts';
 import type { UsageDataset } from '../core/types.ts';
 
@@ -214,6 +223,24 @@ async function selectAgents(requested: readonly string[] | undefined, home: stri
   return chosen;
 }
 
+/**
+ * The table a run's single-valued provenance fields name.
+ *
+ * A routed run has several; the first one that actually priced a record is the
+ * honest answer, and before any record is priced that is the first table.
+ */
+function primaryTableOf(engine: PricingEngine): PricingProvider {
+  if (!isRoutingEngine(engine)) return engine.provider;
+  return engine.tablesUsed()[0] ?? engine.provider;
+}
+
+/** The table names the header should print: one for a single-table run. */
+function pricingLabelOf(engine: PricingEngine): string | readonly string[] {
+  if (!isRoutingEngine(engine)) return engine.provider.label;
+  const used = engine.tablesUsed().map((table) => table.label);
+  return used.length === 0 ? engine.provider.label : used;
+}
+
 /** How the report header names the agents a run read. */
 function agentLabelOf(adapters: readonly AgentAdapter[]): string {
   return adapters.map((adapter) => adapter.label).join(' · ');
@@ -244,14 +271,16 @@ async function loadOrExit(
     // read by two agents is one row, a repository's worktrees are one row, and
     // the configuration can group what the filesystem cannot.
     const dataset = await mergeDatasets(datasets, config.projects.length === 0 ? {} : { projects: config.projects });
-    const provider = resolvePricingProvider(options.provider, dataset.agent, config.providers);
-    // One rate card for several vendors is a number worth flagging: the tokens add
-    // up, the money is one vendor's opinion. See `mixedAgentPricingWarning`.
-    const mixedAgents = mixedAgentPricingWarning(dataset.agents, provider, options.provider);
-    if (mixedAgents !== undefined) dataset.warnings.push(mixedAgents);
-    // The vendor's rates are rewritten into the display currency here, once, so
-    // every amount and every unit price downstream is already in it.
-    const published = providerCurrencies(provider);
+    // Which tables this run may draw on. `--provider` pins one; otherwise every
+    // shipped table is a candidate and the model in each record picks between them
+    // (see `createRoutingEngine`), so `codex` is priced by OpenAI and `claude` by
+    // Anthropic in the same run without anybody guessing from the agent id.
+    const pinned: PricingProvider | undefined =
+      options.provider === undefined ? undefined : requirePricingProvider(options.provider, config.providers);
+    const tables = pinned === undefined ? config.providers : [pinned];
+    // The currency choice is made over every table the run may use, so a euro
+    // reader is not offered a conversion path that one of them cannot take.
+    const published = [...new Set(tables.flatMap((table) => providerCurrencies(table)))];
     const choice = chooseDisplay({
       published,
       // The user's own file is the middle layer: a flag still wins over it.
@@ -259,12 +288,12 @@ async function loadOrExit(
       ...(options.currencyRate === undefined ? {} : { rateFlag: options.currencyRate }),
       ...(systemLocaleFromEnv() === undefined ? {} : { locale: systemLocaleFromEnv() }),
     });
-    // One published list per model, in the currency the report will speak; the
-    // rates are then converted — so a list published in the reader's currency is
-    // used exactly as published, and anything else is converted from the list
-    // that was.
-    const selected = selectCurrency(provider, choice.baseWanted);
-    const base = selected.currencies[0] ?? choice.baseWanted;
+    const target = choice.currency ?? { code: '', symbol: '', name: '' };
+    // Each table keeps the list it published in the reader's currency; a table that
+    // never published it falls back to its own dollar list, and the conversion
+    // below starts from *that* table's currency rather than from a shared one.
+    const picked = tables.map((table) => ({ table, list: selectCurrency(table, choice.baseWanted) }));
+    const base = picked[0]?.list.currencies[0] ?? choice.baseWanted;
     const { rate, provenance } = rateFor({
       base,
       target: choice.currency?.code ?? null,
@@ -276,16 +305,22 @@ async function loadOrExit(
       : 'latest';
     // Historical mode cannot rewrite the rates once — each record needs the rate
     // of its own date — so the engine converts each record instead, and the price
-    // list keeps the numbers the vendor published.
-    let series: LoadedRateSeries | undefined;
+    // list keeps the numbers the vendor published. Two tables may quote two
+    // currencies, so the series is loaded per quoted currency.
+    const seriesByBase = new Map<string, LoadedRateSeries>();
     if (mode === 'historical' && choice.currency !== null && choice.manualRate === null) {
-      series = await loadRateSeries({
-        base,
-        target: choice.currency.code,
-        from: null,
-        to: null,
-        offline: options.update === false,
-      });
+      for (const { list } of picked) {
+        const quoted = list.currencies[0] ?? base;
+        if (seriesByBase.has(quoted)) continue;
+        const series = await loadRateSeries({
+          base: quoted,
+          target: choice.currency.code,
+          from: null,
+          to: null,
+          offline: options.update === false,
+        });
+        if (series !== undefined) seriesByBase.set(quoted, series);
+      }
     }
     const display: DisplayResolution = {
       currency: choice.currency,
@@ -293,18 +328,33 @@ async function loadOrExit(
       rate,
       provenance,
       reason: choice.reason,
-      mode: series === undefined ? 'latest' : 'historical',
-      ...(series === undefined ? {} : { series: series.detail }),
+      mode: seriesByBase.size === 0 ? 'latest' : 'historical',
+      ...(seriesByBase.size === 0 ? {} : { series: seriesByBase.get(base)?.detail }),
     };
-    const engine = createPricingEngine(
-      series === undefined
-        ? convertProvider(selected.provider, choice.currency ?? { code: '', symbol: '', name: '' }, rate)
-        : selected.provider,
-      {
-        ...(series === undefined ? {} : { convertAt: (instant: number) => rateOn(series as LoadedRateSeries, instant) }),
-        ...(config.holidays === undefined ? {} : { holidays: config.holidays }),
+    const holidays = config.holidays === undefined ? {} : { holidays: config.holidays };
+    const engine = createRoutingEngine(tables, {
+      ...(pinned === undefined ? {} : { pinned }),
+      engineFor: (table: PricingProvider) => {
+        const entry = picked.find((candidate) => candidate.table === table);
+        const list = entry?.list.provider ?? table;
+        const quoted = entry?.list.currencies[0] ?? base;
+        if (seriesByBase.size === 0) {
+          const perTable = rateFor({
+            base: quoted,
+            target: choice.currency?.code ?? null,
+            manualRate: choice.manualRate,
+            table: config.rateTable,
+          });
+          return createPricingEngine(convertProvider(list, target, perTable.rate), holidays);
+        }
+        const series = seriesByBase.get(quoted);
+        if (series === undefined) return createPricingEngine(list, holidays);
+        return createPricingEngine(list, {
+          ...holidays,
+          convertAt: (instant: number) => rateOn(series, instant),
+        });
       },
-    );
+    });
     return {
       dataset,
       adapters,
@@ -333,8 +383,8 @@ interface ReportHeadings {
   symbol: string;
   /** Agent display name. */
   agentLabel: string;
-  /** Pricing provider's display name. */
-  pricingLabel: string;
+  /** Pricing table names: one per table that priced this run, in table order. */
+  pricingLabel: string | readonly string[];
   /** Whether to print the 总 / 自身 / 子代理 split. */
   scope: boolean;
 }
@@ -343,7 +393,9 @@ interface ReportHeadings {
 function htmlReport(sections: readonly ReportSection[], headings: ReportHeadings): string {
   return renderHtmlReport(sections, {
     agentLabel: headings.agentLabel,
-    pricingLabel: headings.pricingLabel,
+    // The HTML header prints one string; the text report keeps the list so it can
+    // mark a multi-table run as "priced per model" in the reader's language.
+    pricingLabel: pricingLabelText(headings.pricingLabel) ?? '',
     symbol: headings.symbol,
     scope: headings.scope,
   });
@@ -429,6 +481,9 @@ async function runUsage(options: UsageOptions): Promise<void> {
       ...(options.repoFilter === undefined ? {} : { repos: options.repoFilter }),
     };
     const result = runQuery(dataset, query, { engine, pricingProvider: engine.provider.id });
+    // Which tables priced this run is only known after it: the header names those,
+    // and the single-valued provenance field follows the first of them.
+    result.pricingProvider = primaryTableOf(engine).id;
     // Configuration problems belong where the other warnings are shown.
     result.warnings.push(...loaded.warnings);
     sections.push({ label, range, result });
@@ -442,7 +497,7 @@ async function runUsage(options: UsageOptions): Promise<void> {
     const headings: ReportHeadings = {
       symbol,
       agentLabel: agentLabelOf(loaded.adapters),
-      pricingLabel: engine.provider.label,
+      pricingLabel: pricingLabelOf(engine),
       scope: subagentMode !== 'total',
     };
     // `--open` is "show me the report now": it writes the same document
@@ -481,7 +536,7 @@ async function runUsage(options: UsageOptions): Promise<void> {
     usageToJson(sections),
     formatUsageReport(sections, symbol, {
       agentLabel: agentLabelOf(loaded.adapters),
-      pricingLabel: engine.provider.label,
+      pricingLabel: pricingLabelOf(engine),
       scope: subagentMode !== 'total',
       expandSubagents: subagentMode === 'detail',
       cost: options.cost === true,
@@ -530,9 +585,13 @@ interface PriceOptions extends GlobalOptions {
 
 /** The `price` command implementation. */
 function runPrice(options: PriceOptions, config: ResolvedConfig): void {
+  // `--all` lists every table; without it the question is about one, and a
+  // `--provider` names which. Defaulting to the first table is the same answer the
+  // tool gave before vendors had a say, and it is a *price list* question rather
+  // than a pricing decision — a record is routed by its model, not listed here.
   const providers = options.all === true
     ? config.providers
-    : [resolvePricingProvider(options.provider, undefined, config.providers)];
+    : [options.provider === undefined ? config.providers[0]! : requirePricingProvider(options.provider, config.providers)];
   const wanted = options.currency === undefined ? undefined : options.currency.trim().toUpperCase();
   const now = Date.now();
   const lines: string[] = [];
@@ -546,7 +605,6 @@ function runPrice(options: PriceOptions, config: ResolvedConfig): void {
       continue;
     }
     lines.push(t().price.provider(provider.label, provider.id, listed.join(' / ')));
-    lines.push(`  ${t().price.defaultModel}: ${provider.defaultModel ?? t().price.noDefaultModel}`);
     for (const price of provider.models()) {
       // A currency filter narrows the list; `--current` narrows it to the period
       // in effect now, which is what a price question is usually about.
@@ -722,7 +780,6 @@ function runAgents(options: GlobalOptions): void {
             id: provider.id,
             label: provider.label,
             currencies: providerCurrencies(provider),
-            defaultModel: provider.defaultModel,
             models: provider.models().map((price) => ({
               model: price.model,
               aliases: price.aliases,

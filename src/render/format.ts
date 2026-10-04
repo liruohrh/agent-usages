@@ -391,8 +391,8 @@ export interface FormatOptions {
   cost?: boolean | undefined;
   /** Expand every node that billed under more than one model. */
   models?: boolean | undefined;
-  /** Pricing provider's display name, for the header. */
-  pricingLabel?: string | undefined;
+  /** Pricing table names, for the header: one, or one per table that priced the run. */
+  pricingLabel?: PricingLabel | undefined;
 }
 
 /** Two-digit zero pad. */
@@ -768,6 +768,28 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
 }
 
 /**
+ * A header's pricing label: one table's name, or the names of several.
+ *
+ * A run that routed by model may have used more than one table, and naming just
+ * one of them would misdescribe the money, so several are joined and marked as a
+ * per-model choice in the reader's language.
+ */
+export type PricingLabel = string | readonly string[] | undefined;
+
+/**
+ * Turn {@link PricingLabel} into the one string a header prints.
+ * @param value - a table's name, several tables' names, or nothing.
+ * @returns the text, or `undefined` when the caller named no table.
+ */
+export function pricingLabelText(value: PricingLabel): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string') return value.length === 0 ? undefined : value;
+  const names = value.filter((name) => name.trim().length > 0);
+  if (names.length === 0) return undefined;
+  return names.length === 1 ? names[0] : t().header.pricingByModel(names.join(' · '));
+}
+
+/**
  * How the report's money was obtained, for the provenance line.
  *
  * Shared by both renderers so a converted report reads the same whichever one
@@ -777,9 +799,9 @@ function renderSection(section: ReportSection, symbol: string, options: FormatOp
  * @param pricingLabel - the provider's display name, when the caller has one.
  * @returns the pricing source line and, when money was converted, the equation.
  */
-export function provenanceOf(result: UsageResult, pricingLabel?: string): { source: string; rate: string | undefined } {
+export function provenanceOf(result: UsageResult, pricingLabel?: PricingLabel): { source: string; rate: string | undefined } {
   const rate = result.rateInfo;
-  const vendor = pricingLabel ?? result.pricingProvider;
+  const vendor = pricingLabelText(pricingLabel) ?? result.pricingProvider;
   // The vendor's own currency is the reference; a conversion adds the equation
   // that was applied, so a reader can check every amount against the price list.
   const historical = rate.mode === 'historical';
@@ -815,10 +837,6 @@ export function formatUsageReport(
   const [first] = sections;
   if (first === undefined) return '';
   const { source, rate: rateLine } = provenanceOf(first.result, options.pricingLabel);
-  // One rate card for several vendors understates the money — 37×–45× on the real data
-  // this was measured against (2026-10-04) — so the header points at the warning instead
-  // of letting a reader take the total for "the cost" and stop there.
-  const mixedPricing = first.result.warnings.some((warning) => warning.code === 'pricingMixedAgents');
   const labels = t();
   // A report that merged agents names all of them, because "which agent is
   // this?" is exactly the question the merge exists to answer; a single-agent
@@ -836,7 +854,7 @@ export function formatUsageReport(
     sections.length === 1
       ? headerLine(labels.header.range, first.range.label)
       : headerLine(labels.header.windows, sections.map((section) => section.label).join(' / ')),
-    headerLine(labels.header.pricing, mixedPricing ? labels.header.pricingMixed(source) : source),
+    headerLine(labels.header.pricing, source),
     ...(rateLine === undefined ? [] : [headerLine(labels.header.rate, rateLine)]),
   ].join('\n');
   const blocks = [header];

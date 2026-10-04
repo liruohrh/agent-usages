@@ -187,9 +187,7 @@ export type PriceResolution =
   /** No period covered the instant; the earliest later period was used. */
   | 'fallback-later'
   /** No period covered or followed the instant; the latest earlier period was used. */
-  | 'fallback-earlier'
-  /** The model is unknown; the provider's default model schedule was used. */
-  | 'fallback-default';
+  | 'fallback-earlier';
 
 /** The rates chosen for one request. */
 export interface ResolvedRate {
@@ -269,22 +267,6 @@ export interface PricingProvider {
   id: string;
   /** Human-readable name. */
   label: string;
-  /**
-   * Agent ids this provider is the natural default for — `codex` for OpenAI,
-   * `claude` for Anthropic.
-   *
-   * A dataset from one agent is priced with the provider that claims it, unless
-   * `--provider` says otherwise. A dataset that spans several agents, or names one
-   * nobody claims, falls back to the first provider and says so out loud
-   * (`dsh + codex` costed with one table is a number worth warning about).
-   */
-  defaultFor?: readonly string[] | undefined;
-  /**
-   * Model used when a record names something this provider has no schedule for.
-   * `null` disables the fallback, in which case unknown models are reported as
-   * unpriced instead of being guessed at.
-   */
-  defaultModel: string | null;
   /** Every model with a published schedule. */
   models(): readonly ModelPrice[];
   /** Find a schedule by canonical id, alias, or provider-qualified label. */
@@ -389,11 +371,6 @@ export type TierReason =
 
 /** Options for {@link createPricingEngine}. */
 export interface PricingEngineOptions {
-  /**
-   * Model to fall back to when a schedule cannot price a record, overriding the
-   * provider's own {@link PricingProvider.defaultModel}.
-   */
-  defaultModel?: string | null | undefined;
   /**
    * Currency factor to apply to one record's amounts, by its instant.
    *
