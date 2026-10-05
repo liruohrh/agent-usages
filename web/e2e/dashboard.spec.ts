@@ -422,18 +422,27 @@ test.describe('the overview', () => {
     await expect.poll(async () => seriesCategories(page)).toBe(before);
   });
 
-  test('a click on a month opens its weeks', async ({ page }) => {
+  test('a click on a month narrows to that month, day by day', async ({ page }) => {
     await page.goto('/');
     await cardOf(page, '时间序列').getByRole('button', { name: '按月', exact: true }).click();
     const months = (await apiSeries(page, 'month')).points;
     const index = months.findLastIndex((point) => point.requests > 0);
     test.skip(index < 0, 'no month with usage to drill into');
     await clickSeriesPoint(page, index);
-    await expect(cardOf(page, '时间序列').getByRole('button', { name: '按周', exact: true })).toHaveAttribute(
+    // The drill steps straight to days: a week is a grid one can ask for, not a
+    // step the click inserts.
+    await expect(cardOf(page, '时间序列').getByRole('button', { name: '按天', exact: true })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
     await expect(cardOf(page, '时间序列').getByText(/^窗口 /)).toBeVisible();
+    // The window is that month, so the days drawn are exactly the days of it.
+    const month = months[index];
+    const daysInMonth = (await apiSeries(page, 'day')).points.filter(
+      (point) => point.t >= (month?.t ?? 0) && point.t < (month?.t ?? 0) + 31 * 24 * 60 * 60 * 1000,
+    );
+    expect(daysInMonth.length).toBeGreaterThan(0);
+    await expect.poll(async () => seriesCategories(page)).toBe(daysInMonth.length);
   });
 
   test('the chart has a fullscreen button that follows the document', async ({ page }) => {

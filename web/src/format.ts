@@ -82,12 +82,14 @@ export function currencySymbol(code: string): string {
  * Which grid a click on a bucket drills into, or `undefined` at the finest.
  *
  * The ladder runs the way a reader zooms in: a year opens its months, a month
- * its weeks, a week its days, a day its hours. Hours are the floor — there is
- * nothing finer to show, so clicking an hour does nothing.
+ * its days, a week its days, a day its hours. Weeks are a grid one can *ask*
+ * for, never a step the drill inserts: clicking a month means "show me that
+ * month, day by day", not "reslice my month into weeks". Hours are the floor —
+ * there is nothing finer to show, so clicking an hour does nothing.
  */
 export const DRILL_NEXT: Readonly<Record<BucketKey, BucketKey | undefined>> = {
   year: 'month',
-  month: 'week',
+  month: 'day',
   week: 'day',
   day: 'hour',
   hour: undefined,
