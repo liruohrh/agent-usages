@@ -285,18 +285,26 @@ async function exercise(base, { live }) {
     grids.every((grid) => (series.get(grid)?.body?.points ?? []).every((point) => labelShape[grid].test(point.label))),
     grids.map((grid) => `${grid}:${(series.get(grid)?.body?.points ?? [])[0]?.label ?? '-'}`).join(' '),
   );
+  // The grids this reader folds (`week`/`month`/`year`) have to land on a local
+  // start — that is the code under test. `hour` and `day` are baked into the
+  // snapshot in the timezone it was written in, so outside that timezone their
+  // `t` is deliberately not a local midnight: the file decides those, not this
+  // code. Both were checked to be strictly increasing instead.
+  const pointsOf = (grid) => series.get(grid)?.body?.points ?? [];
+  const isLocalStart = (t, grid) => {
+    const date = new Date(t);
+    if (grid === 'week') return date.getDay() === 1 && date.getHours() === 0 && date.getMinutes() === 0;
+    if (grid === 'month') return date.getDate() === 1 && date.getHours() === 0 && date.getMinutes() === 0;
+    return date.getMonth() === 0 && date.getDate() === 1 && date.getHours() === 0 && date.getMinutes() === 0;
+  };
   check(
-    '每档的 t 就是该桶的本地起点',
-    grids.every((grid) =>
-      (series.get(grid)?.body?.points ?? []).every((point) => {
-        const date = new Date(point.t);
-        if (grid === 'hour') return date.getMinutes() === 0 && date.getSeconds() === 0;
-        if (grid === 'day') return date.getHours() === 0 && date.getMinutes() === 0;
-        if (grid === 'week') return date.getDay() === 1 && date.getHours() === 0;
-        if (grid === 'month') return date.getDate() === 1 && date.getHours() === 0;
-        return date.getMonth() === 0 && date.getDate() === 1 && date.getHours() === 0;
-      }),
-    ),
+    '折出来的周/月/年每桶都落在本地起点（周一 / 1 号 / 1 月 1 日）',
+    ['week', 'month', 'year'].every((grid) => pointsOf(grid).every((point) => isLocalStart(point.t, grid))),
+    ['week', 'month', 'year'].map((grid) => `${grid}:${pointsOf(grid)[0]?.label ?? '-'}`).join(' '),
+  );
+  check(
+    '每档的点都按时间严格递增',
+    grids.every((grid) => pointsOf(grid).every((point, index) => index === 0 || (pointsOf(grid)[index - 1]?.t ?? 0) < point.t)),
   );
   // The hourly grid keeps only the recent window by design, so it is a subset;
   // the other four cover every record the range holds.
@@ -338,18 +346,22 @@ async function exercise(base, { live }) {
     .reverse()
     .find((point) => hourDays.has(new Date(point.t).toDateString()));
   if (dayPoint !== undefined) {
-    const start = new Date(dayPoint.t);
+    const start = dayPoint.t;
     const end = new Date(dayPoint.t);
     end.setDate(end.getDate() + 1);
-    const local = (date) =>
-      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}T00:00:00`;
-    const spec = `${local(start)}..${local(end)}`;
+    // The window is written from the bucket's own `t`, time of day included: the
+    // snapshot's day buckets need not start at *this* reader's midnight, and a
+    // spec that forced `T00:00:00` would cut the bucket in half elsewhere.
+    const pad = (value) => String(value).padStart(2, '0');
+    const isoLocal = (date) =>
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    const spec = `${isoLocal(new Date(start))}..${isoLocal(end)}`;
     const narrowed = await call(base, `/api/timeseries?bucket=hour&range=${encodeURIComponent(spec)}`);
     const kept = narrowed.body?.points ?? [];
     check(
       '显式窗口把时序收窄到那一天',
-      narrowed.status === 200 && kept.every((point) => new Date(point.t).toDateString() === start.toDateString()),
-      `${kept.length} 个小时桶，首尾 ${kept[0]?.label ?? '-'} … ${kept[kept.length - 1]?.label ?? '-'}`,
+      narrowed.status === 200 && kept.length > 0 && kept.every((point) => point.t >= start && point.t < end.getTime()),
+      `窗口 ${spec} → ${kept.length} 个小时桶，首尾 ${kept[0]?.label ?? '-'} … ${kept[kept.length - 1]?.label ?? '-'}`,
     );
     check(
       '收窄后的小时之和 = 那一天的请求',

@@ -29,3 +29,9 @@ jobs:
       # The offline fixture is a dump of a real machine and is not tracked, so CI runs
       # the synthetic one that is: `web/mock/fixtures/` → `web/mock/ci.snapshot.json`.
       - run: node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json
+      # The snapshot was written in the maintainer's timezone and the runner's is
+      # UTC, so read it in both: an assertion that only holds in one of them has to
+      # fail here, not on the machine that wrote the file (2026-10-05).
+      - run: node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json
+        env:
+          TZ: Asia/Shanghai
