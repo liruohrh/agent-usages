@@ -367,5 +367,20 @@ export interface RefreshReport {
 /** Which time range the dashboard is showing. */
 export type RangeKey = 'today' | 'week' | 'month' | 'all';
 
+/**
+ * A range the API understands: a preset key, or an explicit `A..B` window.
+ *
+ * Drilling into a bucket writes the explicit form (the bucket's own local
+ * `start..end`), which is the same spec the CLI takes as `--range`.
+ */
+export type RangeSpec = RangeKey | (string & {});
+
 /** Which grid the time series is drawn on. */
-export type BucketKey = 'day' | 'hour';
+/**
+ * A grid the time series can be drawn on.
+ *
+ * `hour` and `day` come from the scan as-is; `week`, `month` and `year` are
+ * folded from the day grid by the server. The drill ladder walks them from the
+ * coarsest to the finest: year → month → week → day → hour.
+ */
+export type BucketKey = 'hour' | 'day' | 'week' | 'month' | 'year';

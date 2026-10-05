@@ -6,7 +6,7 @@
  */
 
 import { t } from './i18n';
-import type { CostTotals, TokenBuckets } from './types';
+import type { BucketKey, CostTotals, TokenBuckets } from './types';
 
 /**
  * The locale the page formats in.
@@ -76,6 +76,63 @@ const CURRENCY_SYMBOLS: Readonly<Record<string, string>> = {
 /** The symbol for a currency code, falling back to the code and a space. */
 export function currencySymbol(code: string): string {
   return CURRENCY_SYMBOLS[code] ?? (code.length === 0 ? '' : `${code} `);
+}
+
+/**
+ * Which grid a click on a bucket drills into, or `undefined` at the finest.
+ *
+ * The ladder runs the way a reader zooms in: a year opens its months, a month
+ * its weeks, a week its days, a day its hours. Hours are the floor — there is
+ * nothing finer to show, so clicking an hour does nothing.
+ */
+export const DRILL_NEXT: Readonly<Record<BucketKey, BucketKey | undefined>> = {
+  year: 'month',
+  month: 'week',
+  week: 'day',
+  day: 'hour',
+  hour: undefined,
+};
+
+/**
+ * The local instant one bucket ends, i.e. where the next one starts.
+ *
+ * Calendar arithmetic rather than fixed milliseconds: a day can be 23 or 25
+ * hours long, and a month is not a number of days at all.
+ * @param start - the bucket's own local start.
+ * @param bucket - the grid the bucket sits on.
+ * @returns the first instant of the next bucket.
+ */
+export function bucketEnd(start: number, bucket: BucketKey): number {
+  const date = new Date(start);
+  if (bucket === 'hour') date.setHours(date.getHours() + 1);
+  else if (bucket === 'day') date.setDate(date.getDate() + 1);
+  else if (bucket === 'week') date.setDate(date.getDate() + 7);
+  else if (bucket === 'month') date.setMonth(date.getMonth() + 1);
+  else date.setFullYear(date.getFullYear() + 1);
+  return date.getTime();
+}
+
+/**
+ * `2026-10-05T13:00:00` on the local clock — the form the range spec takes.
+ *
+ * ISO rather than the chart's own `YYYY-MM-DD HH:MM`: the server parses the same
+ * spec as `--range` on the CLI, which takes `2026-09-01T10:30:00` and would read
+ * the space-separated spelling as an unrecognised time.
+ */
+export function localSpec(instant: number): string {
+  const date = new Date(instant);
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/**
+ * A half-open `A..B` window, the same spec the CLI takes as `--range`.
+ * @param from - first instant included.
+ * @param to - first instant excluded.
+ * @returns the spec, e.g. `2026-10-05T00:00:00..2026-10-06T00:00:00`.
+ */
+export function rangeSpec(from: number, to: number): string {
+  return `${localSpec(from)}..${localSpec(to)}`;
 }
 
 /** A ratio as a percentage. */

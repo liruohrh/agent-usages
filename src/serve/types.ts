@@ -356,6 +356,15 @@ export interface RepoNode {
   agentTotals: AgentTotals[];
 }
 
+/**
+ * A grid the time series can be drawn on.
+ *
+ * The scan pre-computes `hour` and `day`; `week`, `month` and `year` are folded
+ * from the day grid when asked for (see `aggregateTimeseries`), so adding a grid
+ * costs a grouping pass rather than a rescan.
+ */
+export type TimeseriesGrid = 'hour' | 'day' | 'week' | 'month' | 'year';
+
 /** One (bucket, agent, project) cell of the usage over time. */
 export interface SeriesPoint {
   /** Bucket start, milliseconds since the Unix epoch, on the local clock. */
@@ -535,7 +544,10 @@ export interface TimeseriesBucket {
   t: number;
   /** `YYYY-MM-DD` on the local clock. */
   date: string;
-  /** `YYYY-MM-DD HH:00` for hour buckets, `YYYY-MM-DD` for day buckets. */
+  /**
+   * The bucket in the reader's own units: `2026-10-05 13:00` (hour),
+   * `2026-10-05` (day), `2026-W41` (week), `2026-10` (month), `2026` (year).
+   */
   label: string;
   /** Requests in the bucket. */
   requests: number;

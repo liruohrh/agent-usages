@@ -7,7 +7,7 @@
  * columns a reader can scan, sort by eye and copy, instead of a run-on line.
  */
 
-import type { Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
+import type { BucketKey, Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
 import { AgentTable, TokenTable } from './Tables';
 import { MetricDetailTable, ScopeSplitTable } from './Metrics';
 import { AgentBadge, Card } from './Bits';
@@ -24,10 +24,16 @@ export function UsageTab({
   project: ProjectSummary | null;
   symbol: string;
   points: readonly TimeseriesBucket[];
-  bucket: 'day' | 'hour';
+  bucket: BucketKey;
   metric: SeriesMetric;
-  onBucket: (bucket: 'day' | 'hour') => void;
+  onBucket: (bucket: BucketKey) => void;
   onMetric: (metric: SeriesMetric) => void;
+  /** A click on one chart bucket: narrow the range and step to a finer grid. */
+  onDrill: (index: number) => void;
+  /** Drop the drilled window. */
+  onClearWindow: () => void;
+  /** Whether an explicit window is in force. */
+  drilled: boolean;
   dark: boolean;
   loading: boolean;
 }): React.ReactElement {

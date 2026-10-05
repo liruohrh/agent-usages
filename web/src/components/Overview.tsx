@@ -7,16 +7,20 @@
  * project. The one long scroll from the terminal's report is deliberately gone.
  */
 
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import type { Dashboard, ProjectSummary, SessionNode, TimeseriesBucket } from '../types';
-import { formatCost, formatShare, formatTokens } from '../format';
+import type { BucketKey, Dashboard, ProjectSummary, SessionNode, TimeseriesBucket } from '../types';
+import { DRILL_NEXT, formatCost, formatInstant, formatShare, formatTokens } from '../format';
 import { Card, Notice } from './Bits';
 import { Composition, KpiRow } from './Metrics';
 import { localeTag, useLanguage, useT } from '../i18n';
 import { SessionLeaderboard } from './Sessions';
 import { ProjectBoard } from './Ranked';
 import { EChart, timeseriesOption, type SeriesMetric } from '../charts';
+
+/** The grids the switcher offers, finest first — the order a reader zooms in. */
+const BUCKET_ORDER: readonly BucketKey[] = ['hour', 'day', 'week', 'month', 'year'];
 
 /** The overview panel. */
 export function Overview({
@@ -27,22 +31,55 @@ export function Overview({
   metric,
   onBucket,
   onMetric,
+  onDrill,
+  onClearWindow,
+  drilled,
   symbol,
   dark,
 }: {
   dashboard: Dashboard;
   project: ProjectSummary | null;
   points: readonly TimeseriesBucket[];
-  bucket: 'day' | 'hour';
+  bucket: BucketKey;
   metric: SeriesMetric;
-  onBucket: (bucket: 'day' | 'hour') => void;
+  onBucket: (bucket: BucketKey) => void;
   onMetric: (metric: SeriesMetric) => void;
+  /** A click on one bucket: narrow to it and step to the next finer grid. */
+  onDrill: (index: number) => void;
+  /** Leave the drilled window and return to the whole range. */
+  onClearWindow: () => void;
+  /** Whether an explicit window is in force. */
+  drilled: boolean;
   symbol: string;
   dark: boolean;
   loading: boolean;
 }): React.ReactElement {
   const t = useT();
   const locale = localeTag(useLanguage());
+  // The card itself is what goes fullscreen, so the title and the legend travel
+  // with the chart. `fullscreenchange` is the source of truth: Esc leaves
+  // fullscreen without a click, and the button has to follow it.
+  const frame = useRef<HTMLDivElement | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = (): void => setFullscreen(document.fullscreenElement === frame.current);
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+  const toggleFullscreen = (): void => {
+    const element = frame.current;
+    if (element === null) return;
+    if (document.fullscreenElement === element) void document.exitFullscreen();
+    else void element.requestFullscreen();
+  };
+  const fullscreenLabel = fullscreen ? t.overview.exitFullscreen : t.overview.fullscreen;
+  // The drilled window reads as a pair of local instants rather than the raw
+  // range spec the API was handed (`…T00:00:00..…`), but only when the payload
+  // names both ends: a preset like "this month" keeps the server's own label.
+  const windowLabel =
+    dashboard.rangeFrom !== null && dashboard.rangeTo !== null
+      ? `${formatInstant(dashboard.rangeFrom)} → ${formatInstant(dashboard.rangeTo)}`
+      : dashboard.rangeLabel;
   const tokens = project === null ? dashboard.totals.tokens : project.tokens;
   const cost = project === null ? dashboard.totals.cost : project.cost;
   const requests = project === null ? dashboard.totals.requests : project.requests;
@@ -100,55 +137,92 @@ export function Overview({
           <Composition tokens={tokens} cost={cost} symbol={symbol} />
         </div>
         <div className="xl:col-span-2">
-          <Card
-            title={t.overview.series}
-            actions={
-              <>
-                <div className="flex overflow-hidden rounded border border-line">
-                  {(['day', 'hour'] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => onBucket(option)}
-                      className={`px-2.5 py-1 text-[12px] ${bucket === option ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
-                    >
-                      {option === 'day' ? t.overview.byDay : t.overview.byHour}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex overflow-hidden rounded border border-line">
-                  {(
-                    [
-                      { key: 'cost', label: t.tables.seriesCost },
-                      { key: 'requests', label: t.tables.seriesRequests },
-                      { key: 'tokens', label: t.tables.seriesTokens },
-                    ] as const
-                  ).map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      onClick={() => onMetric(option.key)}
-                      className={`px-2.5 py-1 text-[12px] ${metric === option.key ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            }
-          >
-            {points.length === 0 ? (
-              <p className="py-10 text-center text-[13px] text-faint">
-                {bucket === 'hour' ? t.overview.emptyHour : t.overview.empty}
+          <div ref={frame} className={fullscreen ? 'flex h-full flex-col bg-panel p-4' : ''}>
+            <Card
+              title={t.overview.series}
+              actions={
+                <>
+                  {drilled && (
+                    // The way back: the window a drill narrowed to, and one
+                    // button that drops it. Without this a reader who clicked by
+                    // accident would have to guess which preset they came from.
+                    <span className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-0.5 text-[11px] text-muted">
+                      {t.overview.window(windowLabel)}
+                      <button
+                        type="button"
+                        onClick={onClearWindow}
+                        aria-label={t.overview.clearWindow}
+                        title={t.overview.clearWindow}
+                        className="rounded px-1 text-muted hover:text-fg"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  )}
+                  <div className="flex overflow-hidden rounded border border-line">
+                    {BUCKET_ORDER.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => onBucket(option)}
+                        aria-pressed={bucket === option}
+                        title={t.overview.bucketLabels[option]}
+                        className={`px-2.5 py-1 text-[12px] ${bucket === option ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
+                      >
+                        {t.overview.bucketLabels[option]}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex overflow-hidden rounded border border-line">
+                    {(
+                      [
+                        { key: 'cost', label: t.tables.seriesCost },
+                        { key: 'requests', label: t.tables.seriesRequests },
+                        { key: 'tokens', label: t.tables.seriesTokens },
+                      ] as const
+                    ).map((option) => (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => onMetric(option.key)}
+                        aria-pressed={metric === option.key}
+                        className={`px-2.5 py-1 text-[12px] ${metric === option.key ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg'}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleFullscreen}
+                    aria-label={fullscreenLabel}
+                    title={fullscreenLabel}
+                    className="rounded border border-line px-2 py-1 text-[12px] text-muted hover:text-fg"
+                  >
+                    {fullscreen ? '⤡' : '⤢'}
+                  </button>
+                </>
+              }
+            >
+              {points.length === 0 ? (
+                <p className="py-10 text-center text-[13px] text-faint">
+                  {bucket === 'hour' ? t.overview.emptyHour : t.overview.empty}
+                </p>
+              ) : (
+                <EChart
+                  option={timeseriesOption(points, agents, metric, symbol, dark)}
+                  height={fullscreen ? 600 : 300}
+                  onSelect={onDrill}
+                  fullscreen={fullscreen}
+                />
+              )}
+              <p className="mt-2 text-[11px] text-faint">
+                {t.overview.seriesNote(day(firstUsage), day(lastUsage))}
+                {bucket === 'hour' && t.overview.seriesHourNote}
+                {DRILL_NEXT[bucket] === undefined ? '' : t.overview.drillHint}
               </p>
-            ) : (
-              <EChart option={timeseriesOption(points, agents, metric, symbol, dark)} height={300} />
-            )}
-            <p className="mt-2 text-[11px] text-faint">
-              {t.overview.seriesNote(day(firstUsage), day(lastUsage))}
-              {bucket === 'hour' && t.overview.seriesHourNote}
-            </p>
-          </Card>
+            </Card>
+          </div>
         </div>
       </div>
 

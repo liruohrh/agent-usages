@@ -23,32 +23,59 @@ echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendCompone
 /** Any option ECharts accepts; the concrete shape is per chart below. */
 export type ChartOption = Parameters<echarts.ECharts['setOption']>[0];
 
+/** The host element, with the ECharts instance reachable for imperative work. */
+interface ChartHost extends HTMLDivElement {
+  /** The live instance, for `resize()` and for the end-to-end tests. */
+  chartInstance?: echarts.ECharts | undefined;
+}
+
 /**
  * One chart, bound to a div.
- * @param props - the option, the height, and an optional class.
+ *
+ * A click on a series element reports the category index it landed on; the
+ * caller decides what that means (the time series drills into it). Clicks on the
+ * legend, the axis or the empty canvas are not series clicks and are ignored —
+ * a reader re-reading the legend must not lose their place in the data.
+ *
+ * @param props - the option, the height, an optional class, and the callbacks.
  */
 export function EChart({
   option,
   height,
   className,
+  onSelect,
+  fullscreen = false,
 }: {
   option: ChartOption;
   height: number;
   className?: string;
+  onSelect?: ((index: number) => void) | undefined;
+  fullscreen?: boolean | undefined;
 }): React.ReactElement {
-  const host = useRef<HTMLDivElement | null>(null);
+  const host = useRef<ChartHost | null>(null);
   const chart = useRef<echarts.ECharts | null>(null);
+  const select = useRef(onSelect);
+  select.current = onSelect;
 
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
     const instance = echarts.init(element, undefined, { renderer: 'canvas' });
     chart.current = instance;
+    element.chartInstance = instance;
     const observer = new ResizeObserver(() => instance.resize());
     observer.observe(element);
+    // `trigger: 'item'`-style clicks only; ECharts reports what was hit, and a
+    // hit on anything but a series is not a selection.
+    const onClick = (params: { componentType?: string; dataIndex?: number }): void => {
+      if (params.componentType !== 'series' || typeof params.dataIndex !== 'number') return;
+      select.current?.(params.dataIndex);
+    };
+    instance.on('click', onClick);
     return () => {
       observer.disconnect();
       instance.dispose();
+      element.chartInstance = undefined;
       chart.current = null;
     };
   }, []);
@@ -56,6 +83,19 @@ export function EChart({
   useEffect(() => {
     chart.current?.setOption(option, true);
   }, [option]);
+
+  // Fullscreen resizes the element without a layout pass the observer can see in
+  // time, and Esc leaves it without React knowing, so resize on the event too.
+  useEffect(() => {
+    const resize = (): void => chart.current?.resize();
+    resize();
+    document.addEventListener('fullscreenchange', resize);
+    window.addEventListener('resize', resize);
+    return () => {
+      document.removeEventListener('fullscreenchange', resize);
+      window.removeEventListener('resize', resize);
+    };
+  }, [fullscreen]);
 
   return <div ref={host} className={className} style={{ height, width: '100%' }} />;
 }

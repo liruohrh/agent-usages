@@ -136,13 +136,24 @@ export const en: Messages = {
     compositionNote: (tokens: string, money: string) =>
       `Bar length is the share: the top bar by T, the bottom one by money. The five parts never overlap and add up to exactly T (I/M + I/C + I/W + O + R = T, with O = O/T − R). Total ${tokens} tokens · ${money}`,
     series: 'Over time',
-    byDay: 'By day',
     byHour: 'By hour',
-    emptyHour: 'Nothing in the last 14 days (hourly detail is kept for 14 days).',
+    byDay: 'By day',
+    byWeek: 'By week',
+    byMonth: 'By month',
+    byYear: 'By year',
+    /** The five switcher labels, keyed by grid, in one place. */
+    bucketLabels: { hour: 'By hour', day: 'By day', week: 'By week', month: 'By month', year: 'By year' },
+    emptyHour: 'Nothing in this window (hourly detail covers windows of 31 days or less; wider ones keep the last 14 days).',
     empty: 'Nothing in this range.',
+    /** `Window 2026-10-05 → 2026-10-06`: the drilled window, with a way back. */
+    window: (label: string) => `Window ${label}`,
+    clearWindow: 'Clear the window and show the whole range',
+    drillHint: ' · click a point to open it at a finer grid (the legend and empty space do nothing)',
+    fullscreen: 'Fullscreen',
+    exitFullscreen: 'Exit fullscreen',
     seriesNote: (first: string, last: string) =>
       `Data from ${first} to ${last} · priced per (time bucket × agent × project) and then added up`,
-    seriesHourNote: ' · hourly detail covers the last 14 days',
+    seriesHourNote: ' · hourly detail: any window of 31 days or less is kept whole; wider windows keep the last 14 days',
     topProjects: 'Projects (top five)',
     topSessions: 'Sessions (top five)',
     topSessionsNamed: (name: string) => `Sessions (top five) · ${name}`,

@@ -216,6 +216,80 @@ async function clipboardOf(page: Page): Promise<string> {
   return page.evaluate(() => navigator.clipboard.readText());
 }
 
+interface ApiSeriesPoint {
+  t: number;
+  label: string;
+  requests: number;
+}
+
+/** The time series the page itself fetches, for one grid. */
+async function apiSeries(page: Page, bucket: string): Promise<{ bucket?: string; points: ApiSeriesPoint[] }> {
+  return page.evaluate(async (grid) => (await fetch(`/api/timeseries?bucket=${grid}`)).json(), bucket) as Promise<{
+    bucket?: string;
+    points: ApiSeriesPoint[];
+  }>;
+}
+
+/** The host div ECharts drew into, with the instance the wrapper keeps on it. */
+async function seriesHost(page: Page): Promise<{ categories: number } & Record<string, unknown>> {
+  return page.evaluate(() => {
+    // ECharts nests its own div (and the canvas) inside the host, so walk up
+    // until the element the wrapper marked is found.
+    let node = document.querySelector('main canvas')?.parentElement as
+      | (HTMLDivElement & { chartInstance?: { getOption: () => { xAxis?: { data?: unknown[] }[] } } })
+      | null
+      | undefined;
+    while (node != null && node.chartInstance === undefined) node = node.parentElement as typeof node;
+    const option = node?.chartInstance?.getOption();
+    return { categories: option?.xAxis?.[0]?.data?.length ?? 0 };
+  }) as Promise<{ categories: number } & Record<string, unknown>>;
+}
+
+/** How many categories the drawn chart currently has. */
+async function seriesCategories(page: Page): Promise<number> {
+  return (await seriesHost(page)).categories;
+}
+
+/**
+ * Click one drawn data point, through the real ECharts handler.
+ *
+ * The chart is a canvas, so a Playwright locator cannot address a point: the
+ * pixel is asked of the instance the wrapper keeps on its host div, and the
+ * click is then a real mouse click at that pixel — the same event a reader
+ * produces, so the drill path under test is the one that ships.
+ */
+async function clickSeriesPoint(page: Page, index: number): Promise<void> {
+  // The chart draws once the series arrives; a click before that lands on an
+  // empty canvas and does nothing, which is a flaky failure rather than a bug.
+  await expect.poll(async () => seriesCategories(page), { timeout: 15_000 }).toBeGreaterThan(index);
+  const canvas = page.locator('main canvas').first();
+  const box = await canvas.boundingBox();
+  const spot = await page.evaluate((at) => {
+    let node = document.querySelector('main canvas')?.parentElement as
+      | (HTMLDivElement & {
+          chartInstance?: {
+            getOption: () => { series?: { data?: number[] }[] };
+            convertToPixel: (finder: Record<string, number>, value: number) => number;
+          };
+        })
+      | null
+      | undefined;
+    while (node != null && node.chartInstance === undefined) node = node.parentElement as typeof node;
+    const chart = node?.chartInstance;
+    if (chart === undefined) return null;
+    const series = chart.getOption().series ?? [];
+    // Any series will do: the handler asks which bucket was hit, not which line.
+    const hit = series.find((entry) => Number(entry.data?.[at] ?? 0) > 0) ?? series[series.length - 1];
+    const value = Number(hit?.data?.[at] ?? 0);
+    return { x: chart.convertToPixel({ xAxisIndex: 0 }, at), y: chart.convertToPixel({ yAxisIndex: 0 }, value) };
+  }, index);
+  if (box === null || spot === null) throw new Error('the chart is not on screen');
+  // Move first, then click: the same two events a reader produces, and the
+  // hover pass is what ECharts uses to resolve a symbol under the pointer.
+  await page.mouse.move(box.x + spot.x, box.y + spot.y);
+  await page.mouse.click(box.x + spot.x, box.y + spot.y);
+}
+
 /**
  * Every session in the payload whose agent named its log file.
  *
@@ -290,6 +364,101 @@ test.describe('the overview', () => {
     );
     expect(names).toContain('未命中缓存输入');
     expect(names).toContain('缓存命中输入');
+  });
+
+  test('draws the series on five grids', async ({ page }) => {
+    await page.goto('/');
+    await expect(cardOf(page, '时间序列')).toBeVisible();
+    const grids: [string, string][] = [
+      ['按小时', 'hour'],
+      ['按天', 'day'],
+      ['按周', 'week'],
+      ['按月', 'month'],
+      ['按年', 'year'],
+    ];
+    for (const [label, grid] of grids) {
+      const button = cardOf(page, '时间序列').getByRole('button', { name: label, exact: true });
+      await expect(button, `${label} is offered`).toHaveCount(1);
+      await button.click();
+      await expect(button, `${label} is the active grid`).toHaveAttribute('aria-pressed', 'true');
+      // The grid the page asked for is the grid the server answered with.
+      const answer = (await apiSeries(page, grid)) as { bucket?: string };
+      expect(answer.bucket, `${grid} comes back labelled`).toBe(grid);
+      await expect.poll(async () => seriesCategories(page)).toBeGreaterThan(0);
+    }
+  });
+
+  test('a click on a bucket opens the next finer grid', async ({ page }) => {
+    await page.goto('/');
+    // The chart plots what the API returned; pick the newest day that the hourly
+    // grid still covers, so the drill has hours to show.
+    const days = (await apiSeries(page, 'day')).points;
+    const hours = (await apiSeries(page, 'hour')).points;
+    const covered = new Set(hours.map((point) => new Date(point.t).toDateString()));
+    const index = days.findLastIndex((point) => point.requests > 0 && covered.has(new Date(point.t).toDateString()));
+    test.skip(index < 0, 'no day inside the hourly window to drill into');
+    const target = days[index];
+    if (target === undefined) return;
+
+    const before = await seriesCategories(page);
+    await clickSeriesPoint(page, index);
+
+    // The grid steps down, the window narrows to that day, and the way back is
+    // on screen rather than remembered.
+    const hourly = cardOf(page, '时间序列').getByRole('button', { name: '按小时', exact: true });
+    await expect(hourly).toHaveAttribute('aria-pressed', 'true');
+    await expect(cardOf(page, '时间序列').getByText(/^窗口 /)).toBeVisible();
+    await expect.poll(async () => seriesCategories(page)).toBeLessThan(before);
+    const narrowed = await seriesCategories(page);
+    expect(narrowed).toBeGreaterThan(0);
+    expect(narrowed).toBeLessThanOrEqual(24);
+
+    // Clearing puts the reader back on the grid they came from.
+    await cardOf(page, '时间序列').getByRole('button', { name: /清除窗口/ }).click();
+    await expect(cardOf(page, '时间序列').getByRole('button', { name: '按天', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect.poll(async () => seriesCategories(page)).toBe(before);
+  });
+
+  test('a click on a month opens its weeks', async ({ page }) => {
+    await page.goto('/');
+    await cardOf(page, '时间序列').getByRole('button', { name: '按月', exact: true }).click();
+    const months = (await apiSeries(page, 'month')).points;
+    const index = months.findLastIndex((point) => point.requests > 0);
+    test.skip(index < 0, 'no month with usage to drill into');
+    await clickSeriesPoint(page, index);
+    await expect(cardOf(page, '时间序列').getByRole('button', { name: '按周', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(cardOf(page, '时间序列').getByText(/^窗口 /)).toBeVisible();
+  });
+
+  test('the chart has a fullscreen button that follows the document', async ({ page }) => {
+    await page.goto('/');
+    const button = cardOf(page, '时间序列').getByRole('button', { name: '全屏', exact: true });
+    await expect(button).toBeVisible();
+    await expect(button).toHaveAttribute('title', '全屏');
+    const section = cardOf(page, '时间序列');
+    await button.click();
+    // Element fullscreen needs a user gesture and a browser that grants it; the
+    // click above is one. When the browser refuses, the button must at least not
+    // have lied about the state.
+    const entered = await page.evaluate(() => document.fullscreenElement !== null);
+    if (entered) {
+      // The label follows the document (this is the `fullscreenchange` sync),
+      // and the button is the way out; Esc is the browser's business and is not
+      // routed to a headless element reliably enough to assert here.
+      const exit = section.getByRole('button', { name: '退出全屏', exact: true });
+      await expect(exit).toBeVisible();
+      await exit.click();
+      await expect.poll(async () => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+      await expect(section.getByRole('button', { name: '全屏', exact: true })).toBeVisible();
+    } else {
+      await expect(button).toHaveAttribute('aria-label', '全屏');
+    }
   });
 
   test('ranks the projects and the sessions, and opens one on click', async ({ page }) => {

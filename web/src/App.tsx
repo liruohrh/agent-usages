@@ -24,9 +24,10 @@ import {
   setApiLanguage,
   type Filters as ApiFilters,
 } from './api';
-import type { Dashboard, Language, SessionDetail, TimeseriesBucket } from './types';
+import type { BucketKey, Dashboard, Language, RangeSpec, SessionDetail, TimeseriesBucket } from './types';
 import { LanguageProvider, useT } from './i18n';
 import { Filters, type FilterState } from './components/Filters';
+import { DRILL_NEXT, bucketEnd, rangeSpec } from './format';
 import { ProjectTree } from './components/Tree';
 import { ScopeView } from './components/ScopeView';
 import { SessionDetailPanel } from './components/SessionDetail';
@@ -94,7 +95,7 @@ function Dashboard({
   const sessionMatch = useMatch('/s/:uid');
 
   const [filters, setFilters] = useState<FilterState>({ range: 'all', agents: [], search: '' });
-  const [bucket, setBucket] = useState<'day' | 'hour'>('day');
+  const [bucket, setBucket] = useState<BucketKey>('day');
   const [metric, setMetric] = useState<SeriesMetric>('cost');
   // `?theme=light` is the documented way to check the other palette (and to take
   // a screenshot of it): the class on <html> is the only switch.
@@ -118,6 +119,30 @@ function Dashboard({
     () => ({ range: filters.range, agents: filters.agents, projects: [], search: filters.search }),
     [filters],
   );
+
+  // A drill narrows the range to one bucket and steps to the next finer grid.
+  // The range it left behind is remembered, so "clear" puts the reader back
+  // where they were rather than at "all time".
+  const [drillFrom, setDrillFrom] = useState<{ range: RangeSpec; bucket: BucketKey } | null>(null);
+  const drilled = drillFrom !== null;
+  const onDrill = useCallback(
+    (index: number): void => {
+      const point = points[index];
+      const next = DRILL_NEXT[bucket];
+      // The finest grid has nothing to open into, and a category the server did
+      // not send is a stale click.
+      if (point === undefined || next === undefined) return;
+      setDrillFrom({ range: filters.range, bucket });
+      setFilters((current) => ({ ...current, range: rangeSpec(point.t, bucketEnd(point.t, bucket)) }));
+      setBucket(next);
+    },
+    [bucket, filters.range, points],
+  );
+  const onClearWindow = useCallback((): void => {
+    setFilters((current) => ({ ...current, range: drillFrom?.range ?? 'all' }));
+    if (drillFrom !== null) setBucket(drillFrom.bucket);
+    setDrillFrom(null);
+  }, [drillFrom]);
 
   // The dashboard and the series are one query: fetch them together, abort the
   // previous pair when the filters change again before it lands.
@@ -245,6 +270,9 @@ function Dashboard({
                     metric={metric}
                     onBucket={setBucket}
                     onMetric={setMetric}
+                    onDrill={onDrill}
+                    onClearWindow={onClearWindow}
+                    drilled={drilled}
                     symbol={dashboard.currencySymbol}
                     dark={dark}
                     loading={loading}
@@ -270,6 +298,9 @@ function Dashboard({
                     metric={metric}
                     onBucket={setBucket}
                     onMetric={setMetric}
+                    onDrill={onDrill}
+                    onClearWindow={onClearWindow}
+                    drilled={drilled}
                     symbol={dashboard.currencySymbol}
                     dark={dark}
                     loading={loading}

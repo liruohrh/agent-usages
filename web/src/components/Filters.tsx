@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import type { Dashboard, Language, RangeKey } from '../types';
+import type { Dashboard, Language, RangeKey, RangeSpec } from '../types';
 import { agentColor, agentLabel, formatAgo, formatCost } from '../format';
 import { saveLanguage } from '../api';
 import { useT } from '../i18n';
@@ -16,9 +16,15 @@ import { useT } from '../i18n';
 /** The range presets, in the order the buttons appear. */
 const RANGES: RangeKey[] = ['today', 'week', 'month', 'all'];
 
-/** Everything the user can change about what is being shown. */
+/**
+ * Everything the user can change about what is being shown.
+ *
+ * `range` is a preset key or an explicit `A..B` window: drilling into a chart
+ * bucket writes the latter, which is why it is a spec and not the union of
+ * presets. A preset button is highlighted only while its own key is in force.
+ */
 export interface FilterState {
-  range: RangeKey;
+  range: RangeSpec;
   agents: string[];
   search: string;
 }

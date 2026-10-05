@@ -260,7 +260,7 @@ CLI 的 `bin` / `files` / `version` 未改动。
 | `agent` | `dsh` 或 `dsh,pi` | 省略即全部；过滤后总计会重算 |
 | `project` | 项目 id（可重复/逗号分隔） | 省略即全部 |
 | `q` | 子串 | 匹配项目名与工作区路径（大小写不敏感） |
-| `bucket` | `day` / `hour` | 仅 `/api/timeseries` |
+| `bucket` | `hour` / `day` / `week` / `month` / `year` | 仅 `/api/timeseries`；其余值按 `day` 处理 |
 | `lang` | `zh` / `en` | 这一份答复用哪种语言：payload 里的**散文**（时间范围标签、告警句子）按它渲染；省略即用配置/系统语言 |
 
 | 端点 | 返回 |
@@ -272,7 +272,7 @@ CLI 的 `bin` / `files` / `version` 未改动。
 | `GET /api/projects/:id` | 单个项目；`id` 是 `repo:<root>` 或 `path:<dir>`，也可用项目名匹配；找不到 404 |
 | `GET /api/sessions` | 所有项目的会话拍平；`subagents=0` 只看主会话；`count` |
 | `GET /api/sessions/:id` | `detail`：会话自身的 `own/spawned/total`、模型、计价区间、祖先链、**委派树**；找不到 404 |
-| `GET /api/timeseries` | `{bucket, count, points[]}`，每个桶含 `t/date/label/requests/tokens/cost/byAgent` |
+| `GET /api/timeseries` | `{bucket, count, points[]}`，每个桶含 `t/date/label/requests/tokens/cost/byAgent`；`t` 是该桶的**本地起点**（周一为首日的周、自然月/年），`label` 分别是 `2026-10-05 13:00` / `2026-10-05` / `2026-W41`（ISO 周，含 ISO 周年）/ `2026-10` / `2026`。`hour`/`day` 来自扫描期预计算，`week`/`month`/`year` 由 `day` 网格折叠而来；`hour` 的保留跟请求窗口走：窗口有界且 ≤ 31 天时全程保留（任意历史某天都能钻到小时），更宽或不带 range 时只保留最近 14 天 |
 | `GET /api/dashboard` | 上面所有内容的合集（前端一次请求拿全，快照文件就是它的形状） |
 | `POST /api/refresh` | 重扫所有 agent；成功 `{ok:true,ms,agents[],warnings[]}`，快照模式 409 |
 | `GET /api/settings` | `{language, configured, path, languages[]}`：当前语言、配置文件里写的语言（没有则 `null`）、写入路径 |
@@ -349,6 +349,10 @@ CLI 的 `bin` / `files` / `version` 未改动。
 | `Σ subtotals[].money.display === totals.cost` | 小计取自与总额同一批已四舍五入的区间行，只是按 (表, 货币) 重新分组 |
 
 - 金额是**精确十进制字符串**，浏览器只做展示，从不在前端重新求和。
+- **时间序列五档 + 钻取 + 全屏**：概览的 `时间序列` 卡片可在 时/天/周/月/年 之间切换；
+  点某个时间点会把范围收窄到该桶的 `[start, end)` 并切到下一档更细的粒度（年→月→周→日→时，时不再钻），
+  标题旁因此出现 `窗口 …` 与清除按钮（清掉即回到原来的档位与范围）；点图例或空白不会触发。
+  卡片右上角的全屏按钮用 Fullscreen API 放大整块（标题 + 图 + 图例），按钮状态跟着 `fullscreenchange` 走。
 - **原币**：顶部 KPI 卡与各聚合行只给显示货币（它们本来就可能混着几张表），
   `模型与计价` 页顶部另有一张 `按表小计` 卡片（每张价格表本次命中的那套已发布价目），
   模型行的金额下方以小字给出原币、`title` 里给全；两种货币相同时不重复显示。
@@ -356,7 +360,7 @@ CLI 的 `bin` / `files` / `version` 未改动。
 - `reasoning` 已包含在 `output` 里，**不另外计费**；因此五桶占比以四个计费桶为分母，
   思考那一行的占比表示"占全部 token 的比例"。
 - 时间序列是唯一在服务端按「时间桶 × agent × 项目」重新计价的地方（报表里没有逐桶金额），
-  与总计的差异在小数点后第 4 位以内；小时粒度只保留最近 14 天，更早的只有日粒度。
+  与总计的差异在小数点后第 4 位以内；小时粒度的保留跟请求窗口走：≤ 31 天的有界窗口全程保留（钻取任意历史某天都有小时），更宽或不带 range 时只保留最近 14 天。
 
 ---
 

@@ -103,12 +103,26 @@ import type {
   SessionNode,
   SessionTreeNode,
   TimeseriesBucket,
+  TimeseriesGrid,
   TokenBreakdown,
   WorkspaceNode,
 } from './types.ts';
 
-/** How far back hour buckets are kept: older usage only needs the day grid. */
+/** How far back hour buckets are kept when the request asks for everything. */
 const HOUR_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * The widest requested window that still keeps hour buckets for all of it.
+ *
+ * Drilling is what hour buckets are for, and a drill asks for one bucket: a day,
+ * or a month at most. Keeping every hour of a *requested* window that short is
+ * what makes "click a day from last March → see its hours" work, whatever the
+ * date. Without the bound the hourly grid would grow with the account's history
+ * (and the payload with it), so a wide or open-ended window still keeps only
+ * {@link HOUR_WINDOW_MS}. 31 days is the longest a calendar month can be, so a
+ * month preset or a month drill never falls off the edge.
+ */
+const HOUR_KEEP_WINDOW_MS = 31 * 24 * 60 * 60 * 1000;
 
 /** The five token buckets, in the order every table prints them. */
 const BUCKET_KEYS = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'] as const;
@@ -191,7 +205,7 @@ export interface DashboardStore {
    * @param options - bucket size plus the same filters as {@link DashboardStore.dashboard}.
    * @returns bucket points in ascending time order.
    */
-  timeseries(options: DashboardQuery & { bucket?: 'day' | 'hour' | undefined }): TimeseriesBucket[];
+  timeseries(options: DashboardQuery & { bucket?: TimeseriesGrid | undefined }): TimeseriesBucket[];
   /**
    * One session with its delegation tree.
    * @param id - session id, or `agent:id` when two agents used the same id.
@@ -1177,7 +1191,7 @@ function collectFacts(input: BuildInput): RecordFacts {
           }
 
           addPoint(facts.day, 'day', record, session.agent, projectId);
-          if (input.now - record.time <= HOUR_WINDOW_MS) {
+          if (keepsHourBucket(record.time, input.range, input.now)) {
             addPoint(facts.hour, 'hour', record, session.agent, projectId);
           }
         }
@@ -1185,6 +1199,26 @@ function collectFacts(input: BuildInput): RecordFacts {
     }
   }
   return facts;
+}
+
+/**
+ * Whether one record still deserves an hour bucket.
+ *
+ * The rule follows the *requested* window, not the scan's age: a bounded window
+ * no longer than {@link HOUR_KEEP_WINDOW_MS} keeps hours for all of it — that is
+ * what a drill into a past day needs — and anything wider (or open-ended) keeps
+ * the recent {@link HOUR_WINDOW_MS} only, so the hourly grid cannot grow without
+ * bound. Records outside the requested window never reach here: the report the
+ * facts are collected beside has already narrowed them.
+ *
+ * @param time - the record's own instant.
+ * @param range - the window the request asked for; either end may be `null`.
+ * @param now - the scan's instant, the anchor of the recent-window rule.
+ * @returns whether to add the record to the hourly grid.
+ */
+export function keepsHourBucket(time: number, range: TimeRange, now: number): boolean {
+  if (range.from !== null && range.to !== null && range.to - range.from <= HOUR_KEEP_WINDOW_MS) return true;
+  return now - time <= HOUR_WINDOW_MS;
 }
 
 /** Accumulate the day/hour cells for one record. */
@@ -1808,6 +1842,12 @@ export function filterDashboard(dashboard: Dashboard, query: DashboardQuery = {}
   const filteredBands = dashboard.bands.filter(
     (row) => keptIds.has(row.projectId) && (agents.size === 0 || agents.has(row.agent)),
   );
+  // The series is the one part of a *snapshot* the range has to narrow by hand:
+  // a live store re-queries the records per range, while a file already holds
+  // every bucket it ever computed. Harmless on the live path, where the points
+  // are inside the range to begin with.
+  const range = query.range === undefined ? undefined : resolveRange({ spec: query.range });
+  const within = (instant: number): boolean => range === undefined || inRange(instant, range);
   const filtered: Dashboard = {
     ...dashboard,
     generatedAt: Date.now(),
@@ -1822,10 +1862,10 @@ export function filterDashboard(dashboard: Dashboard, query: DashboardQuery = {}
       }),
     timeseries: {
       day: dashboard.timeseries.day.filter(
-        (point) => keptIds.has(point.projectId) && (agents.size === 0 || agents.has(point.agent)),
+        (point) => within(point.t) && keptIds.has(point.projectId) && (agents.size === 0 || agents.has(point.agent)),
       ),
       hour: dashboard.timeseries.hour.filter(
-        (point) => keptIds.has(point.projectId) && (agents.size === 0 || agents.has(point.agent)),
+        (point) => within(point.t) && keptIds.has(point.projectId) && (agents.size === 0 || agents.has(point.agent)),
       ),
     },
     models: dashboard.models.filter((row) => keptIds.has(row.projectId) && (agents.size === 0 || agents.has(row.agent))),
@@ -1867,12 +1907,16 @@ function emptyDashboard(dashboard: Dashboard): Dashboard {
 }
 
 /** Fold the sparse long-form series into one point per bucket. */
-export function aggregateTimeseries(dashboard: Dashboard, bucket: 'day' | 'hour'): TimeseriesBucket[] {
+export function aggregateTimeseries(dashboard: Dashboard, bucket: TimeseriesGrid): TimeseriesBucket[] {
   const points = bucket === 'hour' ? dashboard.timeseries.hour : dashboard.timeseries.day;
   const groups = new Map<number, SeriesPoint[]>();
   for (const point of points) {
-    const entry = groups.get(point.t);
-    if (entry === undefined) groups.set(point.t, [point]);
+    // Every grid but `hour` folds the *day* points into a coarser start, so one
+    // scan feeds all of them: the bucket a day belongs to is decided here, not
+    // by re-walking the records.
+    const start = bucket === 'hour' || bucket === 'day' ? point.t : gridStart(point.t, bucket);
+    const entry = groups.get(start);
+    if (entry === undefined) groups.set(start, [point]);
     else entry.push(point);
   }
   const out: TimeseriesBucket[] = [];
@@ -1889,7 +1933,7 @@ export function aggregateTimeseries(dashboard: Dashboard, bucket: 'day' | 'hour'
     out.push({
       t,
       date,
-      label: bucket === 'hour' ? `${date} ${String(new Date(t).getHours()).padStart(2, '0')}:00` : date,
+      label: bucketLabel(t, bucket, date),
       requests: rows.reduce((total, row) => total + row.requests, 0),
       tokens: sumTokensList(rows.map((row) => row.tokens)),
       cost: sumAmountsList(rows.map((row) => row.cost)),
@@ -1898,6 +1942,71 @@ export function aggregateTimeseries(dashboard: Dashboard, bucket: 'day' | 'hour'
   }
   out.sort((left, right) => left.t - right.t);
   return out;
+}
+
+/**
+ * The local start of the week, month or year one instant falls in.
+ *
+ * Weeks start on Monday in the reader's own timezone (`getDay()` is local, so a
+ * Sunday belongs to the week that began six days earlier). Months and years are
+ * the calendar's own, which is what "按月" means to the person reading it.
+ * @param instant - any instant inside the bucket.
+ * @param grid - the bucket to snap to.
+ * @returns the bucket's first millisecond, on the local clock.
+ */
+function gridStart(instant: number, grid: 'week' | 'month' | 'year'): number {
+  const date = new Date(instant);
+  if (grid === 'week') {
+    // `getDay()` is 0 for Sunday; shift so Monday is 0 and step back to it.
+    date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  } else if (grid === 'month') {
+    date.setDate(1);
+  } else {
+    date.setMonth(0, 1);
+  }
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+/**
+ * The label one bucket prints, in the reader's own units.
+ * @param t - the bucket's local start.
+ * @param grid - the bucket's grid.
+ * @param date - `YYYY-MM-DD` of that start, already computed.
+ * @returns hour `YYYY-MM-DD HH:00`, day `YYYY-MM-DD`, week `YYYY-Www` (ISO week
+ * and ISO week-year, so 2025-12-29 is `2026-W01`), month `YYYY-MM`, year `YYYY`.
+ */
+function bucketLabel(t: number, grid: TimeseriesGrid, date: string): string {
+  if (grid === 'hour') return `${date} ${String(new Date(t).getHours()).padStart(2, '0')}:00`;
+  if (grid === 'day') return date;
+  if (grid === 'month') return date.slice(0, 7);
+  if (grid === 'year') return date.slice(0, 4);
+  const { year, week } = isoWeek(t);
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
+/**
+ * The ISO-8601 week and week-year of an instant.
+ *
+ * The ISO week-year is not the calendar year: the week containing the year's
+ * first Thursday owns January 1st even when January 1st is a Friday, Saturday or
+ * Sunday, so 2025-12-29 (a Monday) is `2026-W01`. Labelling with the calendar
+ * year instead would print `2025-W01` beside `2025-W53` and read as a mistake.
+ * @param instant - milliseconds since the Unix epoch.
+ * @returns the ISO week-year and week number (1…53).
+ */
+function isoWeek(instant: number): { year: number; week: number } {
+  // The Thursday of this week decides which year the week belongs to.
+  const thursday = new Date(instant);
+  thursday.setDate(thursday.getDate() - ((thursday.getDay() + 6) % 7) + 3);
+  thursday.setHours(0, 0, 0, 0);
+  const year = thursday.getFullYear();
+  // The first Thursday of that year is in week 1, by definition.
+  const firstThursday = new Date(year, 0, 4);
+  firstThursday.setDate(firstThursday.getDate() - ((firstThursday.getDay() + 6) % 7) + 3);
+  firstThursday.setHours(0, 0, 0, 0);
+  const week = 1 + Math.round((thursday.getTime() - firstThursday.getTime()) / (7 * 86_400_000));
+  return { year, week };
 }
 
 /** `YYYY-MM-DD` on the local clock. */

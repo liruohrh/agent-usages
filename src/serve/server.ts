@@ -52,6 +52,7 @@ import type {
   RefreshReport,
   SessionNode,
   TimeseriesBucket,
+  TimeseriesGrid,
 } from './types.ts';
 
 /** Where Vite listens by default. */
@@ -200,15 +201,18 @@ function withRequestLanguage<T>(request: Request, render: () => T): T {
   }
 }
 
+/** The grids `?bucket=` accepts; anything else keeps the default. */
+const BUCKETS: readonly TimeseriesGrid[] = ['hour', 'day', 'week', 'month', 'year'];
+
 /** Turn a request's query string into the filters the store understands. */
-function queryOf(request: Request): DashboardQuery & { bucket?: 'day' | 'hour' } {
+function queryOf(request: Request): DashboardQuery & { bucket?: TimeseriesGrid } {
   const bucket = stringOf(request.query['bucket']);
   return {
     ...(stringOf(request.query['range']) === undefined ? {} : { range: stringOf(request.query['range']) }),
     ...(listOf(request.query['agent']).length === 0 ? {} : { agents: listOf(request.query['agent']) }),
     ...(listOf(request.query['project']).length === 0 ? {} : { projects: listOf(request.query['project']) }),
     ...(stringOf(request.query['q']) === undefined ? {} : { search: stringOf(request.query['q']) }),
-    ...(bucket === 'day' || bucket === 'hour' ? { bucket } : {}),
+    ...(BUCKETS.includes(bucket as TimeseriesGrid) ? { bucket: bucket as TimeseriesGrid } : {}),
   };
 }
 
@@ -256,7 +260,7 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
    * The dashboard for one request: its filters applied, its sentences in the
    * language the request asked for.
    */
-  const dashboardOf = (request: Request): { dashboard: Dashboard; query: DashboardQuery & { bucket?: 'day' | 'hour' } } =>
+  const dashboardOf = (request: Request): { dashboard: Dashboard; query: DashboardQuery & { bucket?: TimeseriesGrid } } =>
     withRequestLanguage(request, () => {
       const query = queryOf(request);
       return { dashboard: localizeDashboard(store.dashboard(query), query.range), query };

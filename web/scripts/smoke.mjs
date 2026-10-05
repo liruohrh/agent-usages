@@ -262,6 +262,109 @@ async function exercise(base, { live }) {
   const filtered = await call(base, `/api/timeseries?bucket=day&agent=${encodeURIComponent(agents[0]?.id ?? 'dsh')}`);
   check('带 agent 过滤的时序可用', filtered.status === 200 && (filtered.body?.points ?? []).every((point) => Object.keys(point.byAgent).every((id) => id === agents[0]?.id)));
 
+  // Five grids over the same records: hour/day come from the scan, week/month/
+  // year are folded from the day grid. Each bucket starts where it says it does
+  // (its `t` is the local start the drill narrows to), and the labels carry the
+  // year so a week that straddles New Year cannot be mistaken for another.
+  const grids = ['hour', 'day', 'week', 'month', 'year'];
+  const series = new Map();
+  for (const grid of grids) {
+    const answer = await call(base, `/api/timeseries?bucket=${grid}`);
+    series.set(grid, answer);
+    check(`GET /api/timeseries?bucket=${grid} → 200 且回显档位`, answer.status === 200 && answer.body?.bucket === grid, `HTTP ${answer.status} bucket=${answer.body?.bucket}`);
+  }
+  const labelShape = {
+    hour: /^\d{4}-\d{2}-\d{2} \d{2}:00$/,
+    day: /^\d{4}-\d{2}-\d{2}$/,
+    week: /^\d{4}-W\d{2}$/,
+    month: /^\d{4}-\d{2}$/,
+    year: /^\d{4}$/,
+  };
+  check(
+    '五档标签各自成形',
+    grids.every((grid) => (series.get(grid)?.body?.points ?? []).every((point) => labelShape[grid].test(point.label))),
+    grids.map((grid) => `${grid}:${(series.get(grid)?.body?.points ?? [])[0]?.label ?? '-'}`).join(' '),
+  );
+  check(
+    '每档的 t 就是该桶的本地起点',
+    grids.every((grid) =>
+      (series.get(grid)?.body?.points ?? []).every((point) => {
+        const date = new Date(point.t);
+        if (grid === 'hour') return date.getMinutes() === 0 && date.getSeconds() === 0;
+        if (grid === 'day') return date.getHours() === 0 && date.getMinutes() === 0;
+        if (grid === 'week') return date.getDay() === 1 && date.getHours() === 0;
+        if (grid === 'month') return date.getDate() === 1 && date.getHours() === 0;
+        return date.getMonth() === 0 && date.getDate() === 1 && date.getHours() === 0;
+      }),
+    ),
+  );
+  // The hourly grid keeps only the recent window by design, so it is a subset;
+  // the other four cover every record the range holds.
+  check(
+    'Σ day/week/month/year 请求 === 总计请求',
+    ['day', 'week', 'month', 'year'].every(
+      (grid) =>
+        (series.get(grid)?.body?.points ?? []).reduce((sum, point) => sum + point.requests, 0) ===
+        summary.body?.totals?.requests,
+    ),
+    ['day', 'week', 'month', 'year']
+      .map((grid) => `${grid}:${(series.get(grid)?.body?.points ?? []).reduce((sum, point) => sum + point.requests, 0)}`)
+      .join(' '),
+  );
+  check(
+    'Σ hour 请求 ≤ 总计请求（小时只保留近 14 天）',
+    (series.get('hour')?.body?.points ?? []).reduce((sum, point) => sum + point.requests, 0) <=
+      (summary.body?.totals?.requests ?? 0),
+  );
+  // Folding the day grid must be lossless: one month's requests are its days'.
+  const monthOf = (label) => (series.get('month')?.body?.points ?? []).find((point) => point.label === label);
+  const monthPoint = (series.get('month')?.body?.points ?? [])[0];
+  if (monthPoint !== undefined) {
+    const daysInside = (series.get('day')?.body?.points ?? []).filter(
+      (point) => new Date(point.t).getFullYear() === new Date(monthPoint.t).getFullYear() && new Date(point.t).getMonth() === new Date(monthPoint.t).getMonth(),
+    );
+    check(
+      '一个月的请求 = 该月各天的请求',
+      daysInside.reduce((sum, point) => sum + point.requests, 0) === monthPoint.requests,
+      `${monthOf(monthPoint.label)?.requests} vs ${daysInside.reduce((sum, point) => sum + point.requests, 0)}`,
+    );
+  }
+  // An explicit `A..B` window (what a drill writes) narrows the series; the same
+  // window on the next finer grid is how "click a day → see its hours" works.
+  // A day the hourly grid still covers: the first day of the range would predate
+  // the 14-day window and drill into nothing.
+  const hourDays = new Set((series.get('hour')?.body?.points ?? []).map((point) => new Date(point.t).toDateString()));
+  const dayPoint = [...(series.get('day')?.body?.points ?? [])]
+    .reverse()
+    .find((point) => hourDays.has(new Date(point.t).toDateString()));
+  if (dayPoint !== undefined) {
+    const start = new Date(dayPoint.t);
+    const end = new Date(dayPoint.t);
+    end.setDate(end.getDate() + 1);
+    const local = (date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}T00:00:00`;
+    const spec = `${local(start)}..${local(end)}`;
+    const narrowed = await call(base, `/api/timeseries?bucket=hour&range=${encodeURIComponent(spec)}`);
+    const kept = narrowed.body?.points ?? [];
+    check(
+      '显式窗口把时序收窄到那一天',
+      narrowed.status === 200 && kept.every((point) => new Date(point.t).toDateString() === start.toDateString()),
+      `${kept.length} 个小时桶，首尾 ${kept[0]?.label ?? '-'} … ${kept[kept.length - 1]?.label ?? '-'}`,
+    );
+    check(
+      '收窄后的小时之和 = 那一天的请求',
+      kept.reduce((sum, point) => sum + point.requests, 0) === dayPoint.requests,
+      `${kept.reduce((sum, point) => sum + point.requests, 0)} vs ${dayPoint.requests}`,
+    );
+  }
+  // An unknown bucket keeps the documented default rather than failing.
+  const unknown = await call(base, '/api/timeseries?bucket=fortnight');
+  check(
+    '未知档位退回 day',
+    unknown.status === 200 && unknown.body?.bucket === 'day',
+    `HTTP ${unknown.status} bucket=${unknown.body?.bucket}`,
+  );
+
   const ranged = await call(base, '/api/summary?range=week');
   check('GET /api/summary?range=week → 200', ranged.status === 200, `HTTP ${ranged.status}`);
   check('range=week 的请求数不超过全部', (ranged.body?.totals?.requests ?? 0) <= (summary.body?.totals?.requests ?? 0));

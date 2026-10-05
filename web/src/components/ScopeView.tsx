@@ -16,7 +16,7 @@
 
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-import type { Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
+import type { BucketKey, Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
 import { Overview } from './Overview';
 import { UsageTab } from './Usage';
 import { BandTable, ModelTable, PriceListTable } from './Tables';
@@ -35,10 +35,16 @@ export interface ScopeProps {
   dashboard: Dashboard;
   project: ProjectSummary | null;
   points: readonly TimeseriesBucket[];
-  bucket: 'day' | 'hour';
+  bucket: BucketKey;
   metric: SeriesMetric;
-  onBucket: (bucket: 'day' | 'hour') => void;
+  onBucket: (bucket: BucketKey) => void;
   onMetric: (metric: SeriesMetric) => void;
+  /** A click on one chart bucket: narrow the range and step to a finer grid. */
+  onDrill: (index: number) => void;
+  /** Drop the drilled window. */
+  onClearWindow: () => void;
+  /** Whether an explicit window is in force. */
+  drilled: boolean;
   symbol: string;
   dark: boolean;
   loading: boolean;

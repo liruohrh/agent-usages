@@ -7,12 +7,13 @@
  */
 
 import type {
+  BucketKey,
   ConfigPatch,
   ConfigPayload,
   ConfigSaved,
   Dashboard,
   Language,
-  RangeKey,
+  RangeSpec,
   RefreshReport,
   SessionDetail,
   SettingsPayload,
@@ -21,8 +22,8 @@ import type {
 
 /** What the dashboard is filtered by. */
 export interface Filters {
-  /** Time range preset. */
-  range: RangeKey;
+  /** A range preset, or an explicit `A..B` window (what a chart drill writes). */
+  range: RangeSpec;
   /** Agent ids; empty means every loaded agent. */
   agents: string[];
   /** Project ids; empty means every project. */
@@ -91,7 +92,7 @@ export function fetchDashboard(filters: Filters, signal?: AbortSignal): Promise<
 /** Usage over time, already aggregated per bucket. */
 export function fetchTimeseries(
   filters: Filters,
-  bucket: 'day' | 'hour',
+  bucket: BucketKey,
   signal?: AbortSignal,
 ): Promise<{ points: TimeseriesBucket[] }> {
   const params = filterParams(filters);
