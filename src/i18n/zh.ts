@@ -518,6 +518,13 @@ export const zh = {
     piNoData: (p: { source: string }) =>
       `在 ${p.source} 下没有找到 pi 会话；用 --home 指定 pi 的 agent 目录（默认 ~/.pi/agent），或用 PI_CODING_AGENT_DIR 覆盖`,
     claudecodeSessionUnreadable: (p: { path: string }) => `Claude Code 会话文件读不出来: ${p.path}`,
+    mergedSourcesUnknown: '（没有记录文件路径）',
+    claudecodeSessionMerged: (p: { id: string; count: string; files: string }) =>
+      `Claude Code 会话 ${p.id} 在同一个数据目录下有 ${p.count} 份日志（${p.files}）；它们是同一段对话的多份（在另一个工作目录 --resume 就会这样写），已按记录 id 合并成一条会话，请求不会重复计费。`,
+    sessionMergedAcrossSourcesSummary: (p: { count: string; limit: string; sources: string }) =>
+      `一共 ${p.count} 个会话出现在多个数据来源（${p.sources}），上面列出了前 ${p.limit} 个；每一条都按记录 id 合并成一条会话，请求不会重复计费。`,
+    sessionMergedAcrossSources: (p: { agent: string; id: string; count: string; files: string }) =>
+      `会话 ${p.agent}:${p.id} 出现在 ${p.count} 个数据来源（${p.files}）；已按记录 id 合并成一条会话，请求不会重复计费。若这两份其实是两段独立对话，请把它们放在不同的数据目录下分别统计。`,
     claudecodeHomeNotAbsolute: (p: { value: string }) => `Claude Code 配置目录必须是绝对路径，收到 ${p.value}`,
     claudecodeNoData: (p: { source: string }) =>
       `在 ${p.source} 下没有找到 Claude Code 会话；用 --home 指定配置目录（默认 ~/.claude），或用 CLAUDE_CONFIG_DIR 覆盖`,

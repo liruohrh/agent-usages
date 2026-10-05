@@ -201,6 +201,115 @@ describe('a session read twice', () => {
     expect(merged.projects).toHaveLength(1);
     expect(merged.projects[0]?.sessions).toHaveLength(1);
   });
+
+  it('says so, once, when two datasets carried the same session', async () => {
+    const id = 'shared-session';
+    const reading = (name: string, ids: readonly string[]) =>
+      dataset(
+        [
+          project({
+            id: name,
+            name,
+            path: '/tmp/shared',
+            sessions: [
+              session({
+                id,
+                agent: 'claudecode',
+                cwd: '/tmp/shared',
+                sourceFile: `/data/${name}/${id}.jsonl`,
+                records: ids.map((recordId, index) => record({ id: recordId, time: 100 * (index + 1) })),
+              }),
+            ],
+          }),
+        ],
+        { agent: 'claudecode', agents: ['claudecode'], source: `/data/${name}` },
+      );
+
+    const merged = await mergeDatasets([
+      reading('first', [`${id}:m1`]),
+      reading('second', [`${id}:m1`, `${id}:m2`]),
+      reading('third', [`${id}:m1`]),
+    ]);
+
+    // Three readings, one session — and one warning, not two.
+    const merged3 = merged.warnings.filter((warning) => warning.code === 'sessionMergedAcrossSources');
+    expect(merged3).toHaveLength(1);
+    expect(merged3[0]?.message).toContain(id);
+    expect(merged3[0]?.message).toContain('claudecode');
+    expect(merged3[0]?.message).toContain('/data/first/');
+    expect(merged3[0]?.message).toContain('/data/third/');
+  });
+
+  it('names five sessions and sums up the rest when a whole root was read twice', async () => {
+    // A duplicated root folds every session it holds: naming all of them is not
+    // information, so five are named and the count carries the rest.
+    const ids = ['s1', 's2', 's3', 's4', 's5', 's6'];
+    const reading = (name: string) =>
+      dataset(
+        [
+          project({
+            id: name,
+            name,
+            path: '/tmp/shared',
+            sessions: ids.map((id, index) =>
+              session({
+                id,
+                agent: 'claudecode',
+                cwd: '/tmp/shared',
+                sourceFile: `/data/${name}/${id}.jsonl`,
+                records: [record({ id: `${id}:m${index}`, time: 100 * (index + 1) })],
+              }),
+            ),
+          }),
+        ],
+        { agent: 'claudecode', agents: ['claudecode'], source: `/data/${name}` },
+      );
+
+    const merged = await mergeDatasets([reading('first'), reading('second')]);
+
+    // The union itself is untouched: one session per id, each with its request.
+    expect(merged.sessions.map((entry) => entry.id).sort()).toEqual(ids);
+    expect(merged.sessions.every((entry) => entry.records.length === 1)).toBe(true);
+
+    const detail = merged.warnings.filter((warning) => warning.code === 'sessionMergedAcrossSources');
+    const summary = merged.warnings.filter((warning) => warning.code === 'sessionMergedAcrossSourcesSummary');
+    expect(detail).toHaveLength(5);
+    expect(summary).toHaveLength(1);
+    expect(summary[0]?.message).toContain('6');
+    expect(summary[0]?.message).toContain('/data/first');
+    // The five named ones are the first five identities, in a stable order.
+    expect(detail.map((warning) => warning.message.match(/claudecode:(\S+?)\s/)?.[1])).toEqual(['s1', 's2', 's3', 's4', 's5']);
+  });
+
+  it('stays quiet when no session was read twice', async () => {
+    const id = 'only-once';
+    const one = dataset(
+      [
+        project({
+          id: 'p1',
+          name: 'p1',
+          path: '/tmp/shared',
+          sessions: [session({ id, agent: 'claudecode', cwd: '/tmp/shared', records: [record({ id: `${id}:m1`, time: 100 })] })],
+        }),
+      ],
+      { agent: 'claudecode', agents: ['claudecode'], source: '/data/one' },
+    );
+    const two = dataset(
+      [
+        project({
+          id: 'p2',
+          name: 'p2',
+          path: '/tmp/other',
+          sessions: [session({ id: 'another', agent: 'claudecode', cwd: '/tmp/other', records: [record({ id: 'another:m1', time: 100 })] })],
+        }),
+      ],
+      { agent: 'claudecode', agents: ['claudecode'], source: '/data/two' },
+    );
+
+    const merged = await mergeDatasets([one, two]);
+    expect(merged.sessions).toHaveLength(2);
+    expect(merged.warnings.filter((warning) => warning.code === 'sessionMergedAcrossSources')).toHaveLength(0);
+  });
 });
 
 describe('configured projects', () => {

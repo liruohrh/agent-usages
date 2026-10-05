@@ -24,8 +24,19 @@
 
 import { repoOf } from './git.ts';
 import { basenameOf, canonicalPath, normalizePath } from './paths.ts';
-import type { Warning } from '../i18n/errors.ts';
+import { UserError, type Warning } from '../i18n/errors.ts';
+import { t } from '../i18n/index.ts';
 import type { DatasetStats, ProjectRecord, RepoInfo, RepoKind, SessionRecord, UsageDataset, UsageRecord } from './types.ts';
+
+/**
+ * How many folded sessions are named one by one before the rest are summed up.
+ *
+ * Naming a session — its id and the files it was read from — is what lets a
+ * reader check the union rule, and one or two is the usual case (a `--resume`
+ * in another directory). A duplicated *root* is the other case: 27 identical
+ * warnings say less than five and a count.
+ */
+const NAMED_FOLD_LIMIT = 5;
 
 /**
  * A project the user declared in `~/.config/agent-usages/config.json`.
@@ -233,6 +244,10 @@ export async function mergeDatasets(
   // second reading of one session is not a duplicate to drop: its records are
   // folded into the session that is already there (see `unionSessionRecords`).
   const seen = new Map<string, SessionRecord>();
+  // Sessions that two datasets both carried, with every file that named them: the
+  // fold is a decision a reader has to be able to see (§ the identity rules), and
+  // one conversation is reported once however many datasets it was read from.
+  const folded = new Map<string, { agent: string; id: string; files: string[] }>();
   for (const dataset of present) {
     const owningProject = new Map<string, ProjectRecord>();
     for (const project of dataset.projects) {
@@ -249,6 +264,13 @@ export async function mergeDatasets(
       const already = seen.get(identity);
       if (already !== undefined) {
         unionSessionRecords(already, session);
+        const entry = folded.get(identity) ?? {
+          agent: session.agent,
+          id: session.id,
+          files: already.sourceFile === undefined ? [] : [already.sourceFile],
+        };
+        if (session.sourceFile !== undefined) entry.files.push(session.sourceFile);
+        folded.set(identity, entry);
         continue;
       }
       seen.set(identity, session);
@@ -332,6 +354,30 @@ export async function mergeDatasets(
   };
   const agents = [...new Set(present.map((dataset) => dataset.agent))];
   const warnings: Warning[] = present.flatMap((dataset) => dataset.warnings);
+  // Sorted by identity so "the first five" is the same five on every run.
+  const foldedSessions = [...folded.values()].sort((left, right) =>
+    `${left.agent}:${left.id}`.localeCompare(`${right.agent}:${right.id}`),
+  );
+  for (const entry of foldedSessions.slice(0, NAMED_FOLD_LIMIT)) {
+    warnings.push(
+      new UserError('sessionMergedAcrossSources', {
+        agent: entry.agent,
+        id: entry.id,
+        count: String(entry.files.length),
+        files: entry.files.length === 0 ? t().errors.mergedSourcesUnknown : entry.files.join(t().period.listJoin),
+      }),
+    );
+  }
+  if (foldedSessions.length > NAMED_FOLD_LIMIT) {
+    const sources = [...new Set(present.map((dataset) => dataset.source))].filter((source) => source.length > 0);
+    warnings.push(
+      new UserError('sessionMergedAcrossSourcesSummary', {
+        count: String(foldedSessions.length),
+        limit: String(NAMED_FOLD_LIMIT),
+        sources: sources.length === 0 ? t().errors.mergedSourcesUnknown : sources.join(t().period.listJoin),
+      }),
+    );
+  }
   return {
     agent: agents.join('+'),
     agents,

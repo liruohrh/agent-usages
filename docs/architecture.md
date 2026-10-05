@@ -38,6 +38,9 @@ UsageDataset { agent, agents, source, projects, sessions, stats, warnings }
 
 补充约定：
 
+- **同一个 `agent+id` 的多份日志 = 一段对话的多份**，合并规则是**按 `record.id` 求并集**（`unionSessionRecords`，`src/core/merge.ts`）：`record.id` 就是「一次 API 调用」的标识，跨文件稳定（DSH 的 seed 与 `session.v4` 键一致、Claude Code / Codex 追加不改变旧 id），所以两份互有出入的日志既不丢记录，也不会把共有的那次调用算两遍。first-wins（「第二份丢掉」）被否决，因为它的正确性取决于目录遍历顺序（实测：同一会话的两份日志换个读取顺序，单根会从 391 条掉到 133 条）。
+- **发生并集时必须可观测**：两条入口各给一条告警，且每个会话只报一次——适配器层（一个数据目录内的多份日志，`claudecodeSessionMerged`，点名会话 id 与全部文件路径）与合并层（多个数据集/多个根相遇，`sessionMergedAcrossSources`，点名 `agent:id`、来源数与文件路径）。**没有折叠发生时一条都不会出现**（零噪音），所以「配了重复目录」这类事不会被静默吞掉。
+- 会话的身份就是 `agent+id`，**不带数据目录**：id 是 agent 自己给的，搬家、备份、软链、多根下都稳定；带上 root 会把「备份了一份」变成双倍账单。若两份同 id 日志其实是两段独立对话，应把它们放进不同的数据目录分别统计（告警文案里就是这么说的）。
 - 只有一个数据集、且没有任何 `projects` 配置时**原样返回**：适配器已经分好的项目不必重算，用户看到的项目名（DSH 的 workspace 标题等）也不会被改掉。
 - 合并只搬运会话，**不重新计价**：项目、agent、全局三层的数字都是同一批「每会话小结」的相加，所以 `Σ 各 agent = 项目总计 = 全局总计` 由构造保证（`test/unit/agent-totals.test.ts` 逐项断言）。
 - 只有**被派生出来的**子代理算作后代。fork / continuation 虽然写了 `parentId`，但它是自己独立开始的会话，不折叠进来源会话，否则它的 token 会被计两次。

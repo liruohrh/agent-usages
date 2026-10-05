@@ -545,6 +545,15 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   const projectOfSession = new Map<string, string>();
   /** Emitted sessions by id, so a second file of the same session can be folded in. */
   const emitted = new Map<string, SessionRecord>();
+  /**
+   * The log files each session id was read from, in read order.
+   *
+   * One conversation can be written as several files in one data directory
+   * (resuming in another working directory writes a new one), and they are
+   * merged — but never silently: the count and the paths both end up in a
+   * warning, and a session with one file is never mentioned.
+   */
+  const logsOfSession = new Map<string, string[]>();
   // `--fork-session` copies the source's entries verbatim — same `message.id`,
   // no back-pointer — so the copy is recognised by the calls it repeats. One
   // message id is one API call, so an id billed by an earlier file is inherited
@@ -597,6 +606,9 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       // new file when the session is resumed in another working directory. That
       // is one conversation, so its requests are folded into the session already
       // emitted instead of one file replacing the other.
+      const files = logsOfSession.get(session.id) ?? [];
+      if (session.sourceFile !== undefined) files.push(session.sourceFile);
+      logsOfSession.set(session.id, files);
       const already = emitted.get(session.id);
       if (already !== undefined) {
         unionSessionRecords(already, session);
@@ -606,6 +618,19 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       sessions.push(session);
       projectOfSession.set(session.id, projectKey);
     }
+  }
+
+  // One warning per session, whatever number of files it took: folding three logs
+  // is still one conversation, and three warnings for it would be noise.
+  for (const [id, files] of logsOfSession) {
+    if (files.length < 2) continue;
+    warnings.push(
+      new UserError('claudecodeSessionMerged', {
+        id,
+        count: String(files.length),
+        files: files.join(t().period.listJoin),
+      }),
+    );
   }
 
   const byId = new Map(sessions.map((session) => [session.id, session]));

@@ -450,6 +450,13 @@ export const en: Messages = {
     piNoData: (p: { source: string }) =>
       `no pi sessions under ${p.source}; point --home at pi's agent directory (default ~/.pi/agent) or set PI_CODING_AGENT_DIR`,
     claudecodeSessionUnreadable: (p: { path: string }) => `could not read the Claude Code session file: ${p.path}`,
+    mergedSourcesUnknown: '(no file path was recorded)',
+    claudecodeSessionMerged: (p: { id: string; count: string; files: string }) =>
+      `Claude Code session ${p.id} has ${p.count} logs under one data directory (${p.files}); they are readings of one conversation (resuming in another working directory writes another file), so they are merged into one session by record id and no request is charged twice.`,
+    sessionMergedAcrossSourcesSummary: (p: { count: string; limit: string; sources: string }) =>
+      `${p.count} sessions appear in more than one data source (${p.sources}); the first ${p.limit} are listed above. Each one is merged into a single session by record id, so no request is charged twice.`,
+    sessionMergedAcrossSources: (p: { agent: string; id: string; count: string; files: string }) =>
+      `session ${p.agent}:${p.id} appears in ${p.count} data sources (${p.files}); they are merged into one session by record id, so no request is charged twice. If they are really two separate conversations, keep them in different data directories.`,
     claudecodeHomeNotAbsolute: (p: { value: string }) => `the Claude Code config directory must be an absolute path, got ${p.value}`,
     claudecodeNoData: (p: { source: string }) =>
       `no Claude Code sessions under ${p.source}; point --home at the config directory (default ~/.claude) or set CLAUDE_CONFIG_DIR`,

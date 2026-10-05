@@ -386,6 +386,40 @@ describe('reading a Claude Code home', () => {
     expect(branched?.extra?.['branchPoints']).toBe(1);
   });
 
+  it('says nothing when every session was read from one file', async () => {
+    const data = await claudecodeAgent.load({ home });
+    expect(data.warnings.filter((warning) => warning.code === 'claudecodeSessionMerged')).toHaveLength(0);
+  });
+
+  it('merges two logs of one session in the same root, and says so once', async () => {
+    // Resuming a session in another working directory writes the conversation
+    // into that project's directory as well: the same session id, a log that
+    // repeats one call and adds one of its own.
+    const other = join(home, 'projects', '-tmp-other');
+    await mkdir(other, { recursive: true });
+    await writeFile(
+      join(other, `${SESSION}.jsonl`),
+      [
+        JSON.stringify({ type: 'user', uuid: 'u9', sessionId: SESSION, timestamp: '2026-09-23T00:00:09.000Z', cwd: '/tmp/other' }),
+        assistant('c1', '2026-09-23T00:00:10.000Z', 'deepseek-flash', 1_000, 100, 'msg-a1'),
+        assistant('c2', '2026-09-23T00:00:11.000Z', 'deepseek-flash', 500, 20, 'msg-extra'),
+      ].join('\n') + '\n',
+    );
+
+    const data = await claudecodeAgent.load({ home });
+    const sessions = data.sessions.filter((session) => session.id === SESSION);
+    // One conversation however many files carry it: `msg-a1` once, `msg-extra`
+    // only the second file had.
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.records.map((record) => record.id)).toEqual([`${SESSION}:msg-a1`, `${SESSION}:msg-extra`]);
+
+    const merged = data.warnings.filter((warning) => warning.code === 'claudecodeSessionMerged');
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.message).toContain(SESSION);
+    expect(merged[0]?.message).toContain('-tmp-demo');
+    expect(merged[0]?.message).toContain('-tmp-other');
+  });
+
   it('groups sessions under the project their cwd names', async () => {
     const data = await claudecodeAgent.load({ home });
     expect(data.agent).toBe('claudecode');
