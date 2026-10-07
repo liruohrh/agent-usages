@@ -23,7 +23,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -423,6 +423,40 @@ async function exercise(base, { live }) {
         typeof agent?.ok?.true === 'number' && typeof agent?.ok?.false === 'number' && typeof agent?.ok?.unknown === 'number',
     ),
   );
+  check(
+    '三态相加 = 该 agent 的调用数（未表态单独计，不并进成功）',
+    toolAgents.every((agent) => (agent?.ok?.true ?? 0) + (agent?.ok?.false ?? 0) + (agent?.ok?.unknown ?? 0) === (agent?.calls ?? 0)),
+  );
+  if (tools.body?.unavailable === true) {
+    // A snapshot written before tool calls existed: the page must say so rather
+    // than draw an empty table that reads as "these agents called nothing". The
+    // dashboard payload is the page's other signal — the key is simply absent.
+    const payload = await call(base, '/api/dashboard');
+    check(
+      '旧快照：标了 unavailable、无工具行，且 dashboard payload 不带 tools',
+      toolAgents.length === 0 &&
+        (toolTotals.calls ?? 0) === 0 &&
+        (toolTotals.records ?? 0) === 0 &&
+        (payload.body?.tools ?? null) === null,
+      JSON.stringify(toolTotals),
+    );
+  } else {
+    // The tracked fixture carries tool calls, so the页面's table is never empty here.
+    check(
+      '工具表非空：有调用、有工具名与占比',
+      (toolTotals.calls ?? 0) > 0 &&
+        toolAgents.some((agent) => (agent?.tools ?? []).length > 0) &&
+        toolAgents.every((agent) =>
+          (agent?.tools ?? []).every(
+            (tool) =>
+              typeof tool?.name === 'string' && tool.name.length > 0 && typeof tool?.calls === 'number' && typeof tool?.share === 'number',
+          ),
+        ),
+      `calls=${toolTotals.calls}`,
+    );
+    const top = toolAgents.flatMap((agent) => agent?.tools ?? [])[0];
+    check('Top 工具名可读', typeof top?.name === 'string' && top.name.length > 0, String(top?.name));
+  }
   if (toolAgents.length > 0) {
     const named = toolAgents[0]?.agent ?? '';
     const one = await call(base, `/api/tools?agent=${encodeURIComponent(named)}`);
@@ -603,6 +637,21 @@ if (!existsSync(snapshotPath)) {
 }
 
 await run({ port: 0, snapshot: snapshotPath }, false);
+
+// The other state the page draws differently: a file written before tool calls
+// existed. Same data, one key removed — it must answer `unavailable`, not zeroes
+// that look like "no tool was recorded".
+const legacyDir = await mkdtemp(join(tmpdir(), 'agent-usages-smoke-legacy-'));
+try {
+  const full = JSON.parse(await readFile(snapshotPath, 'utf8'));
+  delete full.tools;
+  const legacy = join(legacyDir, 'legacy.snapshot.json');
+  await writeFile(legacy, JSON.stringify(full));
+  process.stdout.write('\n▸ 旧格式快照（删掉 tools 键的副本）\n');
+  await run({ port: 0, snapshot: legacy }, false);
+} finally {
+  await rm(legacyDir, { recursive: true, force: true });
+}
 
 if (process.argv.includes('--live')) {
   // A live scan writes the usage store: give it a scratch file so the run never

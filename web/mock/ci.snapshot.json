@@ -1,9 +1,9 @@
 {
-  "generatedAt": 1791395173630,
+  "generatedAt": 1791396207452,
   "mode": "live",
   "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode",
-  "scannedAt": 1791395173623,
-  "scanMs": 39,
+  "scannedAt": 1791396207445,
+  "scanMs": 46,
   "loadedAgents": [
     {
       "id": "claudecode",
@@ -1951,29 +1951,74 @@
     "agents": [
       {
         "agent": "claudecode",
-        "calls": 0,
+        "calls": 5,
         "records": 6,
-        "recordsWithCalls": 0,
+        "recordsWithCalls": 4,
         "ok": {
-          "true": 0,
-          "false": 0,
-          "unknown": 0
+          "true": 3,
+          "false": 1,
+          "unknown": 1
         },
-        "bytes": 0,
-        "tools": [],
+        "bytes": 421,
+        "tools": [
+          {
+            "name": "Bash",
+            "calls": 2,
+            "ok": {
+              "true": 2,
+              "false": 0,
+              "unknown": 0
+            },
+            "bytes": 129,
+            "share": 40
+          },
+          {
+            "name": "Edit",
+            "calls": 1,
+            "ok": {
+              "true": 1,
+              "false": 0,
+              "unknown": 0
+            },
+            "bytes": 132,
+            "share": 20
+          },
+          {
+            "name": "Read",
+            "calls": 1,
+            "ok": {
+              "true": 0,
+              "false": 1,
+              "unknown": 0
+            },
+            "bytes": 52,
+            "share": 20
+          },
+          {
+            "name": "Write",
+            "calls": 1,
+            "ok": {
+              "true": 0,
+              "false": 0,
+              "unknown": 1
+            },
+            "bytes": 108,
+            "share": 20
+          }
+        ],
         "sessions": []
       }
     ],
     "totals": {
-      "calls": 0,
+      "calls": 5,
       "records": 6,
-      "recordsWithCalls": 0,
+      "recordsWithCalls": 4,
       "ok": {
-        "true": 0,
-        "false": 0,
-        "unknown": 0
+        "true": 3,
+        "false": 1,
+        "unknown": 1
       },
-      "bytes": 0
+      "bytes": 421
     }
   },
   "warnings": [

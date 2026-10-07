@@ -1045,6 +1045,148 @@ test.describe('the session leaderboard', () => {
   });
 });
 
+/** The parts of `/api/tools` the tool-call tab is asserted against. */
+interface ApiTools {
+  agents: {
+    agent: string;
+    calls: number;
+    records: number;
+    recordsWithCalls: number;
+    ok: { true: number; false: number; unknown: number };
+    bytes: number;
+    tools: {
+      name: string;
+      calls: number;
+      ok: { true: number; false: number; unknown: number };
+      bytes: number;
+      share: number;
+    }[];
+  }[];
+  totals: {
+    calls: number;
+    records: number;
+    recordsWithCalls: number;
+    ok: { true: number; false: number; unknown: number };
+    bytes: number;
+  };
+  unavailable?: boolean;
+}
+
+/** The tool report the page itself fetches — asked from the browser, same origin. */
+async function apiTools(page: Page): Promise<ApiTools> {
+  return page.evaluate(async () => (await fetch('/api/tools')).json()) as Promise<ApiTools>;
+}
+
+/** The zeroed report the server sends when the data carries no tool call. */
+const NO_TOOL_CALLS = {
+  agents: [],
+  totals: { calls: 0, records: 0, recordsWithCalls: 0, ok: { true: 0, false: 0, unknown: 0 }, bytes: 0 },
+};
+
+test.describe('the tool-call tab', () => {
+  test('is a tab of its own and shows the three outcomes as three columns', async ({ page }) => {
+    await page.goto('/?view=tools');
+    const tab = page.getByRole('button', { name: '工具调用' });
+    await expect(tab).toBeVisible();
+    await expect(tab).toHaveClass(/border-accent/);
+
+    const tools = await apiTools(page);
+    test.skip(tools.unavailable === true || tools.totals.calls === 0, 'this fixture records no tool call');
+    const usage = tools.agents.find((agent) => agent.tools.length > 0);
+    expect(usage, 'an agent with calls').toBeDefined();
+    if (usage === undefined) return;
+
+    // The card is headed by the agent's badge, whose `title` is the raw agent id
+    // — the one handle that does not depend on the display-name mapping.
+    const card = page
+      .locator('section')
+      .filter({ has: page.locator(`span[title="${usage.agent}"]`) })
+      .first();
+    await expect(card).toBeVisible();
+    const head = (await card.locator('thead th').allInnerTexts()).map((cell) => cell.trim());
+    // 未表态 is a column of its own: a verdict the log never wrote is not success.
+    expect(head).toEqual(['工具', '调用', '占比', '成功', '失败', '未表态', '参数体量']);
+
+    const top = usage.tools[0];
+    const first = card.locator('tbody tr').first();
+    await expect(first).toContainText(top?.name ?? '');
+    // The row prints the payload's own figures, not a second computation.
+    const cells = (await first.locator('td').allInnerTexts()).map((cell) => cell.trim());
+    expect(numberOf(cells[1] ?? '')).toBe(top?.calls);
+    expect(numberOf(cells[3] ?? '')).toBe(top?.ok.true);
+    expect(numberOf(cells[4] ?? '')).toBe(top?.ok.false);
+    expect(numberOf(cells[5] ?? '')).toBe(top?.ok.unknown);
+  });
+
+  test('the overview adds the outcome buckets up to the call count', async ({ page }) => {
+    await page.goto('/?view=tools');
+    const tools = await apiTools(page);
+    test.skip(tools.unavailable === true || tools.totals.calls === 0, 'this fixture records no tool call');
+    const { totals } = tools;
+    // Each figure is its own tile, and the three verdicts partition the calls.
+    for (const [label, value] of [
+      ['成功', totals.ok.true],
+      ['失败', totals.ok.false],
+      ['未表态', totals.ok.unknown],
+    ] as const) {
+      const figure = page.getByText(label, { exact: true }).first().locator('xpath=following-sibling::div');
+      await expect(figure).toBeVisible();
+      expect(numberOf(await figure.innerText()), `${label} tile`).toBe(value);
+    }
+    expect(totals.ok.true + totals.ok.false + totals.ok.unknown).toBe(totals.calls);
+  });
+
+  test('an unavailable snapshot and an empty report say different things, and neither draws a table', async ({ page }) => {
+    // 1) The file never carried tool data: the tab says so and shows nothing.
+    await page.route('**/api/tools*', (route) =>
+      route.fulfill({ json: { ...NO_TOOL_CALLS, unavailable: true } }),
+    );
+    await page.goto('/?view=tools');
+    await expect(page.getByText('这份快照是旧格式，没有带工具调用数据')).toBeVisible();
+    await expect(page.getByText('这些数据里没有记录到工具调用')).toHaveCount(0);
+    await expect(page.locator('main table')).toHaveCount(0);
+
+    // 2) The data is there and recorded nothing: a different sentence, still no table.
+    await page.unroute('**/api/tools*');
+    await page.route('**/api/tools*', (route) => route.fulfill({ json: NO_TOOL_CALLS }));
+    await page.reload();
+    await expect(page.getByText('这些数据里没有记录到工具调用')).toBeVisible();
+    await expect(page.getByText('这份快照是旧格式，没有带工具调用数据')).toHaveCount(0);
+    await expect(page.locator('main table')).toHaveCount(0);
+  });
+
+  test('at 500px the table scrolls inside its card instead of clipping', async ({ page }) => {
+    await page.setViewportSize({ width: 500, height: 900 });
+    await page.goto('/?view=tools');
+    const tools = await apiTools(page);
+    test.skip(tools.unavailable === true || tools.totals.calls === 0, 'this fixture records no tool call');
+    // The page itself must not scroll sideways...
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, 'no page-level horizontal overflow').toBeLessThanOrEqual(1);
+    // ...because the table keeps a declared minimum width inside a scroll box.
+    const measured = await page.locator('main table').first().evaluate((table) => ({
+      scroll: table.scrollWidth,
+      wrapper: table.parentElement?.clientWidth ?? 0,
+      minWidth: getComputedStyle(table).minWidth,
+    }));
+    expect(measured.scroll, 'the table is wider than the viewport, not squeezed').toBeGreaterThan(measured.wrapper);
+    expect(measured.minWidth, 'a minimum width is declared').not.toBe('0px');
+  });
+
+  test('a project scope does not offer the tab', async ({ page }) => {
+    // `twoProjects` asks the page for the payload, so the page must be on the app.
+    await page.goto('/');
+    const projects = await twoProjects(page);
+    const first = projects[0];
+    if (first === undefined) return;
+    await page.goto(`/p/${encodeURIComponent(first.id)}`);
+    await expect(page.getByRole('button', { name: '工具调用' })).toHaveCount(0);
+    // And the URL cannot reach it either: the tab falls back to the overview.
+    await page.goto(`/p/${encodeURIComponent(first.id)}?view=tools`);
+    await expect(page.getByRole('button', { name: '概览' })).toHaveClass(/border-accent/);
+  });
+});
+
 test.describe('layout', () => {
   /** Two cards must line up on the left, have the same width, and stack. */
   async function expectStacked(page: Page, above: string, below: string): Promise<void> {

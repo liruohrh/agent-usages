@@ -384,3 +384,78 @@ export type RangeSpec = RangeKey | (string & {});
  * coarsest to the finest: year → month → week → day → hour.
  */
 export type BucketKey = 'hour' | 'day' | 'week' | 'month' | 'year';
+
+/**
+ * The three outcomes of a tool call, kept apart.
+ *
+ * `unknown` is not a fourth kind of failure: it is every call whose log never
+ * wrote a verdict — Codex's `function_call` has no status field at all, and
+ * Claude Code omits `is_error` on a successful non-Bash call. It is often the
+ * largest bucket in real data, so the page shows it as its own column and never
+ * folds it into success.
+ */
+export interface ToolOutcomes {
+  true: number;
+  false: number;
+  unknown: number;
+}
+
+/** One tool's row inside an agent's report. */
+export interface ToolRow {
+  name: string;
+  calls: number;
+  ok: ToolOutcomes;
+  /** Sum of the complete argument payloads, in bytes. */
+  bytes: number;
+  /** Share of this agent's calls, in percent with one decimal (the server's own rounding). */
+  share: number;
+}
+
+/** One session's tool usage. Empty today: the API has no session depth yet. */
+export interface ToolSessionUsage {
+  id: string;
+  title: string | null;
+  calls: number;
+  ok: ToolOutcomes;
+  bytes: number;
+  tools: { name: string; calls: number }[];
+}
+
+/** One agent's tool calls. */
+export interface AgentToolUsage {
+  agent: string;
+  calls: number;
+  /** Requests in range, whether or not they called a tool. */
+  records: number;
+  /** Of those, the ones that carry at least one call. */
+  recordsWithCalls: number;
+  ok: ToolOutcomes;
+  bytes: number;
+  /** Most-used tools first, cut to the server's `--top` depth. */
+  tools: ToolRow[];
+  sessions: ToolSessionUsage[];
+}
+
+/** The whole run's tool totals. */
+export interface ToolTotals {
+  calls: number;
+  records: number;
+  recordsWithCalls: number;
+  ok: ToolOutcomes;
+  bytes: number;
+}
+
+/**
+ * What `GET /api/tools` answers, in the shape `agent-usages tools --json` prints.
+ *
+ * `unavailable` appears only when the data behind the server cannot answer at
+ * all — a snapshot written before tool calls existed. That is a different state
+ * from an available report whose `calls` is `0`, and the page must not draw them
+ * the same way: one is "the file never held this", the other is "nothing was
+ * recorded".
+ */
+export interface ToolsReport {
+  agents: AgentToolUsage[];
+  totals: ToolTotals;
+  unavailable?: boolean | undefined;
+}

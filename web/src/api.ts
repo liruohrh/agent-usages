@@ -18,6 +18,7 @@ import type {
   SessionDetail,
   SettingsPayload,
   TimeseriesBucket,
+  ToolsReport,
 } from './types';
 
 /** What the dashboard is filtered by. */
@@ -98,6 +99,26 @@ export function fetchTimeseries(
   const params = filterParams(filters);
   params.set('bucket', bucket);
   return request<{ points: TimeseriesBucket[] }>(`/api/timeseries?${params.toString()}`, { signal });
+}
+
+/**
+ * The tool calls behind the usage, aggregated per agent.
+ *
+ * Same numbers as `agent-usages tools --json`: the server answers this endpoint
+ * from the very aggregation the CLI prints. The endpoint reads `range` and
+ * `agent` only — a tool call has no project dimension — so the project filter the
+ * caller may carry is ignored rather than silently over- or under-counted.
+ * @param filters - the same filters the dashboard was fetched with.
+ * @param signal - aborts the request when the filters change mid-flight.
+ * @returns the report, or a zeroed one carrying `unavailable` for a snapshot
+ *   written before tool calls existed.
+ */
+export function fetchTools(filters: Filters, signal?: AbortSignal): Promise<ToolsReport> {
+  const params = filterParams(filters);
+  params.delete('project');
+  params.delete('q');
+  const query = params.toString();
+  return request<ToolsReport>(`/api/tools${query.length === 0 ? '' : `?${query}`}`, { signal });
 }
 
 /** One session, with its delegation tree. */

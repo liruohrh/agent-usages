@@ -276,6 +276,7 @@ function Dashboard({
                     symbol={dashboard.currencySymbol}
                     dark={dark}
                     loading={loading}
+                    filters={apiFilters}
                   />
                 )
               }
@@ -304,6 +305,7 @@ function Dashboard({
                     symbol={dashboard.currencySymbol}
                     dark={dark}
                     loading={loading}
+                    filters={apiFilters}
                   />
                 )
               }

@@ -83,6 +83,7 @@ export const zh = {
       agents: 'agent',
       sessions: '会话',
       usage: '用量',
+      tools: '工具调用',
       models: '模型与计价',
     },
     allProjects: '全部项目',
@@ -97,6 +98,39 @@ export const zh = {
     projectAgents: (name: string) => `agent · ${name}`,
     projectSessions: (name: string) => `会话（${name}）`,
     projectWorkspaces: (name: string) => `工作区 · ${name}`,
+  },
+  /** The 工具调用 tab. */
+  tools: {
+    loading: '正在读取工具调用…',
+    /** A snapshot written before tool calls existed: the file has no data at all. */
+    unavailable: '这份快照是旧格式，没有带工具调用数据',
+    unavailableHint: '用 `agent-usages serve --write-snapshot <文件>` 重新生成快照，或去掉 `--snapshot` 改用实时模式。',
+    /** The other case: the data is there, and it recorded no call. The two must not read alike. */
+    none: '这些数据里没有记录到工具调用',
+    noneHint: '只统计日志里真的记下了工具调用的请求；没有就是没有，不会补齐。',
+    calls: (count: string) => `${count} 次调用`,
+    coverageLabel: '覆盖率',
+    coverage: (percent: string, withCalls: string, records: string) =>
+      `覆盖率 ${percent}%（${withCalls} / ${records} 条记录有调用）`,
+    bytes: (value: string) => `参数体量 ${value}`,
+    colTool: '工具',
+    colCalls: '调用',
+    colShare: '占比',
+    colBytes: '参数体量',
+    outcomes: {
+      title: '成败',
+      ok: '成功',
+      failed: '失败',
+      unknown: '未表态',
+    },
+    /** Why 未表态 is its own column, in one sentence. */
+    outcomesNote:
+      '「未表态」= 日志没写成败（Codex 的 function_call 没有状态字段，Claude Code 成功的非 Bash 调用不写 is_error），它单列一列，不计入成功。',
+    agentTitle: (agent: string) => `${agent} 的工具调用`,
+    /** Shown under a table the server cut at its `--top` depth. */
+    topNote: (shown: string) => `按调用数降序，显示调用最多的前 ${shown} 个工具`,
+    failed: '读取工具调用失败',
+    retry: '重试',
   },
   /** The metric vocabulary: the words behind the abbreviations on hover. */
   vocabulary: {

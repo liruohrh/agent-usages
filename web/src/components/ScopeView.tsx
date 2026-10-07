@@ -12,21 +12,27 @@
  * 会话   会话排行榜（可切换含子代理，或切表格视图）
  * 用量   总 / 自身 / 子代理，按 agent 分列，token 五桶，完整指标
  * 模型与计价   模型明细与计价区间明细
+ *
+ * The 工具调用 tab is the one exception: `GET /api/tools` has no project
+ * dimension, so it is offered for the whole scope only. A project page that
+ * showed it would print numbers that were never filtered by that project.
  */
 
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import type { BucketKey, Dashboard, ProjectSummary, TimeseriesBucket } from '../types';
+import type { Filters as ApiFilters } from '../api';
 import { Overview } from './Overview';
 import { UsageTab } from './Usage';
 import { BandTable, ModelTable, PriceListTable } from './Tables';
 import { SessionLeaderboard } from './Sessions';
 import { AgentBoard, ProjectBoard } from './Ranked';
 import type { SeriesMetric } from '../charts';
+import { ToolsTab } from './Tools';
 import { useT } from '../i18n';
 
 /** The tabs, in reading order; their labels come from the catalogue. */
-const TABS = ['overview', 'projects', 'agents', 'sessions', 'usage', 'models'] as const;
+const TABS = ['overview', 'projects', 'agents', 'sessions', 'usage', 'tools', 'models'] as const;
 
 type TabKey = (typeof TABS)[number];
 
@@ -48,6 +54,8 @@ export interface ScopeProps {
   symbol: string;
   dark: boolean;
   loading: boolean;
+  /** The filters the dashboard was fetched with, for the tabs that fetch their own. */
+  filters: ApiFilters;
 }
 
 /** The tab bar plus the selected panel. */
@@ -56,7 +64,10 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const raw = params.get('view');
-  const active: TabKey = TABS.some((tab) => tab === raw) ? (raw as TabKey) : 'overview';
+  // The tools tab needs the whole scope: the endpoint behind it takes a range and
+  // agents, and has no project dimension to narrow by.
+  const available: readonly TabKey[] = props.project === null ? TABS : TABS.filter((tab) => tab !== 'tools');
+  const active: TabKey = available.some((tab) => tab === raw) ? (raw as TabKey) : 'overview';
 
   const select = (key: TabKey): void => {
     const next = new URLSearchParams(params);
@@ -102,7 +113,7 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
       </div>
 
       <div className="flex flex-wrap items-center gap-1 border-b border-line pb-px">
-        {TABS.map((tab) => (
+        {available.map((tab) => (
           <button
             key={tab}
             type="button"
@@ -138,6 +149,7 @@ export function ScopeView(props: ScopeProps): React.ReactElement {
         />
       )}
       {active === 'usage' && <UsageTab {...props} />}
+      {active === 'tools' && props.project === null && <ToolsTab filters={props.filters} />}
       {active === 'models' && (
         <div className="space-y-4">
           <PriceListTable

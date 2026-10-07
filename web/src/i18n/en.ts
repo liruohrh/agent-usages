@@ -79,6 +79,7 @@ export const en: Messages = {
       agents: 'agents',
       sessions: 'Sessions',
       usage: 'Usage',
+      tools: 'Tool calls',
       models: 'Models & pricing',
     },
     allProjects: 'All projects',
@@ -92,6 +93,40 @@ export const en: Messages = {
     projectAgents: (name: string) => `agents · ${name}`,
     projectSessions: (name: string) => `Sessions (${name})`,
     projectWorkspaces: (name: string) => `Workspaces · ${name}`,
+  },
+  /** The tool-call tab. */
+  tools: {
+    loading: 'Loading tool calls…',
+    /** A snapshot written before tool calls existed: the file has no data at all. */
+    unavailable: 'This snapshot predates tool-call data',
+    unavailableHint:
+      'Regenerate it with `agent-usages serve --write-snapshot <file>`, or drop `--snapshot` to scan live.',
+    /** The other case: the data is there, and it recorded no call. The two must not read alike. */
+    none: 'No tool call was recorded in this data',
+    noneHint: 'Only requests whose log actually recorded a tool call are counted; nothing is filled in.',
+    calls: (count: string) => `${count} call${s(count)}`,
+    coverageLabel: 'Coverage',
+    coverage: (percent: string, withCalls: string, records: string) =>
+      `${percent}% coverage (${withCalls} of ${records} records called a tool)`,
+    bytes: (value: string) => `${value} of arguments`,
+    colTool: 'Tool',
+    colCalls: 'Calls',
+    colShare: 'Share',
+    colBytes: 'Arguments',
+    outcomes: {
+      title: 'Outcome',
+      ok: 'ok',
+      failed: 'failed',
+      unknown: 'unstated',
+    },
+    /** Why 未表态 is its own column, in one sentence. */
+    outcomesNote:
+      '“unstated” means the log recorded no verdict (Codex’s function_call has no status field; Claude Code omits is_error on a successful non-Bash call). It gets its own column and is never counted as success.',
+    agentTitle: (agent: string) => `${agent} tool calls`,
+    /** Shown under a table the server cut at its `--top` depth. */
+    topNote: (shown: string) => `Sorted by calls; the top ${shown} tools are shown`,
+    failed: 'Could not load tool calls',
+    retry: 'Retry',
   },
   vocabulary: {
     requests: 'requests billed',
