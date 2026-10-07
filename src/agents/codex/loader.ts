@@ -38,6 +38,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { repoOf } from '../../core/git.ts';
+import { muteSqliteExperimentalWarning } from '../../core/warnings.ts';
 import { workspacePathsOf } from '../../core/paths.ts';
 import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRecord } from '../../core/types.ts';
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
@@ -613,6 +614,7 @@ async function readSideTurnUsage(
 ): Promise<{ threads: number; turns: number; tokens: number }> {
   const perThread = new Map<string, { turns: number; tokens: number }>();
   try {
+    muteSqliteExperimentalWarning();
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(join(home, AUXILIARY.sideTurns), { readOnly: true });
     try {
@@ -691,6 +693,7 @@ async function readThreadTitles(home: string): Promise<Map<string, string>> {
   const titles = new Map<string, string>();
   const path = join(home, AUXILIARY.threads);
   try {
+    muteSqliteExperimentalWarning();
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(path, { readOnly: true });
     try {

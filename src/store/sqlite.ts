@@ -31,7 +31,8 @@
 import { mkdir, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import { muteSqliteExperimentalWarning } from '../core/warnings.ts';
 
 import type { DatasetStats, ProjectRecord, SessionRecord, UsageDataset, UsageRecord } from '../core/types.ts';
 import { warningsFromJson, warningsToJson, type WarningJson } from './dataset-json.ts';
@@ -317,8 +318,8 @@ function schemaVersionOf(db: DatabaseSync): number {
  * @param path - the database path.
  * @returns the version the file declares.
  */
-function readOnlyVersion(path: string): number {
-  const db = new DatabaseSync(path, { readOnly: true });
+function readOnlyVersion(path: string, driver: SqliteModule): number {
+  const db = new driver.DatabaseSync(path, { readOnly: true });
   try {
     return schemaVersionOf(db);
   } finally {
@@ -424,6 +425,28 @@ async function backupAside(path: string, now: Date): Promise<string | null> {
   return target;
 }
 
+/** The driver, loaded on first use so the warning filter can go in first. */
+type SqliteModule = typeof import('node:sqlite');
+
+/** The loaded driver, once {@link loadSqlite} has run. */
+let sqliteDriver: SqliteModule | undefined;
+
+/**
+ * Load `node:sqlite`, keeping its `ExperimentalWarning` out of the tool's output.
+ *
+ * Loaded on first use rather than imported: the warning is printed when the
+ * module is first imported, so the filter has to be in place before that — see
+ * `muteSqliteExperimentalWarning`.
+ *
+ * @returns the driver.
+ */
+async function loadSqlite(): Promise<SqliteModule> {
+  if (sqliteDriver !== undefined) return sqliteDriver;
+  muteSqliteExperimentalWarning();
+  sqliteDriver = await import('node:sqlite');
+  return sqliteDriver;
+}
+
 /**
  * Open a file as a store, migrating a lower schema version and refusing a
  * higher one.
@@ -431,11 +454,11 @@ async function backupAside(path: string, now: Date): Promise<string | null> {
  * @param toolVersion - version of the tool, recorded in `meta`.
  * @returns the open connection.
  */
-function connect(path: string, toolVersion: string): DatabaseSync {
+function connect(path: string, toolVersion: string, driver: SqliteModule): DatabaseSync {
   let version = 0;
   if (path !== ':memory:' && existsSync(path)) {
     try {
-      version = readOnlyVersion(path);
+      version = readOnlyVersion(path, driver);
     } catch (error) {
       // Damage is decided here; anything else is decided by the read-write open
       // below, which is the operation the caller actually asked for.
@@ -444,7 +467,7 @@ function connect(path: string, toolVersion: string): DatabaseSync {
   }
   if (version > STORE_SCHEMA_VERSION) throw new NewerSchemaError(version);
 
-  const db = new DatabaseSync(path);
+  const db = new driver.DatabaseSync(path);
   try {
     // The key between a root and its rows is composite, so the pragma is what
     // makes a root's data one unit rather than three unrelated tables.
@@ -567,17 +590,18 @@ export class UsageStore {
    */
   static async open(options: UsageStoreOpenOptions): Promise<UsageStoreOpenResult> {
     const { path, toolVersion } = options;
+    const driver = await loadSqlite();
     await mkdir(dirname(path), { recursive: true }).catch(() => {
       // A directory that cannot be created will make `connect` fail below, which
       // produces the `unreadable` answer with a better description than this.
     });
 
     try {
-      return { store: new UsageStore(path, connect(path, toolVersion)), reset: null };
+      return { store: new UsageStore(path, connect(path, toolVersion, driver)), reset: null };
     } catch (error) {
       if (error instanceof NewerSchemaError) {
         return {
-          store: UsageStore.#ephemeral(path, toolVersion),
+          store: UsageStore.#ephemeral(path, toolVersion, driver),
           reset: {
             reason: 'newer',
             path,
@@ -590,14 +614,14 @@ export class UsageStore {
         const backup = await backupAside(path, new Date());
         try {
           return {
-            store: new UsageStore(path, connect(path, toolVersion)),
+            store: new UsageStore(path, connect(path, toolVersion, driver)),
             reset: { reason: 'corrupt', path, backup, detail: detailOf(error) },
           };
         } catch (later) {
-          return UsageStore.#fallback(path, toolVersion, detailOf(later), backup);
+          return UsageStore.#fallback(path, toolVersion, driver, detailOf(later), backup);
         }
       }
-      if (isUnopenable(error)) return UsageStore.#fallback(path, toolVersion, detailOf(error), null);
+      if (isUnopenable(error)) return UsageStore.#fallback(path, toolVersion, driver, detailOf(error), null);
       // Not a statement about the file: a bug here would be swallowed by a
       // silent fallback, so it is thrown instead.
       throw error;
@@ -610,8 +634,8 @@ export class UsageStore {
    * @param toolVersion - version of the tool.
    * @returns the store.
    */
-  static #ephemeral(path: string, toolVersion: string): UsageStore {
-    return new UsageStore(path, connect(':memory:', toolVersion));
+  static #ephemeral(path: string, toolVersion: string, driver: SqliteModule): UsageStore {
+    return new UsageStore(path, connect(':memory:', toolVersion, driver));
   }
 
   /**
@@ -626,12 +650,13 @@ export class UsageStore {
   static async #fallback(
     path: string,
     toolVersion: string,
+    driver: SqliteModule,
     detail: string,
     backup: string | null,
   ): Promise<UsageStoreOpenResult> {
     try {
       return {
-        store: UsageStore.#ephemeral(path, toolVersion),
+        store: UsageStore.#ephemeral(path, toolVersion, driver),
         reset: { reason: 'unreadable', path, backup, detail },
       };
     } catch (error) {
