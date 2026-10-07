@@ -484,7 +484,7 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
   USD，两边的金额不能直接对比——要对齐就在 CLI 上加 `--currency CNY`。
 - **没有 SSE / WebSocket**：前端靠 `POST /api/refresh` + 重新拉取，不做推送。
 - **没有做增量扫描**：每次重扫都全量读盘（本机 2.5 秒）；数据再大一个量级就该上
-  SQLite 缓存（`.agents/drafts/usage-persistence.md` 里的方向）。
+  SQLite 缓存。
 
 ---
 

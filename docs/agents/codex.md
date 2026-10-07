@@ -78,13 +78,10 @@ session_task.run:run_turn: post sampling token usage turn_id=01a0ca87-…   tota
 
 ## 已知坑：`multi_agent_version` 记为 `v2` 时子 agent 收不到任务
 
-详见 [`.agents/drafts/codex-subagent-task-not-delivered.md`](../../.agents/drafts/codex-subagent-task-not-delivered.md)（本机调查记录）：
-
-- `~/.codex/models.json` 每个模型下的 `multi_agent_version` 若为 `v2`，`spawn_agent` 的**任务正文送不进子会话**（子 agent 只看到 AGENTS.md 与环境上下文，回一句「没有收到任务」）；
-- 改成 `v1` 即可，但配置在**进程启动时读一次**，必须重启 Codex（或开新会话）才生效；
-- 实测：02:17:43 的父会话仍是 v2（子 agent 收不到任务）；02:22:25 改 models.json、02:26:56 重启后的会话读到 v1，同一测试通过，任务正文送达。
-
-这条与我们的适配器无关（是 Codex 侧行为），但会影响你观察到的子 agent 数据：v2 期间的子会话虽然落盘、也有用量，但内容是空的。
+`~/.codex/models.json` 里每个模型下的 `multi_agent_version` 若为 `v2`，`spawn_agent` 的**任务正文
+送不进子会话**（子 agent 只看到 AGENTS.md 与环境上下文，回一句「没有收到任务」）。改成 `v1` 即可，
+但配置在**进程启动时读一次**，必须重启 Codex（或开新会话）才生效。v2 期间的子会话照样落盘、也有
+用量，只是内容是空的——看到这种空子会话先查这里。
 
 ## fork / resume
 

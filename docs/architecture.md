@@ -255,8 +255,9 @@ src/
 - 存的是**数据集**，不是句子：warnings 以 `{code, params}` 保存，读回时按当时的语言渲染；金额不存
   （它由价格表决定，查询时按当时的价目表重算）。行按 `(agent, root_id, …)` 存，跨根并集仍由合并层做，
   所以直接 SQL 查询时同一会话可能多行，要 `GROUP BY agent, session_id` 归并。
-- 驱动是 Node 内置的 `node:sqlite`（v22.13 起不需要 flag），不引原生依赖、不做 ORM：
-  这些选择的理由与"什么时候该回头换"写在 `.agents/drafts/sqlite-store-20261007.md` §6。
+- 驱动是 Node 内置的 `node:sqlite`（v22.13 起不需要 flag）：不用原生依赖（`better-sqlite3` 这类
+  要编译），也不引 ORM 与迁移框架——表就是 `sessions` / `records` 两张，SQL 手写、schema 用
+  `PRAGMA user_version` 自己迁移，少一层生成代码，"库里到底存了什么"才好核对。
 - 为「agent 到底在干什么」预留：schema v2 会加 `events`（工具调用等）表，父键是 `records`。
 
 `web/` 是唯一的工作区包（Vite + React + Tailwind + ECharts），只依赖 `src/serve/types.ts`
