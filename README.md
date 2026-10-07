@@ -56,9 +56,15 @@ curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/ins
 npx --yes --package https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz agent-usages usage --range month --open
 ```
 
-**手动方式**（不想用脚本时）：
+**手动方式**（不用脚本时）：
 
 ```bash
+# 不用 shell 脚本也行：install.mjs 就是完整的安装器，下载下来交给 node 跑
+curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.mjs -o install.mjs
+node install.mjs --help     # 全部选项都在这里：--base / --version / --tarball / --prefix / --dry-run
+node install.mjs            # 装最新一版
+node install.mjs --tarball ./release/agent-usages-0.0.3.tgz --prefix /tmp/prefix
+
 # 固定版本：把 <tag> 换成 v0.0.3 这样的 tag（资产名里的版本不带 v）
 npm i -g https://github.com/liruohrh/agent-usages/releases/download/<tag>/agent-usages-<版本>.tgz
 
@@ -66,10 +72,14 @@ npm i -g https://github.com/liruohrh/agent-usages/releases/download/<tag>/agent-
 # 冷缓存实测 808 秒（13 分半）、热缓存 24 秒（2026-09-26，本机）
 npm i -g github:liruohrh/agent-usages#<tag 或 commit>
 npx github:liruohrh/agent-usages ui
+```
 
-# 只想要安装器的帮助，或者离线装一个本地文件
-node scripts/install.mjs --help
-node scripts/install.mjs --tarball ./release/agent-usages-0.0.3.tgz --prefix /tmp/prefix
+**镜像 / 内网**：设 `AGENT_USAGES_BASE_URL` 就行——两个 wrapper 用它下载 `install.mjs`，
+`install.mjs` 又拿同一个值当 `--base` 的默认值，所以一个变量同时换掉两半：
+
+```bash
+curl -fsSL https://mirror.example.com/usages/install.sh | AGENT_USAGES_BASE_URL=https://mirror.example.com/usages sh
+node install.mjs --base https://mirror.example.com/usages   # 只给 install.mjs 也可以
 ```
 
 `ui` 就是 `serve --open`。报告也可以存成文件或进管道：
@@ -81,10 +91,9 @@ agent-usages session list                             # 项目与会话清单
 agent-usages price                                    # 价格表（含峰谷与节假日规则）
 ```
 
-要求 **Node ≥ 22.18**：安装脚本只**检查**、不代装，没有或太旧会直接把几种装法列出来
+要求 **Node ≥ 22.18**：两个 wrapper 只**检查**、不代装，没有或太旧会直接把几种装法列出来
 （nodejs.org / mise / nvm / brew / winget），也可以用 `AGENT_USAGES_NODE` 指定已经装好的 node。
-另一个安装期环境变量是 `AGENT_USAGES_BASE_URL`（换下载基址：镜像、内网、本地测试，等价于
-`--base`）。每个 tag 都会自动构建一份 tarball，并按**固定名 + 版本名**挂上资产，见
+每个 tag 都会自动构建一份 tarball，并按**固定名 + 版本名**挂上资产，见
 [Releases](https://github.com/liruohrh/agent-usages/releases)。
 
 > 另外两条路：**npm registry**（包已整理好，只等能注册这个包名，见文末「发布」）与
@@ -391,8 +400,9 @@ curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/ins
 irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps1 | iex        # Windows
 ```
 
-它只做三件事：找 Node（≥ 22.18，没有就告诉你怎么装，**不代装**）→ 下载 `install.mjs` → 装最新
-发布包并用 `--version` 自检。整条路径不构建：tarball 自带 `dist/` 与 `web/dist`，实测 12 秒。
+它只做三件事：找 Node（≥ 22.18，没有就告诉你怎么装，**不代装**）→ 下载 `install.mjs` → 用它执行
+并把 argv 原样转发、退出码照传。选项全在 `install.mjs` 里，所以帮助也只有一份：
+`node install.mjs --help`。整条路径不构建：tarball 自带 `dist/` 与 `web/dist`，实测 12 秒。
 
 几种装法，按"想省多少事"排序：
 
@@ -406,10 +416,12 @@ irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps
 | npm registry（待能注册） | `npx @agent/usages ui` | 与 release 资产是同一份 `npm pack` 产物 |
 | 从源码（开发） | 见下 | Node ≥ 22.18 + pnpm；web 要先 `pnpm web:build` |
 
-**安装脚本的参数**（`install.sh` / `install.ps1` 只找 Node + 下载，其余都转给 `install.mjs`）：
-`--version <v|latest>`、`--tarball <路径|URL>`（离线/测试）、`--prefix <dir>`、`--dry-run`、
-`--help`；环境变量 `AGENT_USAGES_NODE`（用哪个 node）与 `AGENT_USAGES_BASE_URL`（换基址，等价于
-`--base`）。**一份源码，两种运行形态**：checkout 里 `src/*.ts` 就是程序（Node 原生类型擦除，无构建步骤）；
+**两个 wrapper 不解析任何参数**：`install.sh` / `install.ps1` 只找 Node、从
+`AGENT_USAGES_BASE_URL`（默认 latest 发布页）下载 `install.mjs`，然后用它执行 `"$@"` / `$args`，
+退出码原样返回。选项全在 `install.mjs`：`--base`、`--version <v|latest>`、
+`--tarball <路径|URL>`（离线/测试）、`--prefix <dir>`、`--dry-run`、`--help`（`-h` 同义）。
+环境变量 `AGENT_USAGES_NODE`（用哪个 node）与 `AGENT_USAGES_BASE_URL`（镜像/内网）。
+**一份源码，两种运行形态**：checkout 里 `src/*.ts` 就是程序（Node 原生类型擦除，无构建步骤）；
 装进 `node_modules` 的那份必须是编译好的 JS——Node 明确拒绝在 `node_modules` 里擦类型，
 实测会抛 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`。`bin/agent-usages.js` 先找
 `dist/cli/index.js`、找不到才回落到源码，两种形态共用一个入口。

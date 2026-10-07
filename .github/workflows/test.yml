@@ -37,10 +37,10 @@ jobs:
           TZ: Asia/Shanghai
 
   # The install path a user takes: fixed-name release assets (`install.sh` / `install.ps1`
-  # / `install.mjs` / `agent-usages.tgz`), a wrapper that only finds Node and downloads,
-  # and `install.mjs` doing the install. This runs those exact three files against a
-  # local HTTP base, so a broken one-liner or a wrapper that drops an argument fails
-  # here instead of in the README.
+  # / `install.mjs` / `agent-usages.tgz`), wrappers that do nothing but find Node, download
+  # and forward argv untouched, and `install.mjs` doing the install. This runs those files
+  # against a local HTTP mirror (`AGENT_USAGES_BASE_URL`), so a broken one-liner or a
+  # wrapper that reshapes an argument fails here instead of in the README.
   install:
     runs-on: ubuntu-latest
     steps:
@@ -85,7 +85,10 @@ jobs:
           if node scripts/install.mjs --tarball "$RUNNER_TEMP/does-not-exist.tgz" 2>/dev/null; then
             echo 'a tarball that does not exist must not install'; exit 1
           fi
-      - name: 一行脚本端到端（本地 HTTP 基址，sh 与 pwsh 两条 wrapper）
+      - name: 一行脚本端到端（AGENT_USAGES_BASE_URL 指向本地镜像，sh 与 pwsh 两条 wrapper）
+        env:
+          # 一个环境变量同时管两半：wrapper 用它下载 install.mjs，install.mjs 用它下载发布包。
+          AGENT_USAGES_BASE_URL: http://127.0.0.1:8931
         run: |
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
@@ -96,13 +99,26 @@ jobs:
           server=$!
           trap 'kill $server 2>/dev/null || true' EXIT
           for _ in $(seq 30); do
-            curl -fsS http://127.0.0.1:8931/install.mjs -o /dev/null && break
+            curl -fsS "$AGENT_USAGES_BASE_URL/install.mjs" -o /dev/null && break
             sleep 0.5
           done
-          sh scripts/install.sh --base http://127.0.0.1:8931 --prefix "$RUNNER_TEMP/sh-prefix"
+          # sh wrapper：argv 原样转发，--prefix 一路走到装出来的路径
+          sh scripts/install.sh --prefix "$RUNNER_TEMP/sh-prefix"
           test "$("$RUNNER_TEMP/sh-prefix/bin/agent-usages" --version)" = "$version"
           # 文档里的 Windows 一行是 `irm … | iex`（iex 没法传参），这里用 -File 走同一条代码路径。
-          pwsh -NoProfile -File scripts/install.ps1 -Base http://127.0.0.1:8931 --prefix "$RUNNER_TEMP/ps-prefix"
+          pwsh -NoProfile -File scripts/install.ps1 --prefix "$RUNNER_TEMP/ps-prefix"
           test "$("$RUNNER_TEMP/ps-prefix/bin/agent-usages" --version)" = "$version"
+          # 退出码原样返回：坏 tarball 必须非 0。pwsh 那条尤其要守着——版本探测曾经因为
+          # $LASTEXITCODE 为空把 node 22 判成"不可用"（2026-10-07 容器实测）。
+          if pwsh -NoProfile -File scripts/install.ps1 --tarball "$RUNNER_TEMP/does-not-exist.tgz" > /dev/null 2>&1; then
+            echo 'the pwsh wrapper must return install.mjs non-zero exit code'; exit 1
+          fi
+          if sh scripts/install.sh --tarball "$RUNNER_TEMP/does-not-exist.tgz" > /dev/null 2>&1; then
+            echo 'the sh wrapper must return install.mjs non-zero exit code'; exit 1
+          fi
+          # 不用 wrapper 也行：直接下载 install.mjs 交给 node（文档里的手动方式）
+          curl -fsSL "$AGENT_USAGES_BASE_URL/install.mjs" -o "$RUNNER_TEMP/install.mjs"
+          node "$RUNNER_TEMP/install.mjs" --tarball release/agent-usages.tgz --prefix "$RUNNER_TEMP/direct-prefix"
+          test "$("$RUNNER_TEMP/direct-prefix/bin/agent-usages" --version)" = "$version"
           # 参数确实透传到了 install.mjs：--dry-run 应该是成功且不装
-          sh scripts/install.sh --base http://127.0.0.1:8931 --dry-run --tarball release/agent-usages.tgz
+          sh scripts/install.sh --dry-run --tarball release/agent-usages.tgz

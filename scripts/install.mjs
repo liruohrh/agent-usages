@@ -51,7 +51,8 @@ const HELP = `agent-usages 安装器（Node ≥ ${MIN_NODE}，只用 node: 内�
   -h, --help             显示这段帮助
 
 环境变量：
-  AGENT_USAGES_BASE_URL  同 --base（命令行优先）
+  AGENT_USAGES_BASE_URL  同 --base（命令行优先）；install.sh / install.ps1 也用它
+                         决定从哪儿下载这个 install.mjs（镜像、内网、本地测试）
 
 例：
   node install.mjs                                     # 装最新一版

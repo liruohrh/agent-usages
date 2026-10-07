@@ -124,8 +124,11 @@ agent-usages usage --range month --open        # 不起服务：生成 HTML 报�
 npx --yes --package https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz agent-usages ui
 ```
 
-安装器的选项（`--version` / `--tarball` / `--prefix` / `--dry-run`）与环境变量
-（`AGENT_USAGES_NODE` / `AGENT_USAGES_BASE_URL`）见 [README 的安装与发布](../README.md#安装与发布)。
+两个 wrapper 不解析任何参数：只找 Node、从 `AGENT_USAGES_BASE_URL`（默认 latest 发布页）下载
+`install.mjs`，再原样转发 argv 并返回它的退出码；选项（`--base` / `--version` / `--tarball` /
+`--prefix` / `--dry-run` / `--help`）与环境变量（`AGENT_USAGES_NODE` / `AGENT_USAGES_BASE_URL`）
+都在安装器里，也可以直接下 `install.mjs` 用 `node` 跑（`node install.mjs --help`）。见
+[README 的安装与发布](../README.md#安装与发布)。
 
 **从 GitHub 直装**（想跟 `master`、或该版本没有资产）则会在**你的机器上**构建：npm 跑
 `prepare`（`scripts/prepare.mjs`）编译 CLI 到 `dist/`（`node_modules` 里 Node 拒绝擦 TypeScript

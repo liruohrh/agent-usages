@@ -1,52 +1,31 @@
 #!/bin/sh
-# One-line install: find a Node, fetch `install.mjs`, hand over to it.
+# One-line install: find a Node, fetch `install.mjs`, run it with your arguments.
 #
-# This is the part that has to work *before* anything is installed, so it stays
-# POSIX sh with no dependency beyond curl (wget as a fallback) and no bashisms:
-# the documented form pipes this file into a shell
+# This is the part that has to work *before* anything is installed, so it stays POSIX
+# sh with no dependency beyond curl (wget as a fallback) and no bashisms: the
+# documented form pipes this file into a shell
 #
 #   curl -fsSL …/releases/latest/download/install.sh | sh
 #
-# where `$0` is just "sh" and stdin is the script itself — nothing may be read
-# from stdin, and the file cannot be located on disk. Everything past "is there a
-# Node?" lives in install.mjs, which can parse JSON and gunzip without this file
-# needing jq or tar.
+# where `$0` is just "sh" and stdin is the script itself — nothing may be read from
+# stdin, and the file cannot be located on disk.
 #
-# The URL below is a **fixed asset name** on `releases/latest/download`, re-uploaded
-# by every release, so publishing a version never edits this file or the docs that
-# call it.
+# Exactly three steps, and no argument handling at all: find Node (≥ 22.18, and say how
+# to get one instead of installing it), download install.mjs, and run it with **your
+# arguments passed through untouched** — not even `--help` is intercepted, because
+# every option belongs to install.mjs and `"$@"` is enough to hand them over. Which
+# also means this file is optional:
+#
+#   curl -fsSL …/releases/latest/download/install.mjs -o install.mjs
+#   node install.mjs --help
+#
+# `AGENT_USAGES_BASE_URL` is the only configuration read here, and it is also
+# install.mjs's own default for the release it fetches — so one variable moves both
+# halves to a mirror (or to a local test server).
 set -eu
 
 BASE=${AGENT_USAGES_BASE_URL:-https://github.com/liruohrh/agent-usages/releases/latest/download}
 MIN_NODE=22.18
-
-usage() {
-  cat <<'EOF'
-agent-usages 安装器（POSIX sh）
-
-用法：
-  curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh
-
-  # 装指定版本（管道里要给 sh 传参，得用 sh -s --）
-  curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh -s -- --version 0.0.3
-
-  # 已经下载了脚本，或者想装本地 tarball
-  sh install.sh [install.mjs 的选项…]
-
-这个脚本只做两件事：找一个 Node ≥ 22.18（找不到或太旧就告诉你怎么装，不代装）、
-下载 install.mjs，然后把它剩下的活交给 install.mjs。
-
-  --base <url>   安装器与发布包的基址（默认 releases/latest/download）
-  -h, --help     显示这段帮助
-
-其余选项原样转给 install.mjs（--version / --tarball / --prefix / --dry-run），
-`-s -- --help` 可看它的完整帮助。
-
-环境变量：
-  AGENT_USAGES_NODE       用哪个 node（默认 PATH 里的 node）
-  AGENT_USAGES_BASE_URL   同 --base，命令行优先
-EOF
-}
 
 node_error() {
   printf '%s\n' \
@@ -60,35 +39,9 @@ node_error() {
   exit 1
 }
 
-# 把 --base 摘出来，其余参数原样留在位置参数里。POSIX sh 没有数组，所以用
-# 「搬到最后」的写法：每轮处理一个参数，不要的丢掉，要的接到队尾。
-remaining=$#
-while [ "$remaining" -gt 0 ]; do
-  argument=$1
-  shift
-  remaining=$((remaining - 1))
-  case $argument in
-    --base)
-      if [ "$remaining" -eq 0 ]; then
-        printf '%s\n' 'install.sh: --base 缺少值' >&2
-        exit 2
-      fi
-      BASE=$1
-      shift
-      remaining=$((remaining - 1))
-      ;;
-    --base=*) BASE=${argument#--base=} ;;
-    -h | --help)
-      usage
-      exit 0
-      ;;
-    *) set -- "$@" "$argument" ;;
-  esac
-done
-
 BASE=${BASE%/}
 if [ -z "$BASE" ]; then
-  printf '%s\n' 'install.sh: --base 不能为空' >&2
+  printf '%s\n' 'install.sh: AGENT_USAGES_BASE_URL 不能为空' >&2
   exit 2
 fi
 
@@ -135,13 +88,13 @@ installer=$tmp/install.mjs
 if command -v curl >/dev/null 2>&1; then
   curl -fsSL "$url" -o "$installer" || {
     printf '%s\n' "install.sh: 下载失败：$url" \
-      "  （网络不通，或基址不对？可以用 --base <url> 或 AGENT_USAGES_BASE_URL 换一个）" >&2
+      "  （网络不通，或基址不对？AGENT_USAGES_BASE_URL 可以指向镜像或本地目录）" >&2
     exit 1
   }
 elif command -v wget >/dev/null 2>&1; then
   wget -q -O "$installer" "$url" || {
     printf '%s\n' "install.sh: 下载失败：$url" \
-      "  （网络不通，或基址不对？可以用 --base <url> 或 AGENT_USAGES_BASE_URL 换一个）" >&2
+      "  （网络不通，或基址不对？AGENT_USAGES_BASE_URL 可以指向镜像或本地目录）" >&2
     exit 1
   }
 else
@@ -156,9 +109,11 @@ fi
 
 printf '%s\n' "使用 $NODE（Node $NODE_VERSION），基址 $BASE"
 
-# 这里**不用 exec**：exec 会替换掉这个 shell，EXIT trap 不再执行，临时目录每次成功
-# 安装都会留下。前台跑 + 转发退出码对外完全一样（同一个退出码、同一个前台进程、
-# Ctrl-C 同样直接送到 node），而且能清理。
+# `"$@"` is every argument this script received, untouched. Not `exec`: that would
+# replace this shell, skip the EXIT trap and leave the temp dir behind on every
+# successful install. Running node in the foreground and forwarding the status is
+# externally the same (same exit code, same foreground process, Ctrl-C still reaches
+# node) and still cleans up.
 status=0
-"$NODE" "$installer" --base "$BASE" "$@" || status=$?
+"$NODE" "$installer" "$@" || status=$?
 exit "$status"

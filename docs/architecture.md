@@ -154,11 +154,14 @@ pnpm web:e2e              # 浏览器端到端（Playwright：切项目/切会�
 把**同一份 tarball** 上传两次：固定名 `agent-usages.tgz` 与版本名 `agent-usages-<版本>.tgz`
 （`cmp` 断言是字节副本），外加三个安装脚本 `install.sh` / `install.ps1` / `install.mjs`。
 固定名让文档里的 `releases/latest/download/install.sh` 永远有效——**发版不必改文档**；版本名供
-钉住某一版。两个 wrapper 只做两件事：找 Node（≥ 22.18，只检查不代装）与下载 `install.mjs`；
-下载、校验（gzip + tarball 里的 `package.json`）、`npm install -g`、装完用 `--version` 对账都在
-`install.mjs` 里，只用 Node 内置模块（`fetch`、`node:zlib`、自己写的 tar 读取器，没有依赖）。
-`test.yml` 的 `install` job 拿本地 HTTP 基址当发布页，把「一行安装」整条路径（sh 与 pwsh 两条
-wrapper、离线 `--tarball`、覆盖安装）跑一遍。
+钉住某一版。两个 wrapper 只做三件事、**不解析任何参数**：找 Node（≥ 22.18，只检查不代装）、从
+`AGENT_USAGES_BASE_URL`（默认 latest 发布页）下载 `install.mjs`、用它执行并把 argv 与退出码原样
+转交。下载、校验（gzip + tarball 里的 `package.json`）、`npm install -g`、装完用 `--version`
+对账都在 `install.mjs` 里（`--base/--version/--tarball/--prefix/--dry-run/--help` 全是它的选项，
+`AGENT_USAGES_BASE_URL` 也是它的 `--base` 默认值），只用 Node 内置模块（`fetch`、`node:zlib`、
+自己写的 tar 读取器，没有依赖），所以去掉 wrapper 直接 `node install.mjs` 同样能装。
+`test.yml` 的 `install` job 拿本地 HTTP 镜像当发布页，把「一行安装」整条路径（sh 与 pwsh 两条
+wrapper 的原样透传、直接跑 install.mjs、离线 `--tarball`、覆盖安装）跑一遍。
 
 ## 目录
 
