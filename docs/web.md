@@ -91,8 +91,8 @@
 API 返回 JSON，前端是 Vite 构建的单页应用。
 
 - 不写任何 agent 的数据目录：写操作只有三个，都在本工具自己的目录里——显式 `--write-snapshot` 写的快照、
-  页面上切换语言时写的 `config.json`（§6），以及扫描缓存 `scan-cache.json`（默认
-  `$XDG_CACHE_HOME/agent-usages/`，`--no-cache` 关闭、`--cache-dir` 换位置）。
+  页面上切换语言时写的 `config.json`（§6），以及用量数据库 `usage.db`（默认
+  `$XDG_DATA_HOME/agent-usages/`，`--no-store` 关闭、`--db` 换位置）。
 - 默认只绑 `127.0.0.1`，不加载任何 CDN 资源。
 - 数据来自 CLI 已经信任的同一批模块（适配器、`src/core/merge.ts` 合并层、`src/report/index.ts`
   的 `runQuery`），所以 Web 上的数字与 `agent-usages usage` 是同一套口径；`自身 + 子代理 = 总`
@@ -159,7 +159,7 @@ pnpm serve                               # = node src/serve/main.ts，不经过 
 | `--refresh <秒>` | 关 | 每隔多少秒重扫一次；一次只跑一个扫描，落在扫描中的 tick 会被跳过（周期比扫描还短也不会堆积） |
 | `--snapshot <json>` | 关 | 读离线快照，完全不碰 agent 数据（§5） |
 | `--no-update` | 关（允许懒更新） | 本次不联网刷新价格表与汇率；没写就是「过期才刷」 |
-| `--no-cache` / `--cache-dir <目录>` | 用缓存 | 扫描缓存：没变的根不重解析（数字与首次一致），已消失的根保留历史并告警；`--no-cache` 只看现存来源，`--cache-dir` 换位置（见[架构](architecture.md#扫描缓存srcstore)） |
+| `--no-store` / `--db <路径>` | 用库 | 用量数据库（`usage.db`）：没变的根不重解析（数字与首次一致），已消失的目录与文件保留历史并告警；`--no-store` 只看现存来源，`--db` 换位置（见[架构](architecture.md#用量数据库srcstore)） |
 | `--dev` | 关 | 把非 `/api` 请求代理到 Vite（默认 `http://127.0.0.1:5173`） |
 | `--dev-target <url>` | `http://127.0.0.1:5173` | `--dev` 的代理目标 |
 | `--write-snapshot <文件>` | — | 扫一次、写出整份仪表盘 JSON、退出 |

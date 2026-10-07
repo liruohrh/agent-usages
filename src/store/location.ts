@@ -1,29 +1,32 @@
 /**
- * Where the scan cache lives when nobody names a directory.
+ * Where the usage store lives when nobody names a path.
  *
- * The cache is derived data — losing it costs a rescan and nothing else — so it
- * belongs in the cache directory, not in `~/.config` next to the settings a user
- * would miss. `XDG_CACHE_HOME` is honoured because that is what the variable is
- * for; a machine without a home directory gets a relative directory, which the
- * failure path of `save()` reports like any other unwritable path.
+ * The store is the user's data — records they may keep for years, back up, or
+ * read with `sqlite3` — so it belongs in the data directory, not next to derived
+ * caches (`XDG_CACHE_HOME`) or settings (`XDG_CONFIG_HOME`). Losing it costs a
+ * full rescan, but it is not disposable either: it is the only place the history
+ * of directories that no longer exist is kept.
  */
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-/** The directory name this tool owns inside the cache root. */
-export const SCAN_CACHE_DIR_NAME = 'agent-usages';
+/** The directory this tool owns inside the data root. */
+export const STORE_DIR_NAME = 'agent-usages';
+
+/** The database file inside it. */
+export const STORE_FILE_NAME = 'usage.db';
 
 /**
- * The directory holding the scan cache.
- * @param env - environment to read `XDG_CACHE_HOME` / `HOME` from.
- * @returns an absolute directory, or a bare name when no home can be found.
+ * The path of the usage store.
+ * @param env - environment to read `XDG_DATA_HOME` / `HOME` from.
+ * @returns an absolute path, or a bare file name when no home can be found.
  */
-export function defaultScanCacheDir(env: NodeJS.ProcessEnv = process.env): string {
-  const base = env['XDG_CACHE_HOME'];
-  if (base !== undefined && base.trim().length > 0) return join(base.trim(), SCAN_CACHE_DIR_NAME);
+export function defaultStorePath(env: NodeJS.ProcessEnv = process.env): string {
+  const base = env['XDG_DATA_HOME'];
   const home = (env['HOME'] ?? env['USERPROFILE'] ?? '').trim();
-  if (home.length > 0) return join(home, '.cache', SCAN_CACHE_DIR_NAME);
-  const fallback = homedir();
-  return fallback.length > 0 ? join(fallback, '.cache', SCAN_CACHE_DIR_NAME) : SCAN_CACHE_DIR_NAME;
+  const root = home.length > 0 ? home : homedir();
+  if (base !== undefined && base.trim().length > 0) return join(base.trim(), STORE_DIR_NAME, STORE_FILE_NAME);
+  if (root.length === 0) return STORE_FILE_NAME;
+  return join(root, '.local', 'share', STORE_DIR_NAME, STORE_FILE_NAME);
 }

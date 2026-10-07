@@ -58,14 +58,13 @@ import {
   loadPlannedAgents,
   planAgentSources,
   resolveSelectorIds,
-  saveScanCache,
-  scanCacheResetWarning,
+  storeResetWarning,
 } from '../agents/sources.ts';
 import { addCostTotals, costOf, zeroCostTotals, type CostSubtotal, type OriginalPricing } from '../report/accounting.ts';
 import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
 import { TOOL_VERSION } from '../core/version.ts';
-import { ScanCache, defaultScanCacheDir } from '../store/index.ts';
+import { UsageStore, defaultStorePath } from '../store/index.ts';
 import type { CostTotals, TokenBuckets, UsageDataset, UsageRecord } from '../core/types.ts';
 import { renderDiagnostic, type Warning } from '../i18n/errors.ts';
 import { language, t } from '../i18n/index.ts';
@@ -161,10 +160,10 @@ export interface ScanOptions {
   snapshot?: string | undefined;
   /** Skip the lazy price/rate refresh; the server always does. */
   noUpdate?: boolean | undefined;
-  /** `--no-cache`: parse every file again and write no scan cache. */
-  noCache?: boolean | undefined;
-  /** `--cache-dir <dir>`: where the scan cache lives. */
-  cacheDir?: string | undefined;
+  /** `--no-store`: parse every file again and write nothing to the store. */
+  noStore?: boolean | undefined;
+  /** `--db <path>`: where the scan database lives. */
+  db?: string | undefined;
   /** Environment to resolve default roots from. */
   env?: NodeJS.ProcessEnv | undefined;
   /** Injectable clock, for tests. */
@@ -867,14 +866,14 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     const loaded: UsageDataset[] = [];
     const sources: { id: string; label: string; source: string }[] = [];
     const warnings: DashboardWarning[] = [...config.warnings.map(flattenWarning)];
-    // The scan cache spans runs: an unchanged root answers from it, a root that
-    // has disappeared keeps its history and says so. `--no-cache` reads the
-    // machine as it is now.
+    // The store spans runs: an unchanged root answers from it, a root that has
+    // disappeared keeps its history and says so. `--no-store` reads the machine
+    // as it is now.
     const opened =
-      options.noCache === true
+      options.noStore === true
         ? undefined
-        : await ScanCache.open({ dir: options.cacheDir ?? defaultScanCacheDir(env), toolVersion: TOOL_VERSION });
-    if (opened?.reset != null) warnings.push(flattenWarning(scanCacheResetWarning(opened.reset)));
+        : await UsageStore.open({ path: options.db ?? defaultStorePath(env), toolVersion: TOOL_VERSION });
+    if (opened?.reset != null) warnings.push(flattenWarning(storeResetWarning(opened.reset)));
     // The dashboard reads every agent it ships, so a missing one is a warning on
     // the page rather than a silent absence: `detect: false` plans them all.
     const plan = await planAgentSources({
@@ -900,7 +899,7 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
         const read = await loadPlannedAgents([entry], {
           env,
           enrich: true,
-          ...(opened === undefined ? {} : { cache: opened.cache }),
+          ...(opened === undefined ? {} : { store: opened.store }),
         });
         for (const item of read.warnings) warnings.push(flattenWarning(item));
         for (const dataset of read.datasets) {
@@ -934,10 +933,7 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     // 实时模式只有这一条路：合并层把 N 份 dataset 合成一份（一份都没有时给空数据集）。
     // 它同时也是 CLI 用的那个函数，所以两个入口对"同一份数据属于哪个项目"只有一个答案。
     const dataset = await mergeDatasets(loaded, { projects: config.projects ?? [] });
-    if (opened !== undefined) {
-      const writeWarning = await saveScanCache(opened.cache);
-      if (writeWarning !== undefined) warnings.push(flattenWarning(writeWarning));
-    }
+    opened?.store.close();
     scan = { dataset, sources };
     scanWarnings = warnings;
     cache.clear();

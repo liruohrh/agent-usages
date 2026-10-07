@@ -20,17 +20,15 @@
  * the merge layer, so the tokens are still counted exactly once.
  */
 
-import type { UsageDataset } from '../core/types.ts';
+import type { SessionRecord, UsageDataset } from '../core/types.ts';
 import { UserError, type Warning } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
 import {
   fingerprintOf,
   fingerprintsEqual,
-  fromJson,
   rootIdOf,
-  toJson,
-  type ScanCache,
-  type ScanCacheReset,
+  type UsageStore,
+  type UsageStoreReset,
 } from '../store/index.ts';
 import type { AgentAdapter } from './contract.ts';
 import { splitRoots, uniqueRoots } from './roots.ts';
@@ -43,35 +41,45 @@ function localDateText(instant: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/** The warning a source the cache remembers, but this run cannot find, deserves. */
+/** The warning a source the store remembers, but this run cannot find, deserves. */
 function vanishedWarning(adapter: AgentAdapter, path: string, lastSeen: number): Warning {
-  return new UserError('scanCacheSourceVanished', {
+  return new UserError('storeSourceVanished', {
     agent: adapter.label,
     path,
     lastSeen: localDateText(lastSeen),
   });
 }
 
+/** The warning for the files inside a root that this run no longer sees. */
+function vanishedFilesWarning(adapter: AgentAdapter, root: string, files: readonly string[]): Warning {
+  return new UserError('storeFilesVanished', {
+    agent: adapter.label,
+    root,
+    count: String(files.length),
+    files: files.slice(0, 5).join(t().period.listJoin),
+  });
+}
+
 /**
- * Save a scan cache, turning a failure into a warning.
+ * Mark the sessions a store kept from files that are gone.
  *
- * A cache that cannot be written costs the next run its speed, not this run its
- * numbers — the directory may be read-only, or the home directory may not exist.
- * So the failure comes back as something to report instead of something to throw.
+ * The rows are already in the dataset and already counted; the flag is what lets
+ * a reader tell "this is here because the tool remembers it" from "this is here
+ * because the file is".
  *
- * @param cache - the cache to write.
- * @returns the warning to add to the report, or `undefined` when it was saved.
+ * @param dataset - the dataset read back from the store.
+ * @param ids - ids of the sessions whose own file has disappeared.
+ * @returns the same dataset, with those sessions flagged.
  */
-export async function saveScanCache(cache: ScanCache): Promise<Warning | undefined> {
-  // Nothing was learned, so nothing is written: a warm run must not rewrite a
-  // multi-megabyte file just to say the same thing again.
-  if (!cache.dirty) return undefined;
-  try {
-    await cache.save();
-    return undefined;
-  } catch (error) {
-    return new UserError('scanCacheUnwritable', { path: cache.path, reason: (error as Error).message });
-  }
+function markStaleSessions(dataset: UsageDataset, ids: readonly string[]): UsageDataset {
+  if (ids.length === 0) return dataset;
+  const stale = new Set(ids);
+  const flag = (session: SessionRecord): void => {
+    if (stale.has(session.id)) session.stale = true;
+  };
+  for (const session of dataset.sessions) flag(session);
+  for (const project of dataset.projects) for (const session of project.sessions) flag(session);
+  return dataset;
 }
 
 /**
@@ -202,13 +210,13 @@ export async function planAgentSources(options: {
    */
   detect?: boolean | undefined;
   /**
-   * The scan cache, when the run has one.
+   * The usage store, when the run has one.
    *
    * An agent whose directories are all gone would otherwise drop out of an
-   * "everything" plan, and its history with it — the cache remembers it, so it is
+   * "everything" plan, and its history with it — the store remembers it, so it is
    * planned like any other and comes back marked stale.
    */
-  cache?: ScanCache | undefined;
+  store?: UsageStore | undefined;
 }): Promise<AgentSourcePlan> {
   const env = options.env ?? process.env;
   const wanted = requestedAgents(options.agent);
@@ -243,18 +251,20 @@ export async function planAgentSources(options: {
 
   if (everything) {
     const detected = options.detect === false ? [...AGENT_ADAPTERS] : await detectAgents({ dirs, env });
-    // An agent whose *current* roots the cache still remembers is planned even
+    // An agent whose *current* roots the store still remembers is planned even
     // when nothing is found there now: those roots will come back stale, with a
     // warning, instead of usage vanishing from a total that used to include it.
     // An agent remembered only under directories this run does not name is simply
     // not selected — a narrower plan is a choice, not a disappearance.
     const remembered =
-      options.cache === undefined
+      options.store === undefined
         ? []
         : AGENT_ADAPTERS.filter(
             (adapter) =>
               !detected.includes(adapter) &&
-              rootsFor(adapter, dirs, env).some((root) => options.cache?.get(adapter.id, rootIdOf(root)) !== undefined),
+              rootsFor(adapter, dirs, env).some(
+                (root) => options.store?.fingerprintOf(adapter.id, rootIdOf(root)) !== undefined,
+              ),
           );
     const planned: PlannedAgent[] = [...detected, ...remembered].map((adapter) => ({
       adapter,
@@ -286,25 +296,24 @@ export interface AgentLoadResult {
 }
 
 /**
- * The warning a discarded cache file deserves.
+ * The warning a store that had to start over deserves.
  *
- * The store reports *why* a file was not trusted as a bare reason; the sentence
- * belongs to the catalogue, so the translation happens here, once, for both the
- * CLI and the server.
+ * The store reports *why* it could not use the file it was handed as a bare
+ * reason; the sentence belongs to the catalogue, so it is built here, once, for
+ * both the CLI and the server.
  *
- * @param reset - the reset the store reported.
+ * @param reset - what {@link UsageStore.open} reported.
  * @returns the warning to add to the run's report.
  */
-export function scanCacheResetWarning(reset: ScanCacheReset): Warning {
-  const reason =
-    reset.reason === 'corrupt'
-      ? t().errors.scanCacheReasonCorrupt
-      : reset.reason === 'format'
-        ? t().errors.scanCacheReasonFormat
-        : reset.reason === 'tool'
-          ? t().errors.scanCacheReasonTool
-          : t().errors.scanCacheReasonUnreadable;
-  return new UserError('scanCacheRebuilt', { path: reset.path, reason });
+export function storeResetWarning(reset: UsageStoreReset): Warning {
+  if (reset.reason === 'corrupt') {
+    return new UserError('storeRebuilt', {
+      path: reset.path,
+      backup: reset.backup ?? t().errors.storeNoBackup,
+    });
+  }
+  if (reset.reason === 'newer') return new UserError('storeNewer', { path: reset.path });
+  return new UserError('storeUnreadable', { path: reset.path, reason: reset.detail });
 }
 
 /** What {@link loadPlannedAgents} may be told. */
@@ -314,14 +323,14 @@ export interface AgentLoadOptions {
   /** Whether to read the expensive extras (titles, repositories). */
   enrich?: boolean | undefined;
   /**
-   * An opened scan cache, or `undefined` to parse every file again.
+   * An opened usage store, or `undefined` to parse every file again.
    *
-   * With a cache, a root whose files still hold what they held last time is
-   * answered from the cache (same numbers, no parsing), and a root the cache
-   * knows but this run no longer sees comes back marked `stale` — history is not
-   * silently dropped when a directory is removed or moved.
+   * With a store, a root whose files still hold what they held last time is
+   * answered from it (same numbers, no parsing), and a root the store knows but
+   * this run no longer sees comes back marked `stale` — history is not silently
+   * dropped when a directory or a log is removed.
    */
-  cache?: ScanCache | undefined;
+  store?: UsageStore | undefined;
   /** Clock for `lastSeen`; injectable so a test can pin it. */
   now?: (() => number) | undefined;
 }
@@ -339,12 +348,12 @@ export interface AgentLoadOptions {
  * more so its own diagnostic ("no Codex sessions under /nope") is what the user
  * sees, rather than a generic "nothing found".
  *
- * A cache hit is decided by the *fingerprint* of the files the adapter says it
+ * A store hit is decided by the *fingerprint* of the files the adapter says it
  * reads, never by a clock: the same files with the same sizes, mtimes and heads
  * answer the same numbers, and anything else re-reads the root.
  *
  * @param planned - agents and their roots, from {@link planAgentSources}.
- * @param options - environment, extras, and the optional scan cache.
+ * @param options - environment, extras, and the optional usage store.
  * @returns every dataset read, and one warning per skipped directory.
  * @throws whatever an adapter throws when it has no usable root at all.
  */
@@ -354,7 +363,7 @@ export async function loadPlannedAgents(
 ): Promise<AgentLoadResult> {
   const env = options.env ?? process.env;
   const enrich = options.enrich ?? true;
-  const cache = options.cache;
+  const store = options.store;
   const now = options.now ?? Date.now;
   const datasets: UsageDataset[] = [];
   const warnings: Warning[] = [];
@@ -368,23 +377,36 @@ export async function loadPlannedAgents(
     for (const root of roots) {
       const rootId = rootIdOf(root);
       try {
-        const files = cache === undefined ? undefined : await adapter.listSources(root);
+        const files = store === undefined ? undefined : await adapter.listSources(root);
         const fingerprint = files === undefined ? undefined : await fingerprintOf(files);
-        const cached = cache?.get(adapter.id, rootId);
-        if (cached !== undefined && fingerprint !== undefined && fingerprintsEqual(cached.fingerprint, fingerprint)) {
-          // The files still hold what they held: the numbers are the cached ones,
+        const stored = store?.fingerprintOf(adapter.id, rootId);
+        if (stored !== undefined && fingerprint !== undefined && fingerprintsEqual(stored, fingerprint)) {
+          // The files still hold what they held: the numbers are the stored ones,
           // and nothing is parsed again.
-          datasets.push(fromJson(cached.dataset));
-          loaded += 1;
-          continue;
+          const read = store?.readRoot(adapter.id, rootId);
+          if (read !== undefined) {
+            datasets.push(markStaleSessions(read.dataset, read.staleSessionIds));
+            if (read.staleSessionIds.length > 0) {
+              warnings.push(
+                vanishedFilesWarning(
+                  adapter,
+                  read.root,
+                  stored.filter((entry) => !fingerprint.some((file) => file.path === entry.path)).map((entry) => entry.path),
+                ),
+              );
+            }
+            loaded += 1;
+            continue;
+          }
         }
         if (!(await adapter.hasData(root))) {
-          if (cached !== undefined) {
+          const read = store?.readRoot(adapter.id, rootId);
+          if (read !== undefined) {
             // Still named, but holding nothing now: the directory may be gone, or
-            // every log in it. Either way the cache has the history, so it comes
+            // every log in it. Either way the store has the history, so it comes
             // back marked stale and named in a warning — never silently dropped.
-            datasets.push({ ...fromJson(cached.dataset), stale: true });
-            warnings.push(vanishedWarning(adapter, cached.root, cached.lastSeen));
+            datasets.push({ ...markStaleSessions(read.dataset, read.staleSessionIds), stale: true });
+            warnings.push(vanishedWarning(adapter, read.root, read.lastSeen));
             loaded += 1;
             continue;
           }
@@ -392,15 +414,42 @@ export async function loadPlannedAgents(
           continue;
         }
         const dataset = await adapter.load({ home: root, env, enrich });
-        datasets.push(dataset);
         loaded += 1;
-        if (cache !== undefined && fingerprint !== undefined) {
-          cache.set(adapter.id, rootId, {
-            root,
-            fingerprint,
-            dataset: toJson(dataset),
-            lastSeen: now(),
-          });
+        if (store === undefined || fingerprint === undefined) {
+          datasets.push(dataset);
+          continue;
+        }
+        try {
+          store.writeRoot({ agent: adapter.id, rootId, root, now: now(), dataset, fingerprint });
+        } catch (error) {
+          // A store that cannot be written costs the next run its speed, not
+          // this run its numbers.
+          warnings.push(new UserError('storeWriteFailed', { path: store.path, reason: (error as Error).message }));
+          datasets.push(dataset);
+          continue;
+        }
+        // Read back what the root now holds: a file that disappeared while others
+        // stayed keeps its sessions in the store, and this run has to report them
+        // too — otherwise the history would only come back on the *next* run, and
+        // the first one would look like usage vanished.
+        const after = store.readRoot(adapter.id, rootId);
+        if (after === undefined) {
+          datasets.push(dataset);
+          continue;
+        }
+        datasets.push(markStaleSessions(after.dataset, after.staleSessionIds));
+        if (after.staleSessionIds.length > 0) {
+          warnings.push(
+            vanishedFilesWarning(
+              adapter,
+              after.root,
+              stored === undefined
+                ? []
+                : stored
+                    .filter((entry) => !fingerprint.some((file) => file.path === entry.path))
+                    .map((entry) => entry.path),
+            ),
+          );
         }
       } catch (error) {
         skipped.push(

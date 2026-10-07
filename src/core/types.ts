@@ -141,6 +141,12 @@ export interface SessionRecord {
   childIds: string[];
   /** Whether {@link SessionRecord.parentId} names a session present in the dataset. */
   parentKnown: boolean;
+  /**
+   * `true` when this session is here because the store remembers it, not because
+   * its log is: the file it was read from is gone. Such a session still counts —
+   * history does not shrink because a file was deleted — and the run warns.
+   */
+  stale?: true | undefined;
   /** Adapter-specific extras, passed through to JSON output untouched. */
   extra?: Readonly<Record<string, unknown>> | undefined;
 }

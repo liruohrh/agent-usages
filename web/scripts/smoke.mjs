@@ -545,13 +545,13 @@ if (!existsSync(snapshotPath)) {
 await run({ port: 0, snapshot: snapshotPath }, false);
 
 if (process.argv.includes('--live')) {
-  // A live scan writes a scan cache: give it a scratch directory so the run never
+  // A live scan writes the usage store: give it a scratch file so the run never
   // touches the one the developer's own commands use.
-  const cacheDir = await mkdtemp(join(tmpdir(), 'agent-usages-smoke-cache-'));
+  const storeDir = await mkdtemp(join(tmpdir(), 'agent-usages-smoke-store-'));
   try {
-    await run({ port: 0, cacheDir }, true);
+    await run({ port: 0, db: join(storeDir, 'usage.db') }, true);
   } finally {
-    await rm(cacheDir, { recursive: true, force: true });
+    await rm(storeDir, { recursive: true, force: true });
   }
 } else {
   process.stdout.write('\n（跳过实时扫描；加 --live 会再跑一遍真实数据）\n');

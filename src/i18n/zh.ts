@@ -226,8 +226,8 @@ export const zh = {
     provider: '把价格钉死在一张表上（默认按每条记录里的模型自动选表；见 `agents`）',
     json: '以 JSON 输出',
     noUpdate: '本次不检查价格表/汇率更新，直接用本地缓存',
-    noCache: '不用本地扫描缓存：重新解析所有文件，也不写缓存（也就看不到已消失来源的历史）',
-    cacheDir: '扫描缓存放在哪个目录（默认 $XDG_CACHE_HOME/agent-usages，没有则 ~/.cache/agent-usages）',
+    noStore: '不读也不写扫描数据库：重新解析所有文件，只看现存的来源（看不到已消失目录 / 文件的历史）',
+    db: '扫描数据库放哪（默认 $XDG_DATA_HOME/agent-usages/usage.db，没有则 ~/.local/share/agent-usages/usage.db）',
     usage: '计算 token 消耗与费用',
     range: '时间范围：today/week/month/year（可加偏移，如 month-1）或 "起始..结束"（左闭右开）',
     subagent: '每个项目与会话额外拆成 总 / 自身 / 子代理',
@@ -472,17 +472,20 @@ export const zh = {
     agentDirNoData: (p: { agent: string; path: string }) => `${p.agent}：${p.path} 下没有找到数据，已跳过这个目录。`,
     agentDirUnreadable: (p: { agent: string; path: string; reason: string }) =>
       `${p.agent}：${p.path} 读取失败（${p.reason}），已跳过这个目录。`,
-    /* ---- persistence: the scan cache ---- */
-    scanCacheReasonCorrupt: '文件损坏或不是合法 JSON',
-    scanCacheReasonFormat: '缓存格式版本不同',
-    scanCacheReasonTool: '写入它的工具版本不同',
-    scanCacheReasonUnreadable: '文件读不出来',
-    scanCacheRebuilt: (p: { path: string; reason: string }) =>
-      `上一次的扫描缓存 ${p.path} 不能用了（${p.reason}），已重建；本次按全量扫描，数字不受影响。`,
-    scanCacheSourceVanished: (p: { agent: string; path: string; lastSeen: string }) =>
-      `${p.agent}：数据目录 ${p.path} 本次扫描没有出现（最后见到 ${p.lastSeen}），仍按缓存计入历史；只看现存来源用 --no-cache。`,
-    scanCacheUnwritable: (p: { path: string; reason: string }) =>
-      `扫描缓存写不进去（${p.path}：${p.reason}），本次结果不受影响，只是下次仍会重新解析。`,
+    /* ---- persistence: the usage store ---- */
+    storeRebuilt: (p: { path: string; backup: string }) =>
+      `扫描数据 ${p.path} 不是一个能用的数据库，已改名保留为 ${p.backup} 并新建了一个；本次按全量扫描，数字不受影响。`,
+    storeNoBackup: '（未能保留原文件）',
+    storeNewer: (p: { path: string }) =>
+      `扫描数据 ${p.path} 是更新版本的工具写的，本次既不读它也不写它（只在内存里统计）；升级工具后再用，或先把它备份走。`,
+    storeUnreadable: (p: { path: string; reason: string }) =>
+      `扫描数据 ${p.path} 打不开（${p.reason}），本次只在内存里统计、不写盘；修好这个路径就会恢复正常。`,
+    storeSourceVanished: (p: { agent: string; path: string; lastSeen: string }) =>
+      `${p.agent}：数据目录 ${p.path} 本次扫描没有出现（最后见到 ${p.lastSeen}），仍从库里计入历史；只看现存来源用 --no-store。`,
+    storeFilesVanished: (p: { agent: string; root: string; count: string; files: string }) =>
+      `${p.agent}：${p.root} 下有 ${p.count} 个文件本次不存在（${p.files}），它们上次的会话仍计入并标为陈旧；要按现状统计用 --no-store。`,
+    storeWriteFailed: (p: { path: string; reason: string }) =>
+      `扫描数据写不进去（${p.path}：${p.reason}），本次结果不受影响，只是下次仍会重新解析。`,
     /* ---- serve ---- */
     servePortNotInteger: (p: { value: string }) => `--port 需要 0…65535 的整数，收到 ${p.value}`,
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh 需要非负秒数，收到 ${p.value}`,

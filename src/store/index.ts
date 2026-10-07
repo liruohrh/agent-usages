@@ -8,15 +8,13 @@
  *   writer's.
  * - `sqlite.ts` — the usage store: roots, files, sessions and records as rows in
  *   a database the user owns, with a schema version and a migration path.
- * - `cache.ts` — the JSON file those entries used to live in. Superseded by the
- *   store; kept until the last caller has moved over.
- * - `location.ts` — where that file goes when nobody names a directory.
+ * - `location.ts` — where the database goes when nobody names a path.
  *
  * Nothing here touches the CLI, the adapters or the report: the layers above
  * decide *when* to scan and what to say about it, this one only remembers.
  */
 
-export { SCAN_CACHE_DIR_NAME, defaultScanCacheDir } from './location.ts';
+export { STORE_DIR_NAME, STORE_FILE_NAME, defaultStorePath } from './location.ts';
 export {
   HEAD_HASH_BYTES,
   fingerprintOf,
@@ -44,15 +42,3 @@ export {
   type UsageStoreReset,
   type WriteRootInput,
 } from './sqlite.ts';
-export {
-  SCAN_CACHE_FILE,
-  SCAN_CACHE_FORMAT,
-  ScanCache,
-  type ScanCacheDocument,
-  type ScanCacheEntry,
-  type ScanCacheOpenOptions,
-  type ScanCacheOpenResult,
-  type ScanCacheReset,
-  type ScanCacheResetReason,
-  type ScanCacheRoots,
-} from './cache.ts';

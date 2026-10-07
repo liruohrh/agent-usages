@@ -31,10 +31,10 @@ interface Args {
   dev?: boolean;
   devTarget?: string;
   noUpdate?: boolean;
-  /** `--no-cache`: parse every file again and write no scan cache. */
-  noCache?: boolean;
-  /** `--cache-dir <dir>`: where the scan cache lives. */
-  cacheDir?: string;
+  /** `--no-store`: parse every file again and write nothing to the store. */
+  noStore?: boolean;
+  /** `--db <path>`: where the scan database lives. */
+  db?: string;
   writeSnapshot?: string;
   quiet?: boolean;
   help?: boolean;
@@ -66,8 +66,8 @@ function usage(): string {
       --dev                前端走 Vite 开发服务器（默认代理到 127.0.0.1:5173）
       --dev-target <地址>  --dev 代理的目标地址
       --no-update          不联网刷新价格表与汇率
-      --no-cache           ${t().help.noCache}
-      --cache-dir <目录>   ${t().help.cacheDir}
+      --no-store           ${t().help.noStore}
+      --db <路径>          ${t().help.db}
   -q, --quiet              不打印启动信息（脚本里起服务用）
       --write-snapshot <文件>  扫一次并把整份仪表盘写成快照 JSON，然后退出
   -h, --help               显示本帮助
@@ -138,11 +138,11 @@ export function parseArgs(argv: readonly string[]): Args {
       case '--no-update':
         args.noUpdate = true;
         break;
-      case '--no-cache':
-        args.noCache = true;
+      case '--no-store':
+        args.noStore = true;
         break;
-      case '--cache-dir':
-        args.cacheDir = next();
+      case '--db':
+        args.db = next();
         break;
       case '-q':
       case '--quiet':
@@ -181,8 +181,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     ...(args.agentDir === undefined ? {} : { agentDirs: args.agentDir }),
     ...(args.home === undefined ? {} : { home: args.home }),
     ...(args.snapshot === undefined ? {} : { snapshot: args.snapshot }),
-    ...(args.noCache === true ? { noCache: true } : {}),
-    ...(args.cacheDir === undefined ? {} : { cacheDir: args.cacheDir }),
+    ...(args.noStore === true ? { noStore: true } : {}),
+    ...(args.db === undefined ? {} : { db: args.db }),
     noUpdate: args.noUpdate ?? true,
   };
 

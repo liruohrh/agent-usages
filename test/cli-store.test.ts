@@ -1,23 +1,24 @@
 /**
- * The scan cache, end to end.
+ * The usage store, end to end.
  *
- * These spawn the real CLI against synthetic agent homes and a cache directory
- * of their own, because what is under test is the *contract* of persistence:
+ * These spawn the real CLI against synthetic agent homes and a database of their
+ * own, because what is under test is the *contract* of persistence:
  *
  * - a second run over unchanged files answers the same numbers without parsing,
- *   which is proved by planting a value in the cache and watching it come back;
+ *   which is proved by planting a value in the database and watching it come back;
  * - a file that changed is read again;
- * - a directory that disappeared keeps its history and says so;
- * - a cache file that cannot be trusted is rebuilt, and a cache that cannot be
+ * - a directory that disappeared keeps its history and says so, and so does a
+ *   single file that disappeared inside a directory that is still there;
+ * - a database that cannot be trusted is moved aside, and one that cannot be
  *   written does not fail the run.
  *
  * Real data is deliberately absent here — the borrowed dump is a *validation*
  * step, not a fixture, because it changes under the reader and cannot express
- * "this directory was deleted a moment ago".
+ * "this file was deleted a moment ago".
  */
 
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,7 +66,7 @@ interface Report {
 }
 
 let root: string;
-let cacheDir: string;
+let storeDir: string;
 let configHome: string;
 
 /** Run the CLI with the given arguments and environment. */
@@ -88,10 +89,13 @@ async function runCli(args: string[], extraEnv: Record<string, string> = {}): Pr
   }
 }
 
-/** Run the CLI against one Claude Code home and one cache directory. */
+/** Path of the store this test's runs share. */
+const storePath = (): string => join(storeDir, 'usage.db');
+
+/** Run the CLI against one Claude Code home and one scan database. */
 async function usage(args: string[] = [], extraEnv: Record<string, string> = {}): Promise<Result> {
   return runCli(
-    ['--agent', 'claudecode', '--home', root, '--cache-dir', cacheDir, '--no-update', '--json', ...args],
+    ['--agent', 'claudecode', '--home', root, '--db', storePath(), '--no-update', '--json', ...args],
     extraEnv,
   );
 }
@@ -103,8 +107,6 @@ async function report(args: string[] = [], extraEnv: Record<string, string> = {}
   return JSON.parse(result.stdout) as Report;
 }
 
-const cacheFile = (): string => join(cacheDir, 'scan-cache.json');
-
 /** The session titles a report carries, for spotting a planted value. */
 function titles(seen: Report): (string | null)[] {
   return seen.projects.flatMap((project) => project.sessionReports.map((entry) => entry.title));
@@ -112,25 +114,27 @@ function titles(seen: Report): (string | null)[] {
 
 const warningCodes = (seen: Report): string[] => seen.warnings.map((warning) => warning.code);
 
-/** Rewrite every cached session title to a sentinel; only a cache hit can see it. */
+/**
+ * Rewrite every stored session title to a sentinel.
+ *
+ * Only a run that answered from the database can show it, so this is what proves
+ * a warm run did not parse the logs. It edits the database with `sqlite3`'s own
+ * SQL through the same driver the tool uses.
+ */
 async function plantSentinel(): Promise<void> {
-  const document = JSON.parse(await readFile(cacheFile(), 'utf8')) as {
-    agents: Record<string, Record<string, { dataset: { projects: { sessions: { title: string | null }[] }[] } }>>;
-  };
-  for (const agent of Object.values(document.agents)) {
-    for (const entry of Object.values(agent)) {
-      for (const project of entry.dataset.projects) {
-        for (const session of project.sessions) session.title = 'SENTINEL';
-      }
-    }
+  const { DatabaseSync } = await import('node:sqlite');
+  const database = new DatabaseSync(storePath());
+  try {
+    database.exec("UPDATE sessions SET title = 'SENTINEL'");
+  } finally {
+    database.close();
   }
-  await writeFile(cacheFile(), JSON.stringify(document), 'utf8');
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agent-usages-cache-root-'));
-  cacheDir = await mkdtemp(join(tmpdir(), 'agent-usages-cache-dir-'));
-  configHome = await mkdtemp(join(tmpdir(), 'agent-usages-cache-home-'));
+  root = await mkdtemp(join(tmpdir(), 'agent-usages-store-root-'));
+  storeDir = await mkdtemp(join(tmpdir(), 'agent-usages-store-db-'));
+  configHome = await mkdtemp(join(tmpdir(), 'agent-usages-store-home-'));
   const project = join(root, 'projects', '-tmp-demo');
   await mkdir(project, { recursive: true });
   await writeFile(join(project, 'aaa.jsonl'), claudeLog('11111111-1111-4111-8111-111111111111', ['m1', 'm2']));
@@ -139,25 +143,25 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
-  await rm(cacheDir, { recursive: true, force: true });
+  await rm(storeDir, { recursive: true, force: true });
   await rm(configHome, { recursive: true, force: true });
 });
 
-describe('the scan cache', () => {
-  it('answers an unchanged root from the cache, and writes one on the first run', async () => {
+describe('the usage store', () => {
+  it('answers an unchanged root from the store, and writes one on the first run', async () => {
     const cold = await report();
     expect(cold.totals.requests).toBe(3);
-    await expect(stat(cacheFile())).resolves.toBeTruthy();
+    await expect(stat(storePath())).resolves.toBeTruthy();
 
     await plantSentinel();
-    const planted = await stat(cacheFile());
+    const planted = await stat(storePath());
     const warm = await report();
     // The sentinel can only appear if the second run did not parse the logs.
     expect(titles(warm)).toEqual(['SENTINEL', 'SENTINEL']);
     expect(warm.totals.requests).toBe(cold.totals.requests);
     expect(warm.totals.cost.total).toBe(cold.totals.cost.total);
     // And a run that learned nothing writes nothing: the file is as it was left.
-    const after = await stat(cacheFile());
+    const after = await stat(storePath());
     expect(after.mtimeMs).toBe(planted.mtimeMs);
     expect(after.size).toBe(planted.size);
   });
@@ -191,54 +195,72 @@ describe('the scan cache', () => {
     const after = await report();
     expect(after.totals.requests).toBe(cold.totals.requests);
     expect(after.totals.cost.total).toBe(cold.totals.cost.total);
-    expect(warningCodes(after)).toContain('scanCacheSourceVanished');
+    expect(warningCodes(after)).toContain('storeSourceVanished');
   });
 
-  it('measures the machine as it is now under --no-cache, and writes nothing', async () => {
-    await rm(cacheDir, { recursive: true, force: true });
-    const fresh = await report(['--no-cache']);
+  it('measures the machine as it is now under --no-store, and writes nothing', async () => {
+    await rm(storePath(), { force: true });
+    const fresh = await report(['--no-store']);
     expect(fresh.totals.requests).toBe(3);
-    await expect(stat(cacheFile())).rejects.toThrow();
+    await expect(stat(storePath())).rejects.toThrow();
 
-    // With no cache to fall back on, a vanished directory is simply gone.
+    // With no store to fall back on, a vanished directory is simply gone.
     await rm(root, { recursive: true, force: true });
-    const empty = await usage(['--no-cache']);
+    const empty = await usage(['--no-store']);
     expect(empty.code).toBe(1);
   });
 
-  it('rebuilds a cache file that cannot be trusted, and reports it', async () => {
-    await report();
-    await writeFile(cacheFile(), 'not json {', 'utf8');
-    const rebuilt = await report();
-    expect(rebuilt.totals.requests).toBe(3);
-    expect(warningCodes(rebuilt)).toContain('scanCacheRebuilt');
+  it('keeps the sessions of a single file that disappeared, and says so', async () => {
+    const cold = await report();
+    expect(cold.totals.requests).toBe(3);
+    // One log gone, the directory still there: its session is history, not a
+    // number that silently shrinks.
+    await rm(join(root, 'projects', '-tmp-demo', 'bbb.jsonl'), { force: true });
+
+    const after = await report();
+    expect(after.totals.requests).toBe(3);
+    expect(warningCodes(after)).toContain('storeFilesVanished');
+
+    // `--no-store` answers the other question: what is on disk right now.
+    const now = await report(['--no-store']);
+    expect(now.totals.requests).toBe(2);
+    expect(warningCodes(now)).not.toContain('storeFilesVanished');
   });
 
-  it('does not fail the run when the cache cannot be written', async () => {
+  it('moves a database that cannot be trusted aside, and reports it', async () => {
+    await report();
+    await writeFile(storePath(), 'not a database {', 'utf8');
+    const rebuilt = await report();
+    expect(rebuilt.totals.requests).toBe(3);
+    expect(warningCodes(rebuilt)).toContain('storeRebuilt');
+    // The old file is kept, not overwritten: it is the user's data.
+    const kept = (await readdir(storeDir)).filter((name) => name.includes('.corrupt-'));
+    expect(kept.length).toBe(1);
+  });
+
+  it('does not fail the run when the store cannot be written', async () => {
     // `/nowhere` is not writable for a normal user: the run must still answer.
-    const result = await usage(['--cache-dir', '/nowhere/agent-usages']);
+    const result = await usage(['--db', '/nowhere/agent-usages/usage.db']);
     expect(result.code).toBe(0);
     const seen = JSON.parse(result.stdout) as Report;
     expect(seen.totals.requests).toBe(3);
-    expect(warningCodes(seen)).toContain('scanCacheUnwritable');
+    expect(warningCodes(seen)).toContain('storeUnreadable');
   });
 
-  it('uses the environment default when --cache-dir is absent', async () => {
-    const cacheHome = await mkdtemp(join(tmpdir(), 'agent-usages-cache-xdg-'));
+  it('uses the data-directory default when --db is absent', async () => {
+    const dataHome = await mkdtemp(join(tmpdir(), 'agent-usages-store-xdg-'));
     try {
       const result = await runCli(
         ['--agent', 'claudecode', '--home', root, '--no-update', '--json'],
-        { XDG_CACHE_HOME: cacheHome },
+        { XDG_DATA_HOME: dataHome },
       );
       expect(result.code, result.stderr).toBe(0);
-      const document = JSON.parse(await readFile(join(cacheHome, 'agent-usages', 'scan-cache.json'), 'utf8')) as {
-        format: number;
-        tool: string;
-      };
-      expect(document.format).toBe(1);
-      expect(document.tool).toMatch(/^\d+\.\d+\.\d+/);
+      const path = join(dataHome, 'agent-usages', 'usage.db');
+      const header = await readFile(path);
+      // A real SQLite database, readable by any sqlite3 client.
+      expect(header.subarray(0, 6).toString('utf8')).toBe('SQLite');
     } finally {
-      await rm(cacheHome, { recursive: true, force: true });
+      await rm(dataHome, { recursive: true, force: true });
     }
   });
 });

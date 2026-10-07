@@ -191,11 +191,11 @@ src/
 │   └── html.ts            纯排版：单文件 HTML 报告（内联样式与 SVG，无脚本）
 ├── i18n/                  文案目录（zh 是源、en 按类型对齐）与带 code 的诊断
 │                          （网页自己那一份在 web/src/i18n/，同一个套路）
-├── store/                 持久化：扫描缓存（跨越多次运行记住每个数据根读到过什么）
+├── store/                 持久化：用量数据库（跨越多次运行记住每个数据根读到过什么）
 │   ├── fingerprint.ts     一个根的文件指纹（size + mtime + 前 4 KiB 的 sha256）与根 id
 │   ├── dataset-json.ts    UsageDataset ↔ JSON（warnings 只存 code+params，读回按当时语言渲染）
-│   ├── cache.ts           scan-cache.json：版本不符或文件损坏就重建，写入是原子的
-│   └── location.ts        默认位置：$XDG_CACHE_HOME/agent-usages（没有则 ~/.cache/agent-usages）
+│   ├── sqlite.ts          usage.db：schema v1、PRAGMA user_version 迁移、UsageStore
+│   └── location.ts        默认位置：$XDG_DATA_HOME/agent-usages/usage.db（没有则 ~/.local/share/agent-usages/）
 ├── serve/                 本地 Web 分析平台的服务端（HTTP + 前端静态托管；唯一的写是语言设置）
 │   ├── data.ts            逐 adapter 读盘 → merge.ts 合并 → runQuery → 仪表盘 JSON
 │   ├── server.ts          Express 应用、startServer()、`--dev` 代理
@@ -212,23 +212,30 @@ src/
 `report` 的类型与查询，不 import `render`/`cli`；只有 `cli` 能 import `render`。这条规则由
 `test/architecture.test.ts` 守着（它读 import 图，而不是靠约定）。
 
-### 扫描缓存（`src/store/`）
+### 用量数据库（`src/store/`）
 
-一次扫描的代价与历史长度成正比，而绝大多数文件两次运行之间并没有变。所以每个 `(agent, 数据根)` 的结果
-连着**指纹**（该根下每个会影响结果的文件：`size` + `mtimeMs` + 前 4 KiB 的 sha256）一起存在
-`scan-cache.json` 里：指纹逐项相同就直接用缓存里的数据集，**不解析、数字与首次完全一致**；不同则重扫该根
-并覆盖。`--no-cache` 完全绕过缓存（也不带下面的 tombstone），`--cache-dir` 指位置。
+它是**用户的数据**，不是派生缓存：默认落在 `$XDG_DATA_HOME/agent-usages/usage.db`（环境变量没有则
+`~/.local/share/agent-usages/usage.db`），可以备份、可以用 `sqlite3` 或任何语言的客户端直接读。
+`--no-store` 不读不写（只看机器现在的样子），`--db <路径>` 换位置。
+
+一次扫描的代价与历史长度成正比，而绝大多数文件两次运行之间并没有变：每个 `(agent, 数据根)` 的结果
+连着**指纹**（该根下每个会影响结果的文件：`size` + `mtimeMs` + 前 4 KiB 的 sha256）一起写进
+`sessions` / `records` 表；指纹逐项相同就直接从库里读回数据集，**不解析、数字与首次完全一致**。
 
 - **指纹覆盖哪些文件由适配器决定**（`AgentAdapter.listSources`），硬约束是它必须覆盖 `load()` 读到的
   每个文件——日志、标题、子代理元数据、DSH 的投影缓存、Codex 的标题库都算；`listSources` 与 `load`
   共用同一段「找文件」的代码，`test/unit/list-sources.test.ts` 守着这条不变量。
-- **来源消失不缩水**：某个计划内的根这次什么都没有（目录被删 / 搬走 / 清空），缓存里的那份会被标成
-  `stale` 继续计入，并给一条 `scanCacheSourceVanished` 告警——只有 `--no-cache` 才给出「只看现存来源」
-  的数字。根内单个文件被删仍按重扫处理（文件级保留是后续增量）。
-- **缓存不可信就重建**：格式版本或工具版本不符、JSON 损坏、文件读不了，都只是重建 + 一条
-  `scanCacheRebuilt` 告警，绝不让命令失败；写不进去也只是一条 `scanCacheUnwritable` 告警。
-- 缓存里存的是**数据集**，不是句子：warnings 以 `{code, params}` 保存，读回时按当时的语言渲染，所以换
-  语言不会让旧缓存说错话。什么都没学到的一次运行不写文件。
+- **消失不缩水**：计划内的某个根整个没了（目录被删 / 搬走 / 清空），或根里某个文件没了，缓存里的会话
+  都会保留、标成陈旧（`SessionRecord.stale`），并给一条 `storeSourceVanished` / `storeFilesVanished`
+  告警——只有 `--no-store` 才给出「只看现存来源」的数字。
+- **库不可信就挪开**：不是 SQLite / 损坏 → 改名 `<path>.corrupt-<时间>` 后新建（用户的文件不覆盖）；
+  `user_version` 比代码新 → 一个字节都不动，只在内存里统计；打不开 → 同样走内存。三种都只变成告警。
+- 存的是**数据集**，不是句子：warnings 以 `{code, params}` 保存，读回时按当时的语言渲染；金额不存
+  （它由价格表决定，查询时按当时的价目表重算）。行按 `(agent, root_id, …)` 存，跨根并集仍由合并层做，
+  所以直接 SQL 查询时同一会话可能多行，要 `GROUP BY agent, session_id` 归并。
+- 驱动是 Node 内置的 `node:sqlite`（v22.13 起不需要 flag），不引原生依赖、不做 ORM：
+  这些选择的理由与"什么时候该回头换"写在 `.agents/drafts/sqlite-store-20261007.md` §6。
+- 为「agent 到底在干什么」预留：schema v2 会加 `events`（工具调用等）表，父键是 `records`。
 
 `web/` 是唯一的工作区包（Vite + React + Tailwind + ECharts），只依赖 `src/serve/types.ts`
 的 HTTP 契约，不 import 服务端代码；构建产物 `web/dist` 由 `serve` 静态托管。设计、API 与

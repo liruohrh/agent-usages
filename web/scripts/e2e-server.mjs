@@ -29,10 +29,10 @@ const args = ['serve', '--port', port, '--no-update'];
 if (existsSync(snapshot)) {
   args.push('--snapshot', snapshot);
 } else {
-  // A live scan writes a scan cache; keep it out of the developer's own cache
+  // A live scan writes the usage store; keep it out of the developer's own data
   // directory, the way `isolateConfig` keeps the settings out of their config.
-  const cacheDir = mkdtempSync(join(tmpdir(), 'agent-usages-e2e-cache-'));
-  args.push('--cache-dir', cacheDir);
+  const storeDir = mkdtempSync(join(tmpdir(), 'agent-usages-e2e-store-'));
+  args.push('--db', join(storeDir, 'usage.db'));
   process.stdout.write(`e2e: no snapshot at ${snapshot}, scanning live data\n`);
 }
 

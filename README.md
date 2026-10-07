@@ -115,7 +115,7 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 | `--rate-mode <mode>` | `latest`（默认，全程一个汇率）/ `historical`（按每条记录当天的汇率） |
 | `--agent <id,...>` | 读哪些 agent；默认 `all`（所有已安装的），可逗号分隔或重复；见[目标 agent](#目标-agent-与数据目录) |
 | `--agent-dir` / `--home` / `--provider` / `--json` / `--no-update` | 见上 |
-| `--no-cache` / `--cache-dir <目录>` | 扫描缓存：默认把每个数据根上次读到的结果（连着文件指纹）存在 `$XDG_CACHE_HOME/agent-usages/scan-cache.json`，没变的根下次不再解析，数字与首次一致；`--no-cache` 绕过它（重新解析全部文件，也不带已消失来源的历史），`--cache-dir` 换位置。详见[架构](docs/architecture.md#扫描缓存srcstore) |
+| `--no-store` / `--db <路径>` | 用量数据库：默认把每个数据根上次读到的结果（连着文件指纹）写进 `$XDG_DATA_HOME/agent-usages/usage.db`，没变的根下次不再解析，数字与首次一致；它是**你可以备份、也能用 sqlite3 直接读的数据**。`--no-store` 绕过它（重新解析全部文件，只看现存来源），`--db` 换位置。详见[架构](docs/architecture.md#用量数据库srcstore) |
 
 ### `session list`
 
