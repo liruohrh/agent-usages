@@ -4,10 +4,12 @@
  * - `fingerprint.ts` — what a scan read, cheaply described, so the next scan can
  *   tell whether the same files still hold the same usage.
  * - `dataset-json.ts` — a dataset as JSON: warnings travel as codes, never as
- *   sentences, so a cached warning speaks the reader's language, not the
+ *   sentences, so a stored warning speaks the reader's language, not the
  *   writer's.
- * - `cache.ts` — the file those entries live in, rebuilt rather than refused
- *   when it is old, unreadable or broken.
+ * - `sqlite.ts` — the usage store: roots, files, sessions and records as rows in
+ *   a database the user owns, with a schema version and a migration path.
+ * - `cache.ts` — the JSON file those entries used to live in. Superseded by the
+ *   store; kept until the last caller has moved over.
  * - `location.ts` — where that file goes when nobody names a directory.
  *
  * Nothing here touches the CLI, the adapters or the report: the layers above
@@ -23,7 +25,25 @@ export {
   type FingerprintStatus,
   type SourceFingerprint,
 } from './fingerprint.ts';
-export { fromJson, toJson, type DatasetJson, type WarningJson } from './dataset-json.ts';
+export {
+  fromJson,
+  toJson,
+  warningsFromJson,
+  warningsToJson,
+  type DatasetJson,
+  type WarningJson,
+} from './dataset-json.ts';
+export {
+  STORE_BACKUP_SUFFIX,
+  STORE_SCHEMA_VERSION,
+  UsageStore,
+  type ReadRootResult,
+  type StoreRootSummary,
+  type UsageStoreOpenOptions,
+  type UsageStoreOpenResult,
+  type UsageStoreReset,
+  type WriteRootInput,
+} from './sqlite.ts';
 export {
   SCAN_CACHE_FILE,
   SCAN_CACHE_FORMAT,

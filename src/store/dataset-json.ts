@@ -12,7 +12,7 @@
  * something `JSON.stringify` can carry whole, and turns that back.
  */
 
-import { UserError, type ErrorCode, type ErrorParams } from '../i18n/errors.ts';
+import { UserError, type ErrorCode, type ErrorParams, type Warning } from '../i18n/errors.ts';
 import type { DatasetStats, ProjectRecord, SessionRecord, UsageDataset } from '../core/types.ts';
 
 /** One warning, as a code and the parameters its sentence needs. */
@@ -54,11 +54,41 @@ export function toJson(dataset: UsageDataset): DatasetJson {
   const body = structuredClone(rest) as Omit<DatasetJson, 'warnings'>;
   return {
     ...body,
-    warnings: warnings.map((warning) => ({
-      code: warning.code,
-      params: structuredClone(warning.params) as Record<string, unknown>,
-    })),
+    warnings: warningsToJson(warnings),
   };
+}
+
+/**
+ * Reduce warnings to the codes that render them.
+ *
+ * A store that keeps warnings in a column of their own needs just this half of
+ * {@link toJson}, so it lives on its own rather than being re-implemented.
+ * @param warnings - the warnings to serialize.
+ * @returns `{ code, params }` for each, in order.
+ */
+export function warningsToJson(warnings: readonly Warning[]): WarningJson[] {
+  return warnings.map((warning) => ({
+    code: warning.code,
+    params: structuredClone(warning.params) as Record<string, unknown>,
+  }));
+}
+
+/**
+ * Rebuild warnings from their codes.
+ *
+ * The sentences are rendered in the language active *now*, not the one the
+ * store was written with; a code missing from the catalogue renders as itself
+ * rather than throwing.
+ * @param json - the stored warnings.
+ * @returns `UserError`s equal to the ones that were serialized.
+ */
+export function warningsFromJson(json: readonly WarningJson[]): Warning[] {
+  return json.map((warning) => new UserError(
+    warning.code,
+    // The parameters travelled with the code, so the catalog's own type for
+    // that entry is what they are; one cast covers the whole union.
+    warning.params as ErrorParams<ErrorCode>,
+  ));
 }
 
 /**
@@ -79,11 +109,6 @@ export function fromJson(json: DatasetJson): UsageDataset {
   const { warnings, ...rest } = json;
   return {
     ...(structuredClone(rest) as Omit<UsageDataset, 'warnings'>),
-    warnings: warnings.map((warning) => new UserError(
-      warning.code,
-      // The parameters travelled with the code, so the catalog's own type for
-      // that entry is what they are; one cast covers the whole union.
-      warning.params as ErrorParams<ErrorCode>,
-    )),
+    warnings: warningsFromJson(warnings),
   };
 }
