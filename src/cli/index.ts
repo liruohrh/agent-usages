@@ -1022,7 +1022,7 @@ export function buildProgram(): Command {
   program
     .name('agent-usages')
     .description(t().help.program)
-    .version('0.0.2');
+    .version('0.0.3');
   commonOptions(program);
 
   commonOptions(
