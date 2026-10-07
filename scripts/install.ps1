@@ -6,7 +6,7 @@ One-line install for Windows / PowerShell 5.1+:
 Three steps and nothing else, mirroring install.sh one for one: find a Node (>= 22.18;
 it says how to get one, it never installs one), download install.mjs, and run it with
 **your arguments passed through untouched**. There is deliberately no `param()` block -
-`$args` forwards whatever came in, so `--version 0.0.3`, `--prefix D:\somewhere` and
+`$args` forwards whatever came in, so `--version 1.2.3`, `--prefix D:\somewhere` and
 `--help` all reach install.mjs exactly as written, and PowerShell cannot mistake
 `-version` for one of its own parameters. Which also means this file is optional:
 

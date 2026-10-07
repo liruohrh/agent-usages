@@ -45,9 +45,10 @@ const HELP = `agent-usages 安装器（Node ≥ ${MIN_NODE}，只用 node: 内�
 
   --base <url>           安装器与发布包的基址；默认
                          ${DEFAULT_BASE}
-  --version <v|latest>   装哪一版，默认 latest（最新一版）；v0.0.3 与 0.0.3 都认。
+  --version <v|latest>   装哪一版，默认 latest（最新一版）；v1.2.3 与 1.2.3 都认（这里只是例子，
+                         钉住你自己那一版时换成真实版本号）。
                          指定版本、又没给 --base 时自动换成该版本自己的 release 页
-                         （…/releases/download/v0.0.3/agent-usages-0.0.3.tgz）
+                         （…/releases/download/v1.2.3/agent-usages-1.2.3.tgz）
   --tarball <路径|URL>   直接给 tarball：本地文件就直接装，给 http(s) 就下这个地址
   --prefix <dir>         装到 <dir>（等价于 npm 的 --prefix；默认 npm 的全局前缀）
   --dry-run              只打印将要做什么：不下载、不安装、不写盘
@@ -59,8 +60,8 @@ const HELP = `agent-usages 安装器（Node ≥ ${MIN_NODE}，只用 node: 内�
 
 例：
   node install.mjs                                     # 装最新一版
-  node install.mjs --version 0.0.3                     # 装 v0.0.3 那一版
-  node install.mjs --tarball ./agent-usages-0.0.3.tgz --prefix /tmp/prefix
+  node install.mjs --version 1.2.3                     # 装 v1.2.3 那一版（版本号换成你要的那个）
+  node install.mjs --tarball ./agent-usages-1.2.3.tgz --prefix /tmp/prefix
 `;
 
 /** A message meant for the user; `main`'s caller prints it without a stack. */
@@ -127,7 +128,7 @@ function parseArgs(argv) {
 
   if (options.help) return options;
 
-  // `latest` is the default spelled out; `v0.0.3` and `0.0.3` name the same tag.
+  // `latest` is the default spelled out; `v1.2.3` and `1.2.3` name the same tag.
   if (options.version === 'latest' || options.version === '') options.version = undefined;
   if (options.version !== undefined) {
     options.version = options.version.startsWith('v') ? options.version.slice(1) : options.version;
