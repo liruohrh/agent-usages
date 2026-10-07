@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { codexAgent } from '../../src/agents/codex/loader.ts';
+import type { UsageRecord } from '../../src/core/types.ts';
 
 const PARENT = '01a0ca09-f65d-72c1-baf0-567e3e04ec8d';
 const CHILD = '01a0ca0b-4181-7433-884b-58ccbd8701e9';
@@ -355,5 +356,138 @@ describe('titling a Codex session', () => {
     ]);
 
     expect(await titleOf('flavour')).toBe('guardian');
+  });
+});
+
+describe('tool calls', () => {
+  const TOOLS = '7b1e0b1e-0000-4000-8000-0000000000b1';
+
+  let toolsHome: string;
+
+  /** One `response_item` carrying a call, at the ordinal Codex would give it. */
+  function item(ordinal: number, payload: Record<string, unknown>): unknown {
+    return {
+      timestamp: `2026-09-23T00:0${ordinal}:30.000Z`,
+      ordinal,
+      type: 'response_item',
+      payload,
+    };
+  }
+
+  /** A named call: `arguments` is JSON text in the rollout. */
+  function functionCall(ordinal: number, name: string, args: string): unknown {
+    return item(ordinal, { type: 'function_call', id: `fc_${ordinal}`, call_id: `call_${ordinal}`, name, arguments: args });
+  }
+
+  /** A built-in/custom call: `input` is text and `status` states the outcome. */
+  function customCall(ordinal: number, name: string, input: string, status = 'completed'): unknown {
+    return item(ordinal, { type: 'custom_tool_call', id: `ctc_${ordinal}`, call_id: `call_${ordinal}`, name, input, status });
+  }
+
+  /** Write one rollout into its own home and read its records back. */
+  async function recordsOf(entries: readonly unknown[]): Promise<readonly UsageRecord[]> {
+    const lines = [
+      JSON.stringify(meta(TOOLS)),
+      JSON.stringify({
+        timestamp: '2026-09-23T00:00:10.500Z',
+        ordinal: 0,
+        type: 'turn_context',
+        payload: { model: 'deepseek-flash', cwd: '/tmp/tools' },
+      }),
+      // `tokenCount` hands back JSON text already; the rest are plain objects.
+      ...entries.map((entry) => (typeof entry === 'string' ? entry : JSON.stringify(entry))),
+    ];
+    await writeFile(join(toolsHome, 'sessions', '2026', '09', '23', `rollout-${TOOLS}.jsonl`), `${lines.join('\n')}\n`);
+    const data = await codexAgent.load({ home: toolsHome });
+    return data.sessions[0]?.records ?? [];
+  }
+
+  beforeEach(async () => {
+    toolsHome = await mkdtemp(join(tmpdir(), 'agent-usages-codex-tools-'));
+    await mkdir(join(toolsHome, 'sessions', '2026', '09', '23'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(toolsHome, { recursive: true, force: true });
+  });
+
+  it('reads one call out of the response items before its token_count', async () => {
+    const args = '{"command":"Get-Content -Raw README.md"}';
+    const records = await recordsOf([
+      functionCall(1, 'shell_command', args),
+      tokenCount(2, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(records).toHaveLength(1);
+    // `function_call` carries no status field, so the outcome stays unstated.
+    expect(records[0]?.events).toEqual([
+      {
+        kind: 'tool_call',
+        ordinal: 0,
+        name: 'shell_command',
+        detail: args,
+        bytes: Buffer.byteLength(args, 'utf8'),
+      },
+    ]);
+  });
+
+  it('keeps two calls in ordinal order and reads a custom call status', async () => {
+    const records = await recordsOf([
+      functionCall(1, 'shell_command', '{"command":"ls"}'),
+      customCall(2, 'apply_patch', '*** Begin Patch\n'),
+      tokenCount(3, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(records[0]?.events?.map((event) => [event.ordinal, event.name, event.ok])).toEqual([
+      [0, 'shell_command', undefined],
+      [1, 'apply_patch', true],
+    ]);
+  });
+
+  it('gives a failing custom call ok false', async () => {
+    const records = await recordsOf([
+      customCall(1, 'exec', 'exit 1', 'failed'),
+      tokenCount(2, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(records[0]?.events?.map((event) => event.ok)).toEqual([false]);
+  });
+
+  it('charges a call to the token_count that closes it, and drops a trailing one', async () => {
+    const records = await recordsOf([
+      tokenCount(1, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+      functionCall(2, 'shell_command', '{"command":"ls"}'),
+      tokenCount(3, counters(200, 0, 20, 0), counters(300, 0, 30, 0)),
+      // No token_count follows this one, so no record owns it.
+      functionCall(4, 'shell_command', '{"command":"tail"}'),
+    ]);
+
+    expect(records).toHaveLength(2);
+    expect(records[0]?.events).toBeUndefined();
+    expect('events' in (records[0] as object)).toBe(false);
+    expect(records[1]?.events?.map((event) => event.name)).toEqual(['shell_command']);
+  });
+
+  it('leaves events undefined for a request that called no tool', async () => {
+    const records = await recordsOf([
+      userMessage(1, 'hello'),
+      tokenCount(2, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    expect(records[0]?.events).toBeUndefined();
+  });
+
+  it('bounds the excerpt while bytes keeps the whole payload', async () => {
+    const args = `{"command":"${'x'.repeat(2_000)}"}`;
+    const records = await recordsOf([
+      functionCall(1, 'shell_command', args),
+      tokenCount(2, counters(100, 0, 10, 0), counters(100, 0, 10, 0)),
+    ]);
+
+    const event = records[0]?.events?.[0];
+    expect(event?.detail).toHaveLength(300);
+    expect(event?.detail).toBe(args.slice(0, 300));
+    expect(event?.bytes).toBe(Buffer.byteLength(args, 'utf8'));
+    expect(event?.bytes).toBeGreaterThan(Buffer.byteLength(event?.detail ?? '', 'utf8'));
   });
 });

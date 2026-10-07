@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { piAgent } from '../../src/agents/pi/loader.ts';
+import type { UsageRecord } from '../../src/core/types.ts';
 
 const PARENT_ID = '019fc20a-e183-76cd-af73-8a96cf233658';
 const CHILD_ID = '019fc7b5-54d9-7ded-b8be-f902b2a7ff87';
@@ -158,5 +159,154 @@ describe('reading a pi home', () => {
     expect(piAgent.defaultSources({ PI_CODING_AGENT_DIR: home })).toEqual([home]);
     expect(piAgent.defaultSources({ PI_CODING_AGENT_DIR: `${home},/other` })).toEqual([home, '/other']);
     expect(piAgent.defaultSources({})[0]).toMatch(/\.pi[/\\]agent$/);
+  });
+});
+
+/**
+ * pi tool calls.
+ *
+ * The reference corpus holds no pi sessions, so every fixture here is synthetic.
+ * The shapes are not invented though: they follow the eight real session files
+ * on this machine (inspected 2026-10-07) — a `toolCall` content block whose
+ * `arguments` are already parsed, and a later `toolResult` message carrying
+ * `toolCallId` and a boolean `isError`.
+ */
+describe('tool calls', () => {
+  const TOOLS_SESSION = '019fdd08-0000-4000-8000-0000000000d8';
+
+  let toolsHome: string;
+
+  /** One assistant message with explicit content blocks. */
+  function assistantWith(id: string, timestamp: string, content: unknown[]): string {
+    return JSON.stringify({
+      type: 'message',
+      id,
+      parentId: null,
+      timestamp,
+      message: {
+        role: 'assistant',
+        provider: 'deepseek',
+        model: 'deepseek-v4-flash',
+        usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        content,
+      },
+    });
+  }
+
+  /** One `toolResult` message: the outcome of the call it names. */
+  function toolResult(id: string, timestamp: string, toolCallId: string, isError: boolean): string {
+    return JSON.stringify({
+      type: 'message',
+      id,
+      parentId: null,
+      timestamp,
+      message: {
+        role: 'toolResult',
+        toolCallId,
+        toolName: 'bash',
+        content: [{ type: 'text', text: isError ? 'boom' : 'done' }],
+        isError,
+      },
+    });
+  }
+
+  /** Write one session file into its own home and read its records back. */
+  async function recordsOf(lines: readonly string[]): Promise<readonly UsageRecord[]> {
+    const file = join(
+      toolsHome,
+      'sessions',
+      '--home-user-ws-tools--',
+      `2026-09-23T03-00-00-000Z_${TOOLS_SESSION}.jsonl`,
+    );
+    const header = JSON.stringify({
+      type: 'session',
+      version: 3,
+      id: TOOLS_SESSION,
+      timestamp: '2026-09-23T03:00:00.000Z',
+      cwd: '/tmp/tools',
+    });
+    await writeFile(file, `${[header, ...lines].join('\n')}\n`);
+    const data = await piAgent.load({ home: toolsHome });
+    return data.sessions.find((session) => session.id === TOOLS_SESSION)?.records ?? [];
+  }
+
+  beforeEach(async () => {
+    toolsHome = await mkdtemp(join(tmpdir(), 'agent-usages-pi-tools-'));
+    await mkdir(join(toolsHome, 'sessions', '--home-user-ws-tools--'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(toolsHome, { recursive: true, force: true });
+  });
+
+  it('reads one tool call and the outcome its result states', async () => {
+    const args = { command: 'pwd', description: 'Print the working directory' };
+    const records = await recordsOf([
+      assistantWith('m1', '2026-09-23T03:00:01.000Z', [
+        { type: 'text', text: 'checking' },
+        { type: 'toolCall', id: 'call_1', name: 'bash', arguments: args },
+      ]),
+      toolResult('r1', '2026-09-23T03:00:02.000Z', 'call_1', false),
+    ]);
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.events).toEqual([
+      {
+        kind: 'tool_call',
+        ordinal: 0,
+        name: 'bash',
+        detail: JSON.stringify(args),
+        bytes: Buffer.byteLength(JSON.stringify(args), 'utf8'),
+        ok: true,
+      },
+    ]);
+  });
+
+  it('keeps two calls of one message in ordinal order', async () => {
+    const records = await recordsOf([
+      assistantWith('m1', '2026-09-23T03:00:01.000Z', [
+        { type: 'toolCall', id: 'call_1', name: 'bash', arguments: { command: 'ls' } },
+        { type: 'toolCall', id: 'call_2', name: 'read', arguments: { file_path: '/tmp/tools/a.ts' } },
+      ]),
+    ]);
+
+    expect(records[0]?.events?.map((event) => [event.ordinal, event.name])).toEqual([
+      [0, 'bash'],
+      [1, 'read'],
+    ]);
+  });
+
+  it('gives a call whose result says isError ok false', async () => {
+    const records = await recordsOf([
+      assistantWith('m1', '2026-09-23T03:00:01.000Z', [
+        { type: 'toolCall', id: 'call_1', name: 'bash', arguments: { command: 'exit 1' } },
+      ]),
+      toolResult('r1', '2026-09-23T03:00:02.000Z', 'call_1', true),
+    ]);
+
+    expect(records[0]?.events?.map((event) => event.ok)).toEqual([false]);
+  });
+
+  it('leaves events undefined for a request that called no tool', async () => {
+    const records = await recordsOf([
+      assistantWith('m1', '2026-09-23T03:00:01.000Z', [{ type: 'text', text: 'just answering' }]),
+    ]);
+
+    expect(records[0]?.events).toBeUndefined();
+    expect('events' in (records[0] as object)).toBe(false);
+  });
+
+  it('bounds the excerpt while bytes keeps the whole payload', async () => {
+    const args = { command: 'x'.repeat(2_000) };
+    const json = JSON.stringify(args);
+    const records = await recordsOf([
+      assistantWith('m1', '2026-09-23T03:00:01.000Z', [{ type: 'toolCall', id: 'call_1', name: 'bash', arguments: args }]),
+    ]);
+
+    const event = records[0]?.events?.[0];
+    expect(event?.detail).toHaveLength(300);
+    expect(event?.detail).toBe(json.slice(0, 300));
+    expect(event?.bytes).toBe(Buffer.byteLength(json, 'utf8'));
+    expect(event?.bytes).toBeGreaterThan(Buffer.byteLength(event?.detail ?? '', 'utf8'));
   });
 });

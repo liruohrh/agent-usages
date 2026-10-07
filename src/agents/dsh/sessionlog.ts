@@ -28,7 +28,8 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
 
-import type { TokenBuckets, UsageRecord } from '../../core/types.ts';
+import type { TokenBuckets, UsageEvent, UsageRecord } from '../../core/types.ts';
+import { attachToolEvents, toolCallEvents, type PendingToolCall } from '../events.ts';
 
 /** The zstd frame magic number. */
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
@@ -169,6 +170,92 @@ interface PendingUsage {
   record: Omit<UsageRecord, 'id'>;
 }
 
+/** A `tool-call` content block, plus the id its `tool/result` carries back. */
+interface PendingCall extends PendingToolCall {
+  /** `tool-call.id`, the key the result names. */
+  id: string | undefined;
+}
+
+/** The request key an event belongs to, `turn:step` like {@link parseUsageEvent}. */
+function requestKey(data: Record<string, unknown>): string {
+  return `${asInteger(data['turn']) ?? 0}:${asInteger(data['step']) ?? 0}`;
+}
+
+/** A `data` member that the log wrote as an object, or as serialised JSON text. */
+function asJsonRecord(value: unknown): Record<string, unknown> | undefined {
+  const direct = asRecord(value);
+  if (direct !== undefined) return direct;
+  if (typeof value !== 'string') return undefined;
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    // Neither an object nor JSON text: nothing here to read.
+    return undefined;
+  }
+}
+
+/**
+ * Collect the tool calls of one `assistant/message` event.
+ *
+ * The calls sit in the assistant message's own content blocks, in the order they
+ * ran, and the event's key is the same `turn:step` {@link parseUsageEvent} bills
+ * under — so a request and its calls can never drift apart. `arguments` is JSON
+ * text in this log (unlike Claude Code's already-parsed `input`), and is kept
+ * exactly as written: re-encoding it would change the byte count for no gain.
+ *
+ * @param event - one parsed log event.
+ * @param state - the scan accumulator to fill.
+ */
+function collectToolCalls(event: Record<string, unknown>, state: ScanState): void {
+  if (asString(event['type']) !== 'assistant/message') return;
+  const data = asRecord(event['data']);
+  const content = data === undefined ? undefined : asRecord(data['message'])?.['content'];
+  if (data === undefined || !Array.isArray(content)) return;
+  const calls: PendingCall[] = [];
+  for (const raw of content) {
+    const block = asRecord(raw);
+    if (block === undefined || asString(block['type']) !== 'tool-call') continue;
+    const name = asString(block['name']);
+    if (name === undefined) continue;
+    calls.push({ id: asString(block['id']), name, payload: block['arguments'] });
+  }
+  if (calls.length > 0) state.calls.set(requestKey(data), calls);
+}
+
+/**
+ * Collect the outcome of one `tool/result` event.
+ *
+ * The result event is the tool's own closing record: an `error` member means the
+ * call failed, and a result written without one is the log saying it returned
+ * normally. The older v0 logs serialise `data` to a string, hence the two
+ * spellings this reads.
+ *
+ * @param event - one parsed log event.
+ * @param state - the scan accumulator to fill.
+ */
+function collectToolOutcome(event: Record<string, unknown>, state: ScanState): void {
+  if (asString(event['type']) !== 'tool/result') return;
+  const data = asJsonRecord(event['data']);
+  if (data === undefined) return;
+  const callId = asString(asRecord(asRecord(data['message'])?.['source'])?.['callId']);
+  if (callId === undefined) return;
+  state.outcomes.set(callId, data['error'] === undefined || data['error'] === null);
+}
+
+/** One request's calls as neutral events, with the outcomes the log stated. */
+function toolEventsOf(
+  calls: readonly PendingCall[] | undefined,
+  outcomes: ReadonlyMap<string, boolean>,
+): UsageEvent[] {
+  return toolCallEvents(
+    (calls ?? []).map((call) => ({
+      name: call.name,
+      payload: call.payload,
+      ok: call.id === undefined ? undefined : outcomes.get(call.id),
+    })),
+  );
+}
+
 /**
  * Turn one `assistant/message` event into a usage record.
  *
@@ -212,6 +299,10 @@ interface ScanState {
   providerTitle: string | undefined;
   /** Usage records by request key; a later append supersedes an earlier one. */
   records: Map<string, PendingUsage>;
+  /** Tool calls by request key, in the order the log wrote them. */
+  calls: Map<string, PendingCall[]>;
+  /** Per call id, the outcome its `tool/result` stated. */
+  outcomes: Map<string, boolean>;
 }
 
 /** Absorb one decoded chunk of newline-delimited JSON events. */
@@ -239,6 +330,8 @@ function absorbChunk(text: string, state: ScanState): void {
     }
     const usage = parseUsageEvent(event);
     if (usage !== undefined) state.records.set(usage.key, usage);
+    collectToolCalls(event, state);
+    collectToolOutcome(event, state);
   }
 }
 
@@ -261,7 +354,14 @@ function absorbFrames(data: Buffer, state: ScanState): void {
  * @throws when the header frame cannot be found or parsed, which means the file is not a DSH session log.
  */
 export async function readSessionLog(path: string): Promise<SessionLogScan> {
-  const state: ScanState = { header: undefined, title: undefined, providerTitle: undefined, records: new Map() };
+  const state: ScanState = {
+    header: undefined,
+    title: undefined,
+    providerTitle: undefined,
+    records: new Map(),
+    calls: new Map(),
+    outcomes: new Map(),
+  };
   const data = await readFile(path);
   if (path.endsWith('.zstd')) absorbFrames(data, state);
   else absorbChunk(data.toString('utf8'), state);
@@ -287,11 +387,13 @@ export async function readSessionLog(path: string): Promise<SessionLogScan> {
     title: state.providerTitle ?? state.title ?? null,
     seedLength: asInteger(state.header['seedLength']) ?? null,
     // The header carries the id, so every record can now be keyed
-    // `<sessionId>:step:<turn>:<step>`.
-    records: [...state.records.values()].map((pending) => ({
-      id: `${sessionId}:step:${pending.key}`,
-      ...pending.record,
-    })),
+    // `<sessionId>:step:<turn>:<step>` — and its tool calls hung on it. A request
+    // with no calls keeps `events` absent rather than an empty list.
+    records: [...state.records.values()].map((pending) => {
+      const record: UsageRecord = { id: `${sessionId}:step:${pending.key}`, ...pending.record };
+      attachToolEvents(record, toolEventsOf(state.calls.get(pending.key), state.outcomes));
+      return record;
+    }),
   };
 }
 

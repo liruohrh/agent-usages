@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { claudecodeAgent } from '../../src/agents/claudecode/loader.ts';
+import type { UsageRecord } from '../../src/core/types.ts';
 
 const SESSION = '112307e5-1035-404c-8fea-b6650edc8080';
 const AGENT = 'af8b105c79ddcebf5';
@@ -569,5 +570,141 @@ describe('titling a Claude Code session', () => {
     expect(prompt.startsWith(title as string)).toBe(true);
     expect(prompt[(title as string).length]).toBe(' ');
     expect(prompt.slice(0, 80).trim()).not.toBe(title);
+  });
+});
+
+describe('tool calls', () => {
+  const TOOLS_SESSION = 'c9a1f0c3-0000-4000-8000-0000000000c1';
+
+  let toolsHome: string;
+
+  /** One assistant entry with explicit content blocks, as one response is written. */
+  function assistantWith(uuid: string, timestamp: string, messageId: string, content: unknown[]): string {
+    return JSON.stringify({
+      type: 'assistant',
+      uuid,
+      parentUuid: null,
+      sessionId: TOOLS_SESSION,
+      timestamp,
+      cwd: '/tmp/tools',
+      message: {
+        id: messageId,
+        model: 'deepseek-flash',
+        usage: { input_tokens: 100, output_tokens: 10 },
+        content,
+      },
+    });
+  }
+
+  /** One `user` entry carrying tool results, paired back by `tool_use_id`. */
+  function resultsEntry(uuid: string, timestamp: string, results: unknown[]): string {
+    return JSON.stringify({
+      type: 'user',
+      uuid,
+      parentUuid: null,
+      sessionId: TOOLS_SESSION,
+      timestamp,
+      cwd: '/tmp/tools',
+      message: { role: 'user', content: results },
+    });
+  }
+
+  /** Write one session file into its own home and read its records back. */
+  async function recordsOf(lines: readonly string[]): Promise<readonly UsageRecord[]> {
+    const project = join(toolsHome, 'projects', '-tmp-tools');
+    await mkdir(project, { recursive: true });
+    await writeFile(join(project, `${TOOLS_SESSION}.jsonl`), `${lines.join('\n')}\n`);
+    const data = await claudecodeAgent.load({ home: toolsHome });
+    return data.sessions.find((session) => session.id === TOOLS_SESSION)?.records ?? [];
+  }
+
+  beforeEach(async () => {
+    toolsHome = await mkdtemp(join(tmpdir(), 'agent-usages-claude-tools-'));
+  });
+
+  afterEach(async () => {
+    await rm(toolsHome, { recursive: true, force: true });
+  });
+
+  it('reads one tool call out of its assistant entry', async () => {
+    const input = { file_path: '/tmp/tools/a.ts', limit: 20 };
+    const records = await recordsOf([
+      assistantWith('a1', '2026-09-23T01:00:01.000Z', 'msg-1', [
+        { type: 'text', text: 'let me look' },
+        { type: 'tool_use', id: 'toolu_1', name: 'Read', input },
+      ]),
+    ]);
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.events).toEqual([
+      {
+        kind: 'tool_call',
+        ordinal: 0,
+        name: 'Read',
+        detail: JSON.stringify(input),
+        bytes: Buffer.byteLength(JSON.stringify(input), 'utf8'),
+      },
+    ]);
+  });
+
+  it('collects two calls of one response in ordinal order', async () => {
+    // Claude Code writes one entry per content block and repeats `message.id`
+    // across them, so both calls belong to the single record.
+    const records = await recordsOf([
+      assistantWith('a1', '2026-09-23T01:00:01.000Z', 'msg-1', [
+        { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
+      ]),
+      assistantWith('a2', '2026-09-23T01:00:01.000Z', 'msg-1', [
+        { type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: '/tmp/tools/a.ts' } },
+      ]),
+    ]);
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.events?.map((event) => [event.ordinal, event.name])).toEqual([
+      [0, 'Bash'],
+      [1, 'Edit'],
+    ]);
+  });
+
+  it('leaves events undefined for a request that called no tool', async () => {
+    const records = await recordsOf([
+      assistantWith('a1', '2026-09-23T01:00:01.000Z', 'msg-1', [{ type: 'text', text: 'just answering' }]),
+    ]);
+
+    expect(records[0]?.events).toBeUndefined();
+    expect('events' in (records[0] as object)).toBe(false);
+  });
+
+  it('takes ok from the tool_result that names the call', async () => {
+    const records = await recordsOf([
+      assistantWith('a1', '2026-09-23T01:00:01.000Z', 'msg-1', [
+        { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'exit 1' } },
+        { type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'true' } },
+        { type: 'tool_use', id: 't3', name: 'Bash', input: { command: 'still running' } },
+      ]),
+      resultsEntry('u1', '2026-09-23T01:00:02.000Z', [
+        { type: 'tool_result', tool_use_id: 't1', content: 'boom', is_error: true },
+        { type: 'tool_result', tool_use_id: 't2', content: 'ok', is_error: false },
+      ]),
+    ]);
+
+    // The third call has no result, so nothing stated its outcome.
+    expect(records[0]?.events?.map((event) => event.ok)).toEqual([false, true, undefined]);
+  });
+
+  it('bounds the excerpt while bytes keeps the whole payload', async () => {
+    const input = { content: 'x'.repeat(5_000) };
+    const json = JSON.stringify(input);
+    const records = await recordsOf([
+      assistantWith('a1', '2026-09-23T01:00:01.000Z', 'msg-1', [
+        { type: 'tool_use', id: 't1', name: 'Write', input },
+      ]),
+    ]);
+
+    const event = records[0]?.events?.[0];
+    expect(event?.detail).toHaveLength(300);
+    expect(event?.detail).toBe(json.slice(0, 300));
+    expect(event?.bytes).toBe(Buffer.byteLength(json, 'utf8'));
+    expect(event?.bytes).toBeGreaterThan(Buffer.byteLength(event?.detail ?? '', 'utf8'));
   });
 });

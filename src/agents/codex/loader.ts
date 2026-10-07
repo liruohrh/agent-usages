@@ -44,6 +44,7 @@ import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRec
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
+import { attachToolEvents, toolCallEvents, type PendingToolCall } from '../events.ts';
 import { fileIfPresent, splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable Codex honours for its home directory. */
@@ -233,6 +234,48 @@ function usageBuckets(usage: Record<string, unknown>): TokenBuckets {
   };
 }
 
+/**
+ * The tool call one `response_item` carries, when it is a shape this reader knows.
+ *
+ * Only the two shapes the reference corpus actually contains are read:
+ *
+ * | payload type | name | arguments | outcome |
+ * | --- | --- | --- | --- |
+ * | `function_call` | `name` | `arguments` (JSON text) | no status field, so none |
+ * | `custom_tool_call` | `name` | `input` (text) | `status: completed` |
+ *
+ * `tool_search_call` and `web_search_call` do appear in the corpus but carry no
+ * tool name — only a type and an action — so they are left alone rather than
+ * given an invented one; `local_shell_call` / `mcp_call` never appeared there at
+ * all, so their field names are not guessed either.
+ *
+ * @param itemType - the `response_item`'s payload type.
+ * @param payload - the response item.
+ * @returns the call, or `undefined` when this item is not a call this reader knows.
+ */
+function toolCallOf(itemType: string | undefined, payload: Record<string, unknown>): PendingToolCall | undefined {
+  if (itemType === 'function_call') {
+    const name = asString(payload['name']);
+    // A `function_call` has no status field, so nothing recorded its outcome:
+    // `ok` stays absent rather than being read out of the output's prose
+    // ("Exit code: 1" is a sentence, not a flag).
+    return name === undefined ? undefined : { name, payload: payload['arguments'] };
+  }
+  if (itemType === 'custom_tool_call') {
+    const name = asString(payload['name']);
+    if (name === undefined) return undefined;
+    const status = asString(payload['status']);
+    return {
+      name,
+      payload: payload['input'],
+      // `status` is the log's own word for the outcome; any other spelling is
+      // left out instead of being mapped onto one.
+      ...(status === 'completed' ? { ok: true } : status === 'failed' ? { ok: false } : {}),
+    };
+  }
+  return undefined;
+}
+
 /** One rollout file's facts. */
 interface ScannedSession {
   /** Codex's own thread id (`session_meta.id`), never `session_id`. */
@@ -286,6 +329,8 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   let createdAt: number | null = null;
   let model = 'unknown';
   const records: UsageRecord[] = [];
+  /** Calls written since the last `token_count`: they belong to that request. */
+  const pendingCalls: PendingToolCall[] = [];
   let line = 0;
   for (const raw of text.split('\n')) {
     if (raw.trim().length === 0) continue;
@@ -343,10 +388,17 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       } else if (title === null && userTitle === null && itemType === 'message' && asString(payload['role']) === 'user') {
         userTitle = messageTitle(payload) ?? null;
       }
+      const call = toolCallOf(itemType, payload);
+      if (call !== undefined) pendingCalls.push(call);
       continue;
     }
     if (type !== 'event_msg' || payload === undefined) continue;
     if (asString(payload['type']) !== 'token_count') continue;
+    // `token_count` closes one request, and the calls written before it are the
+    // ones that request made (measured order: call → call output → token_count).
+    // They are taken whatever happens next: a count that is skipped as inherited
+    // or unusable still owns them, so they are never charged to the next request.
+    const calls = pendingCalls.splice(0, pendingCalls.length);
     if (forkBoundary !== undefined && (asNumber(entry['ordinal']) ?? 0) <= forkBoundary) continue;
     // The delta, never the running total: a fork inherits the parent's total
     // without inheriting its events.
@@ -360,13 +412,15 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       inheritedTokens = Math.max(0, total - (asNumber(delta['total_tokens']) ?? 0));
     }
     createdAt ??= time;
-    records.push({
+    const record: UsageRecord = {
       id: `${id ?? fallbackId}:tok:${String(entry['ordinal'] ?? line)}`,
       time,
       model,
       modelLabel: model,
       tokens: usageBuckets(delta),
-    });
+    };
+    attachToolEvents(record, toolCallEvents(calls));
+    records.push(record);
   }
   if (id === undefined && records.length === 0 && cwd === null) return undefined;
   // A spawned subagent is titled by the task it was given, and one Codex runs

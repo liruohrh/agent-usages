@@ -32,10 +32,11 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 
 import { repoOf } from '../../core/git.ts';
 import { workspacePathsOf } from '../../core/paths.ts';
-import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRecord } from '../../core/types.ts';
+import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageEvent, UsageRecord } from '../../core/types.ts';
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
+import { attachToolEvents, toolCallEvents, type PendingToolCall } from '../events.ts';
 import { fileIfPresent, splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable pi honours for its agent directory. */
@@ -80,6 +81,68 @@ function usageBuckets(usage: Record<string, unknown>): TokenBuckets {
     // for transparency and never billed beside `output`.
     reasoning: asCount(usage['reasoning']),
   };
+}
+
+/** A `toolCall` content block, plus the id its `toolResult` carries back. */
+interface PendingCall extends PendingToolCall {
+  /** `toolCall.id`, the key the result message names. */
+  id: string | undefined;
+}
+
+/**
+ * Collect one `message` event's tool calls, and any outcome it states.
+ *
+ * Verified against the eight session files on this machine (2026-10-07): an
+ * assistant message carries its calls as `toolCall` content blocks with the
+ * arguments already parsed, and the outcome arrives in a later message whose
+ * role is `toolResult`, keyed by `toolCallId`, with `isError` written as a
+ * boolean every time (3,645 of 3,645 results). Nothing is read out of any other
+ * block or role, so an unknown shape simply yields no events.
+ *
+ * @param event - one parsed `message` event.
+ * @param calls - per message id, the calls found, in content order.
+ * @param outcomes - per `toolCallId`, the outcome the log stated.
+ */
+function collectToolBlocks(
+  event: Record<string, unknown>,
+  calls: Map<string, PendingCall[]>,
+  outcomes: Map<string, boolean>,
+): void {
+  const message = asRecord(event['message']);
+  if (message === undefined) return;
+  if (asString(message['role']) === 'toolResult') {
+    const id = asString(message['toolCallId']);
+    const failed = message['isError'];
+    if (id !== undefined && typeof failed === 'boolean') outcomes.set(id, !failed);
+    return;
+  }
+  const content = message['content'];
+  if (!Array.isArray(content)) return;
+  const messageId = asString(event['id']);
+  if (messageId === undefined) return;
+  const found: PendingCall[] = [];
+  for (const raw of content) {
+    const block = asRecord(raw);
+    if (block === undefined || asString(block['type']) !== 'toolCall') continue;
+    const name = asString(block['name']);
+    if (name === undefined) continue;
+    found.push({ id: asString(block['id']), name, payload: block['arguments'] });
+  }
+  if (found.length > 0) calls.set(messageId, found);
+}
+
+/** One request's calls as neutral events, with the outcomes the log stated. */
+function toolEventsOf(
+  calls: readonly PendingCall[] | undefined,
+  outcomes: ReadonlyMap<string, boolean>,
+): UsageEvent[] {
+  return toolCallEvents(
+    (calls ?? []).map((call) => ({
+      name: call.name,
+      payload: call.payload,
+      ok: call.id === undefined ? undefined : outcomes.get(call.id),
+    })),
+  );
 }
 
 /** One session file, before delegation and projects are resolved. */
@@ -129,6 +192,10 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
   let parentSessionPath: string | null = null;
   const records: UsageRecord[] = [];
   const messageIds: string[] = [];
+  /** Tool calls per message id, in content order. */
+  const toolCalls = new Map<string, PendingCall[]>();
+  /** Outcomes the log stated, per `toolCallId`. */
+  const toolOutcomes = new Map<string, boolean>();
   let line = 0;
   for (const raw of text.split('\n')) {
     if (raw.trim().length === 0) continue;
@@ -162,6 +229,9 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
       continue;
     }
     if (type !== 'message') continue;
+    // Tool blocks are read before the usage check: the calls belong to the
+    // request the message bills, and a result message carries no usage at all.
+    collectToolBlocks(event, toolCalls, toolOutcomes);
     if (task === null && asString(asRecord(event['message'])?.['role']) === 'user') {
       // The plugin sends the task as the first user message: `Task: …`.
       const content = asRecord(event['message'])?.['content'];
@@ -195,6 +265,12 @@ async function scanSession(path: string): Promise<ScannedSession | undefined> {
     });
   }
   if (id === undefined) return undefined;
+  // A request's tool calls ride on its record, so the fork pass that drops the
+  // messages a session inherited drops their events with them. A request with no
+  // calls keeps `events` absent rather than an empty list.
+  records.forEach((record, index) => {
+    attachToolEvents(record, toolEventsOf(toolCalls.get(messageIds[index] as string), toolOutcomes));
+  });
   return { id, cwd, createdAt, title, task, firstUser, agentType, records, messageIds, parentSessionPath };
 }
 

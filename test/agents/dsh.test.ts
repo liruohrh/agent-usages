@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { dshAgent, resolveDshHome } from '../../src/agents/dsh/loader.ts';
 import { locateSessionLogs, readSessionLog } from '../../src/agents/dsh/sessionlog.ts';
+import type { UsageRecord } from '../../src/core/types.ts';
 import { createPricingEngine } from '../../src/pricing/index.ts';
 import { shippedProviders } from '../../src/pricing/catalog.ts';
 
@@ -902,5 +903,149 @@ describe('git repositories', () => {
       branch: 'lynx-rewrite',
     });
     await rm(home, { recursive: true, force: true });
+  });
+});
+
+describe('tool calls in a session log', () => {
+  const TOOL_SESSION = 'session-eeeeeeee-0000-4000-8000-00000000000e';
+  const BASE = 1_700_000_000_000;
+
+  let toolsDir: string;
+
+  /** The header every session log opens with. */
+  function header(): string {
+    return JSON.stringify({
+      type: 'session',
+      version: 0,
+      id: TOOL_SESSION,
+      createdAt: BASE,
+      cwd: '/tmp/tools',
+      delegationDepth: 0,
+    });
+  }
+
+  /** One `assistant/message` event, carrying the content blocks of one step. */
+  function assistantMessage(seq: number, content: unknown[]): string {
+    return JSON.stringify({
+      type: 'assistant/message',
+      seq,
+      time: BASE + seq * 1000,
+      data: {
+        turn: 1,
+        step: seq,
+        message: {
+          role: 'assistant',
+          content,
+          source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+        },
+        usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+      },
+    });
+  }
+
+  /** The harness' own closing event for one call; `error` is how it records a failure. */
+  function toolResult(seq: number, step: number, callId: string, error?: unknown): string {
+    return JSON.stringify({
+      type: 'tool/result',
+      seq,
+      time: BASE + seq * 1000,
+      data: {
+        turn: 1,
+        step,
+        message: {
+          source: { kind: 'tool', callId },
+          content: [{ type: 'tool-result', toolCallId: callId, content: [] }],
+        },
+        ...(error === undefined ? {} : { error }),
+      },
+    });
+  }
+
+  /** Write one log and read its records back. */
+  async function recordsOf(lines: readonly string[]): Promise<readonly UsageRecord[]> {
+    await writeFile(join(toolsDir, 'session.jsonl'), `${[header(), ...lines].join('\n')}\n`);
+    return (await readSessionLog(join(toolsDir, 'session.jsonl'))).records;
+  }
+
+  beforeEach(async () => {
+    toolsDir = await mkdtemp(join(tmpdir(), 'agent-usages-dsh-tools-'));
+  });
+
+  afterEach(async () => {
+    await rm(toolsDir, { recursive: true, force: true });
+  });
+
+  it('reads one tool call out of the message content', async () => {
+    const args = '{"command": "pwd", "description": "Print the working directory"}';
+    const records = await recordsOf([
+      assistantMessage(10, [
+        { type: 'text', text: 'checking the directory' },
+        { type: 'tool-call', id: 'call_1', name: 'bash', arguments: args },
+      ]),
+      toolResult(11, 10, 'call_1'),
+    ]);
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.events).toEqual([
+      {
+        kind: 'tool_call',
+        ordinal: 0,
+        name: 'bash',
+        detail: args,
+        bytes: Buffer.byteLength(args, 'utf8'),
+        ok: true,
+      },
+    ]);
+  });
+
+  it('keeps two calls of one step in ordinal order', async () => {
+    const records = await recordsOf([
+      assistantMessage(10, [
+        { type: 'tool-call', id: 'call_1', name: 'bash', arguments: '{"command": "ls"}' },
+        { type: 'tool-call', id: 'call_2', name: 'read', arguments: '{"file_path": "/tmp/tools/a.ts"}' },
+      ]),
+      toolResult(11, 10, 'call_1'),
+      toolResult(12, 10, 'call_2'),
+    ]);
+
+    expect(records[0]?.events?.map((event) => [event.ordinal, event.name, event.ok])).toEqual([
+      [0, 'bash', true],
+      [1, 'read', true],
+    ]);
+  });
+
+  it('gives a call whose result recorded an error ok false', async () => {
+    const records = await recordsOf([
+      assistantMessage(10, [{ type: 'tool-call', id: 'call_1', name: 'read', arguments: '{"file_path": "/nope"}' }]),
+      toolResult(11, 10, 'call_1', { name: 'FsError', code: 'FS_NOT_OBSERVED' }),
+    ]);
+
+    expect(records[0]?.events?.map((event) => event.ok)).toEqual([false]);
+  });
+
+  it('leaves ok unstated when no result was written, and events undefined without a call', async () => {
+    const records = await recordsOf([
+      assistantMessage(10, [{ type: 'tool-call', id: 'call_1', name: 'bash', arguments: '{"command": "sleep 10"}' }]),
+      assistantMessage(12, [{ type: 'text', text: 'still waiting' }]),
+    ]);
+
+    expect(records).toHaveLength(2);
+    expect(records[0]?.events?.map((event) => event.ok)).toEqual([undefined]);
+    expect(records[1]?.events).toBeUndefined();
+    expect('events' in (records[1] as object)).toBe(false);
+  });
+
+  it('bounds the excerpt while bytes keeps the whole payload', async () => {
+    const args = `{"command": "${'x'.repeat(2_000)}"}`;
+    const records = await recordsOf([
+      assistantMessage(10, [{ type: 'tool-call', id: 'call_1', name: 'bash', arguments: args }]),
+      toolResult(11, 10, 'call_1'),
+    ]);
+
+    const event = records[0]?.events?.[0];
+    expect(event?.detail).toHaveLength(300);
+    expect(event?.detail).toBe(args.slice(0, 300));
+    expect(event?.bytes).toBe(Buffer.byteLength(args, 'utf8'));
+    expect(event?.bytes).toBeGreaterThan(Buffer.byteLength(event?.detail ?? '', 'utf8'));
   });
 });

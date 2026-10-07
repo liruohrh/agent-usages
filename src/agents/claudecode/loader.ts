@@ -38,11 +38,13 @@ import type {
   SessionRecord,
   TokenBuckets,
   UsageDataset,
+  UsageEvent,
   UsageRecord,
 } from '../../core/types.ts';
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
+import { attachToolEvents, toolCallEvents } from '../events.ts';
 import { fileIfPresent, splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable Claude Code honours for its config directory. */
@@ -272,6 +274,59 @@ function billedUsage(
   return { tokens: usageBuckets(usage), ...cacheWriteTiersOf(usage) };
 }
 
+/** A `tool_use` block, plus the id that pairs it with its `tool_result`. */
+interface ToolUse {
+  /** `tool_use.id`, the key a `tool_result` carries back. */
+  id: string | undefined;
+  name: string;
+  /** The block's `input`, as written (always an object in the real logs). */
+  input: unknown;
+}
+
+/**
+ * Collect the tool calls of one entry's message, and the outcome of any result.
+ *
+ * A response is written as one entry per content block — a text block and a
+ * `tool_use` block are separate lines that share the same `message.id` (measured:
+ * 6,452 message ids in the reference corpus) — so calls are keyed by that id and
+ * accumulate in file order. The `tool_result` blocks arrive in later `user`
+ * entries and are matched back by `tool_use_id`.
+ *
+ * @param message - the entry's `message` object.
+ * @param calls - per `message.id`, the calls found so far, in file order.
+ * @param outcomes - per `tool_use_id`, the outcome the log stated.
+ */
+function collectToolBlocks(
+  message: Record<string, unknown>,
+  calls: Map<string, ToolUse[]>,
+  outcomes: Map<string, boolean>,
+): void {
+  const content = message['content'];
+  if (!Array.isArray(content)) return;
+  const messageId = asString(message['id']);
+  for (const raw of content) {
+    const block = asRecord(raw);
+    if (block === undefined) continue;
+    if (block['type'] === 'tool_use') {
+      const name = asString(block['name']);
+      if (messageId === undefined || name === undefined) continue;
+      const found = calls.get(messageId) ?? [];
+      found.push({ id: asString(block['id']), name, input: block['input'] });
+      calls.set(messageId, found);
+      continue;
+    }
+    if (block['type'] === 'tool_result') {
+      const id = asString(block['tool_use_id']);
+      const failed = block['is_error'];
+      // Only a boolean is the log stating an outcome. Claude Code writes the
+      // flag for every Bash result but for other tools only when they failed
+      // (measured: 9,671 of 11,345 results carry it), so an absent flag stays
+      // absent rather than being read as success.
+      if (id !== undefined && typeof failed === 'boolean') outcomes.set(id, !failed);
+    }
+  }
+}
+
 /** One session file's facts. */
 interface ScannedSession {
   /** Session id: the parent's file uuid, or the subagent's `sessionId`. */
@@ -313,6 +368,10 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   let summaryTitle: string | null = null;
   const records: UsageRecord[] = [];
   const messageIds: string[] = [];
+  /** Tool calls per `message.id`, in the order the log wrote them. */
+  const toolCalls = new Map<string, ToolUse[]>();
+  /** Outcomes Claude Code stated, per `tool_use_id`. */
+  const toolOutcomes = new Map<string, boolean>();
   const children = new Map<string, number>();
   // One API response is written as one entry per content block, and every one of
   // them repeats the same `usage` — counting entries would bill each request two
@@ -351,6 +410,9 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       continue;
     }
     const message = asRecord(entry['message']);
+    // Tool blocks are collected before the usage check: they describe the
+    // request, and a call is worth keeping even where no usage was written.
+    if (message !== undefined) collectToolBlocks(message, toolCalls, toolOutcomes);
     const usage = message === undefined ? undefined : asRecord(message['usage']);
     if (usage === undefined || message === undefined) continue;
     if (asString(entry['type']) !== 'assistant') continue;
@@ -382,6 +444,13 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
       ...billedUsageFields,
     });
   }
+  // A request's tool calls ride on its record, so the fork and dedupe passes
+  // that later drop inherited records drop their events with them.
+  records.forEach((record, index) => {
+    const calls = toolCalls.get(messageIds[index] as string);
+    if (calls === undefined) return;
+    attachToolEvents(record, toolEventsOf(calls, toolOutcomes));
+  });
   if (id === undefined && cwd === null && records.length === 0) return undefined;
   // `--resume-session-at` branches in place: the log stays append-only and the
   // branch shows up as a message with two children.
@@ -390,6 +459,17 @@ async function scanSession(path: string, fallbackId: string): Promise<ScannedSes
   // does; a name the user set outranks both and is applied by the caller.
   const title = summaryTitle ?? userTitle;
   return { id: id ?? fallbackId, cwd, createdAt, title, records, messageIds, branchPoints };
+}
+
+/** One request's `tool_use` blocks as neutral events, with the outcomes that were stated. */
+function toolEventsOf(calls: readonly ToolUse[], outcomes: ReadonlyMap<string, boolean>): UsageEvent[] {
+  return toolCallEvents(
+    calls.map((call) => ({
+      name: call.name,
+      payload: call.input,
+      ok: call.id === undefined ? undefined : outcomes.get(call.id),
+    })),
+  );
 }
 
 /** Directory entries, or an empty list when the directory cannot be read. */
