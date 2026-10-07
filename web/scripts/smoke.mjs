@@ -386,6 +386,66 @@ async function exercise(base, { live }) {
   const badRange = await call(base, '/api/summary?range=2026-01-01..2026-02-02..2026-03-03');
   check('非法 range → 400 JSON', badRange.status === 400 && typeof badRange.body?.error?.message === 'string', `HTTP ${badRange.status}`);
 
+  // The tool-call view: the shape `agent-usages tools --json` prints, and the
+  // identity every level of this dashboard is built on — Σ agents = totals.
+  const tools = await call(base, '/api/tools');
+  check('GET /api/tools → 200', tools.status === 200, `HTTP ${tools.status}`);
+  check(
+    'tools 的形状是 { agents, totals }',
+    Array.isArray(tools.body?.agents) && typeof tools.body?.totals === 'object',
+    JSON.stringify(Object.keys(tools.body ?? {})),
+  );
+  // A snapshot written before tool calls existed cannot answer this endpoint, and
+  // "the file has no tool data" must not look like "these agents called none".
+  check(
+    'toolsAvailable 与 /api/tools 的可用性一致',
+    (health.body?.toolsAvailable === true) === (tools.body?.unavailable !== true),
+    `health=${health.body?.toolsAvailable} unavailable=${tools.body?.unavailable}`,
+  );
+  const toolAgents = tools.body?.agents ?? [];
+  const toolTotals = tools.body?.totals ?? {};
+  const sumIn = (rows, pick) => rows.reduce((total, row) => total + (pick(row) ?? 0), 0);
+  check(
+    'Σ tools.agents = tools.totals（四项 + ok 三态）',
+    sumIn(toolAgents, (agent) => agent?.calls) === (toolTotals.calls ?? 0) &&
+      sumIn(toolAgents, (agent) => agent?.records) === (toolTotals.records ?? 0) &&
+      sumIn(toolAgents, (agent) => agent?.recordsWithCalls) === (toolTotals.recordsWithCalls ?? 0) &&
+      sumIn(toolAgents, (agent) => agent?.bytes) === (toolTotals.bytes ?? 0) &&
+      sumIn(toolAgents, (agent) => agent?.ok?.true) === (toolTotals.ok?.true ?? 0) &&
+      sumIn(toolAgents, (agent) => agent?.ok?.false) === (toolTotals.ok?.false ?? 0) &&
+      sumIn(toolAgents, (agent) => agent?.ok?.unknown) === (toolTotals.ok?.unknown ?? 0),
+    JSON.stringify(toolTotals),
+  );
+  check(
+    '每个 agent 的 ok 三态齐全',
+    toolAgents.every(
+      (agent) =>
+        typeof agent?.ok?.true === 'number' && typeof agent?.ok?.false === 'number' && typeof agent?.ok?.unknown === 'number',
+    ),
+  );
+  if (toolAgents.length > 0) {
+    const named = toolAgents[0]?.agent ?? '';
+    const one = await call(base, `/api/tools?agent=${encodeURIComponent(named)}`);
+    const kept = one.body?.agents ?? [];
+    const keptTotals = one.body?.totals ?? {};
+    check(
+      '?agent= 收窄后恒等式仍成立',
+      one.status === 200 &&
+        kept.length > 0 &&
+        kept.every((agent) => agent?.agent === named) &&
+        sumIn(kept, (agent) => agent?.calls) === (keptTotals.calls ?? -1) &&
+        sumIn(kept, (agent) => agent?.records) === (keptTotals.records ?? -1) &&
+        sumIn(kept, (agent) => agent?.bytes) === (keptTotals.bytes ?? -1),
+      `HTTP ${one.status} agent=${named}`,
+    );
+  }
+  const badToolsRange = await call(base, '/api/tools?range=2026-01-01..2026-02-02..2026-03-03');
+  check(
+    '非法 range 在 /api/tools 上同样是 400 JSON',
+    badToolsRange.status === 400 && typeof badToolsRange.body?.error?.message === 'string',
+    `HTTP ${badToolsRange.status}`,
+  );
+
   // The detail tables the UI draws: one row per identity, and the rows add up to
   // the totals they sit under. A row per session both duplicates the identity
   // (which is the React key) and leaves the tables short.

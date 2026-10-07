@@ -31,7 +31,7 @@ import { dirname, join, resolve } from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
-import { flattenWarning, localizeDashboard, openStore, type DashboardQuery, type DashboardStore } from './data.ts';
+import { flattenWarning, localizeDashboard, openStore, TOOLS_UNAVAILABLE, type DashboardQuery, type DashboardStore } from './data.ts';
 import { openInBrowser } from './open.ts';
 import { LANGUAGES, language, messagesFor, parseLanguage, setLanguage, t, type Language } from '../i18n/index.ts';
 import { ConfigError, UserError, renderDiagnostic } from '../i18n/errors.ts';
@@ -76,12 +76,24 @@ export interface ServeOptions {
   webRoot?: string | undefined;
   /** Agent selector for the scan (`all`, `dsh`, `dsh,pi`). */
   agent?: string | undefined;
+  /**
+   * Per-agent data roots, `agent=<path>[,<path>…]` (`--agent-dir`).
+   *
+   * One agent can be read from several directories, and a single `home` cannot
+   * say which agent a directory belongs to — so this is the option the CLI maps
+   * `--agent-dir` onto.
+   */
+  agentDirs?: readonly string[] | undefined;
   /** Explicit data root, passed to every adapter. */
   home?: string | undefined;
   /** Read a JSON snapshot instead of scanning. */
   snapshot?: string | undefined;
   /** Skip the lazy price/rate refresh. */
   noUpdate?: boolean | undefined;
+  /** `--no-store`: parse every file again and write nothing to the scan database. */
+  noStore?: boolean | undefined;
+  /** `--db <path>`: where the scan database lives. */
+  db?: string | undefined;
   /** Suppress the startup lines (the smoke test and tests do). */
   quiet?: boolean | undefined;
 }
@@ -273,7 +285,25 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
       scannedAt: store.scannedAt,
       scanMs: store.scanMs,
       agents: store.loadedAgents,
+      // A snapshot written before tool calls existed cannot answer /api/tools;
+      // saying so here lets the page hide the view instead of drawing an empty
+      // one, which would read as "these agents called no tools".
+      toolsAvailable: store.toolsAvailable,
     });
+  }));
+
+  /**
+   * The tool-call report, in exactly the shape `agent-usages tools --json`
+   * prints: `{ agents, totals }`, plus `unavailable` only when the data behind
+   * the server cannot answer at all (an older snapshot).
+   *
+   * `range` and `agent` narrow it; `project`/`q` have no meaning for a tool call
+   * here and are ignored, because the report has no project dimension to narrow.
+   */
+  app.get('/api/tools', route((request, response) => {
+    const { dashboard } = dashboardOf(request);
+    const tools = dashboard.tools;
+    json(response, tools === undefined ? TOOLS_UNAVAILABLE : { agents: tools.agents, totals: tools.totals });
   }));
 
   app.get('/api/summary', route((request, response) => {
@@ -652,8 +682,11 @@ function listen(app: Express, port: number, host: string): Promise<Server> {
 export async function startServer(options: ServeOptions = {}): Promise<RunningServer> {
   const store = await openStore({
     ...(options.agent === undefined ? {} : { agent: options.agent }),
+    ...(options.agentDirs === undefined ? {} : { agentDirs: options.agentDirs }),
     ...(options.home === undefined ? {} : { home: options.home }),
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
+    ...(options.noStore === true ? { noStore: true } : {}),
+    ...(options.db === undefined ? {} : { db: options.db }),
     noUpdate: options.noUpdate ?? true,
   });
   const app = createApp(store, options);

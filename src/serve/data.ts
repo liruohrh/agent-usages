@@ -61,6 +61,7 @@ import {
   storeResetWarning,
 } from '../agents/sources.ts';
 import { addCostTotals, costOf, zeroCostTotals, type CostSubtotal, type OriginalPricing } from '../report/accounting.ts';
+import { collectTools, type AgentToolUsage, type ToolsReport, type ToolTotals } from '../report/tools.ts';
 import { resolveConfig } from '../config/resolve.ts';
 import { mergeDatasets } from '../core/merge.ts';
 import { TOOL_VERSION } from '../core/version.ts';
@@ -205,6 +206,15 @@ export interface DashboardStore {
   /** Its display name. */
   readonly pricingLabel: string;
   /**
+   * Whether this store can answer with tool-call data.
+   *
+   * A live scan always can — an empty answer then means "no tool calls were
+   * recorded". A snapshot can only if the file was written with `tools`, so the
+   * two cases are told apart before anything is asked, which is what
+   * `GET /api/tools` and `/api/health` report.
+   */
+  readonly toolsAvailable: boolean;
+  /**
    * The dashboard for a query.
    * @param query - range, agent, project and search filters.
    * @returns the dashboard, filtered and re-totalled.
@@ -343,6 +353,13 @@ function addAmounts(left: string, right: string): string {
 /** Add a list of decimal amounts, exactly. */
 function sumAmountsList(list: readonly string[]): string {
   return list.reduce(addAmounts, '0');
+}
+
+/** A JSON object from an untrusted value, or `undefined` (arrays are not objects here). */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 /** Copy the five buckets out of an unknown value, defaulting each to zero. */
@@ -1023,6 +1040,9 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     currencySymbol: symbol,
     pricingProvider: provider.id,
     pricingLabel: provider.label,
+    // A live store read the records itself, so it always has an answer: zero
+    // calls means the logs recorded none.
+    toolsAvailable: true,
     dashboard(query = {}) {
       return filterDashboard(build(query.range), query);
     },
@@ -1063,6 +1083,148 @@ function describeSources(sources: readonly { id: string; source: string }[]): st
   if (sources.length === 0) return '（没有可读的 agent 数据）';
   if (sources.length === 1) return sources[0]?.source ?? '（没有可读的 agent 数据）';
   return sources.map((entry) => `${entry.id}: ${entry.source}`).join(' · ');
+}
+
+// ---------------------------------------------------------------------------
+// Tool calls
+// ---------------------------------------------------------------------------
+
+/**
+ * Zeroed tool totals.
+ *
+ * A shared constant rather than a fresh object per call, because it is also the
+ * answer a snapshot without tool data gets — and an all-zero `ToolsReport` is
+ * exactly what "the log recorded no tool call" looks like, which is why that
+ * answer carries {@link TOOLS_UNAVAILABLE} beside it instead.
+ */
+const NO_TOOLS: ToolTotals = { calls: 0, records: 0, recordsWithCalls: 0, ok: { true: 0, false: 0, unknown: 0 }, bytes: 0 };
+
+/**
+ * The answer for a snapshot that carries no tool data at all.
+ *
+ * A snapshot written before `tools` existed is not a scan that found no tool
+ * calls: the file simply never held them. Both would otherwise serialise to
+ * `agents: []` with zero totals, and a reader could not tell "nothing happened"
+ * from "nothing was recorded" — so the missing case says so in words.
+ */
+export const TOOLS_UNAVAILABLE = {
+  agents: [] as const,
+  totals: NO_TOOLS,
+  unavailable: true as const,
+};
+
+/** Sum one agent's tool figures into a running total. */
+function addToolTotals(into: ToolTotals, agent: AgentToolUsage): void {
+  into.calls += agent.calls;
+  into.records += agent.records;
+  into.recordsWithCalls += agent.recordsWithCalls;
+  into.bytes += agent.bytes;
+  into.ok.true += agent.ok.true;
+  into.ok.false += agent.ok.false;
+  into.ok.unknown += agent.ok.unknown;
+}
+
+/**
+ * The totals of a set of agent rows.
+ *
+ * Recomputed from the rows rather than carried beside them, so the identity
+ * `Σ agents = totals` holds by construction — for a narrowed dashboard, and for
+ * a snapshot whose totals disagree with its own rows.
+ *
+ * @param agents - the rows to add up.
+ * @returns their sums.
+ */
+export function toolTotalsOf(agents: readonly AgentToolUsage[]): ToolTotals {
+  const totals: ToolTotals = { calls: 0, records: 0, recordsWithCalls: 0, ok: { true: 0, false: 0, unknown: 0 }, bytes: 0 };
+  for (const agent of agents) addToolTotals(totals, agent);
+  return totals;
+}
+
+/**
+ * Narrow a tool report to a set of agents.
+ *
+ * The rows are the unit here, not the projects they happened in: `?agent=dsh`
+ * asks for what dsh did, and answering with the other agents that shared its
+ * projects would be the same over-count the dashboard's per-agent filter exists
+ * to avoid. An empty set means "no filter".
+ *
+ * @param tools - the report to narrow, when the dashboard has one.
+ * @param agents - the agent ids to keep.
+ * @returns the narrowed report, or `undefined` when there was none.
+ */
+function narrowTools(tools: ToolsReport | undefined, agents: ReadonlySet<string>): ToolsReport | undefined {
+  if (tools === undefined) return undefined;
+  if (agents.size === 0) return tools;
+  const kept = tools.agents.filter((agent) => agents.has(agent.agent));
+  return { agents: kept, totals: toolTotalsOf(kept) };
+}
+
+/** A non-negative count from a snapshot, or `0`. */
+function countOr0(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+/** An outcome counter from a snapshot, defaulting every bucket to `0`. */
+function outcomesOf(value: unknown): AgentToolUsage['ok'] {
+  const source = asRecord(value);
+  return { true: countOr0(source?.['true']), false: countOr0(source?.['false']), unknown: countOr0(source?.['unknown']) };
+}
+
+/** One agent's tool row from a snapshot, defensively copied. */
+function normalizeToolAgent(value: unknown): AgentToolUsage {
+  const entry = asRecord(value);
+  const tools = Array.isArray(entry?.['tools']) ? (entry['tools'] as unknown[]) : [];
+  const sessions = Array.isArray(entry?.['sessions']) ? (entry['sessions'] as unknown[]) : [];
+  return {
+    agent: String(entry?.['agent'] ?? ''),
+    calls: countOr0(entry?.['calls']),
+    records: countOr0(entry?.['records']),
+    recordsWithCalls: countOr0(entry?.['recordsWithCalls']),
+    ok: outcomesOf(entry?.['ok']),
+    bytes: countOr0(entry?.['bytes']),
+    tools: tools.map((item) => {
+      const row = asRecord(item);
+      return {
+        name: String(row?.['name'] ?? ''),
+        calls: countOr0(row?.['calls']),
+        ok: outcomesOf(row?.['ok']),
+        bytes: countOr0(row?.['bytes']),
+        share: numberOr0(row?.['share']),
+      };
+    }),
+    sessions: sessions.map((item) => {
+      const row = asRecord(item);
+      const rows = Array.isArray(row?.['tools']) ? (row['tools'] as unknown[]) : [];
+      return {
+        id: String(row?.['id'] ?? ''),
+        title: stringOrNull(row?.['title']),
+        calls: countOr0(row?.['calls']),
+        ok: outcomesOf(row?.['ok']),
+        bytes: countOr0(row?.['bytes']),
+        tools: rows.map((tool) => {
+          const pair = asRecord(tool);
+          return { name: String(pair?.['name'] ?? ''), calls: countOr0(pair?.['calls']) };
+        }),
+      };
+    }),
+  };
+}
+
+/**
+ * The `tools` block of a snapshot file.
+ *
+ * `undefined` when the file has none — the field's absence is the signal, so an
+ * old snapshot is never mistaken for a scan that recorded no tool call.
+ *
+ * @param value - the parsed `tools` member.
+ * @returns the report, or `undefined` when the snapshot carries none.
+ */
+export function normalizeTools(value: unknown): ToolsReport | undefined {
+  if (value === undefined || value === null || typeof value !== 'object') return undefined;
+  const agents = Array.isArray((value as Record<string, unknown>)['agents'])
+    ? ((value as Record<string, unknown>)['agents'] as unknown[]).map(normalizeToolAgent)
+    : [];
+  return { agents, totals: toolTotalsOf(agents) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1161,6 +1323,11 @@ function buildDashboard(input: BuildInput): Dashboard {
     models: mergeModelRows(drafts.projects.flatMap((draft) => draft.models)),
     bands,
     subtotals: subtotalsOf(bands),
+    // The tool calls of this range, from the same records the report above read:
+    // one aggregation (the report layer's), so the page and `agent-usages tools`
+    // cannot disagree. The range is the request's, which is what makes the live
+    // `/api/tools?range=…` a re-query rather than a filter over stale numbers.
+    tools: collectTools(input.datasets[0] ?? emptyScanDataset(), { range: input.range }),
     warnings: [...input.warnings],
   };
   detailIndex.set(dashboard, drafts.reports);
@@ -1897,6 +2064,9 @@ export function filterDashboard(dashboard: Dashboard, query: DashboardQuery = {}
     // Recomputed from the rows that survived, so the block describes the same
     // scope as the totals beside it rather than the whole scan.
     subtotals: subtotalsOf(filteredBands),
+    // The same rule for the tool rows: keep the agents the query named, and let
+    // the totals be their sum — `Σ agents = totals` is what the API promises.
+    tools: narrowTools(dashboard.tools, agents),
   };
   const index = detailIndex.get(dashboard);
   if (index !== undefined) detailIndex.set(filtered, index);
@@ -1927,6 +2097,9 @@ function emptyDashboard(dashboard: Dashboard): Dashboard {
     models: [],
     bands: [],
     subtotals: [],
+    // A selector that matched nothing has no tool calls either; `undefined`
+    // would claim the data itself carries none.
+    ...(dashboard.tools === undefined ? {} : { tools: { agents: [], totals: toolTotalsOf([]) } }),
   };
 }
 
@@ -2285,6 +2458,10 @@ async function openSnapshotStore(path: string, options: ScanOptions): Promise<Da
     currencySymbol: snapshot.currencySymbol,
     pricingProvider: snapshot.pricingProvider,
     pricingLabel: snapshot.pricingLabel,
+    // The file either holds tool calls or it does not; `dashboard(query).tools`
+    // stays `undefined` in the second case, and this is how a caller knows
+    // before asking.
+    toolsAvailable: snapshot.tools !== undefined,
     dashboard(query = {}) {
       const range = resolveRange(query.range === undefined ? {} : { spec: query.range });
       const built: Dashboard = {
@@ -2445,6 +2622,10 @@ export function normalizeSnapshot(parsed: unknown, path: string): Dashboard {
     ),
     bands: snapshotBands,
     subtotals: subtotalsOf(snapshotBands),
+    // Computed when the file was written, exactly like the time series: a
+    // snapshot is a photograph, and no range filter can put back a call the
+    // photograph never took. Absent means the file predates the field.
+    tools: normalizeTools(root['tools']),
     warnings,
   };
   const reports = new Map<string, SessionReport>();

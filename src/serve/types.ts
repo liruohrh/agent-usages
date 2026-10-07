@@ -17,9 +17,10 @@
 import type { Language } from '../i18n/index.ts';
 import type { CostTotals, TokenBuckets } from '../core/types.ts';
 import type { CostSubtotal } from '../report/accounting.ts';
+import type { ToolsReport } from '../report/tools.ts';
 import type { DualMoney, OriginalAmounts } from '../pricing/index.ts';
 
-export type { CostTotals, TokenBuckets };
+export type { CostTotals, TokenBuckets, ToolsReport };
 
 /** A non-fatal problem, flattened for JSON (`UserError` carries a getter). */
 export interface DashboardWarning {
@@ -437,6 +438,15 @@ export interface Dashboard extends DashboardMeta {
   models: ModelRow[];
   /** Every price band seen, per agent and project. */
   bands: BandRow[];
+  /**
+   * What the agents *did* in this range: tool calls, per agent.
+   *
+   * Always present on a live dashboard. Absent only in a snapshot written before
+   * this field existed — {@link Dashboard} consumers must read absence as "this
+   * snapshot does not carry tool calls", never as "the data recorded none":
+   * `GET /api/tools` answers `unavailable: true` for exactly that case.
+   */
+  tools?: ToolsReport | undefined;
   /**
    * One row per (price list, published currency) the run billed under.
    *

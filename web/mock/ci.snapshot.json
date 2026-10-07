@@ -1,9 +1,9 @@
 {
-  "generatedAt": 1791138607008,
+  "generatedAt": 1791395173630,
   "mode": "live",
   "source": "/home/demo/agent-usages/web/mock/fixtures/claudecode",
-  "scannedAt": 1791138607002,
-  "scanMs": 19,
+  "scannedAt": 1791395173623,
+  "scanMs": 39,
   "loadedAgents": [
     {
       "id": "claudecode",
@@ -1628,21 +1628,6 @@
     ],
     "hour": [
       {
-        "t": 1790128800000,
-        "bucket": "hour",
-        "agent": "claudecode",
-        "projectId": "-ws-demo-app",
-        "requests": 3,
-        "tokens": {
-          "input": 420000,
-          "output": 3700,
-          "cacheRead": 2880000,
-          "cacheWrite": 44000,
-          "reasoning": 1260
-        },
-        "cost": "1.0728"
-      },
-      {
         "t": 1790211600000,
         "bucket": "hour",
         "agent": "claudecode",
@@ -1962,6 +1947,35 @@
       }
     }
   ],
+  "tools": {
+    "agents": [
+      {
+        "agent": "claudecode",
+        "calls": 0,
+        "records": 6,
+        "recordsWithCalls": 0,
+        "ok": {
+          "true": 0,
+          "false": 0,
+          "unknown": 0
+        },
+        "bytes": 0,
+        "tools": [],
+        "sessions": []
+      }
+    ],
+    "totals": {
+      "calls": 0,
+      "records": 6,
+      "recordsWithCalls": 0,
+      "ok": {
+        "true": 0,
+        "false": 0,
+        "unknown": 0
+      },
+      "bytes": 0
+    }
+  },
   "warnings": [
     {
       "code": "unpricedRecords",

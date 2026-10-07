@@ -286,9 +286,10 @@ CLI 的 `bin` / `files` / `version` 未改动。
 
 | 端点 | 返回 |
 | --- | --- |
-| `GET /api/health` | `{ok, mode, scannedAt, scanMs, agents[]}`，给探活用 |
+| `GET /api/health` | `{ok, mode, scannedAt, scanMs, agents[], toolsAvailable}`，给探活用（`toolsAvailable` 见 §3.1） |
 | `GET /api/summary` | 元信息 + `agents[]`（按 agent 的总计）+ `totals`（含 `tokenBreakdown`）+ `counts` + `warnings[]` |
 | `GET /api/agents` | 元信息 + `agents[]` + `totals` |
+| `GET /api/tools` | 工具调用聚合，形状与 `agent-usages tools --json` **完全一致**：`{agents[], totals}`；只认 `range` 与 `agent`（见 §3.1） |
 | `GET /api/projects` | 元信息 + `projects[]`（每个项目含 `agentTotals[]` 与 `sessionReports[]`）+ `repos[]` + `totals` |
 | `GET /api/projects/:id` | 单个项目；`id` 是 `repo:<root>` 或 `path:<dir>`，也可用项目名匹配；找不到 404 |
 | `GET /api/sessions` | 所有项目的会话拍平；`subagents=0` 只看主会话；`count` |
@@ -308,6 +309,49 @@ CLI 的 `bin` / `files` / `version` 未改动。
 
 `startServer(options)` 的返回值是 `{ url, port, store, close() }`，`close()` 会关掉监听与
 `--refresh` 定时器；`src/cli/index.ts` 只需要 `await startServer({...})` 再在退出时 `close()`。
+
+### 3.1 工具调用（`/api/tools`）
+
+回答"agent 到底在用什么工具"。数据来自各适配器写进 `UsageRecord.events` 的工具调用，
+聚合直接复用 CLI 的那一份（`src/report/tools.ts` 的 `collectTools`），所以 Web 与
+`agent-usages tools --json` 的口径逐字段一致：
+
+```jsonc
+{
+  "agents": [
+    { "agent": "dsh",
+      "calls": 10697, "records": 10063, "recordsWithCalls": 9807,
+      "ok": { "true": 10524, "false": 172, "unknown": 1 },
+      "bytes": 11236748,
+      "tools": [ { "name": "bash", "calls": 6742, "ok": { … }, "bytes": 6742000, "share": 63.0 } ],
+      "sessions": [] }
+  ],
+  "totals": { "calls": 14485, "records": 13924, "recordsWithCalls": 13506,
+              "ok": { "true": 14021, "false": 323, "unknown": 141 }, "bytes": 12345678 }
+}
+```
+
+- **`Σ agents = totals` 在 calls / records / recordsWithCalls / bytes 四项以及 `ok` 三态上成
+  立**，`?agent=` 收窄后仍然成立：`totals` 永远由留下的行重算，而不是照抄一个更宽的数——
+  与 dashboard 其余部分同一条规则（`/api/summary` 的 `agents`/`totals` 也是这么来的）。
+- **`ok` 是三态**：`true` / `false` / `unknown`（日志没写成败）。`unknown` 单列，绝不并进成功：
+  真实数据里它常常是最大的一档（Claude Code 不给成功的非 Bash 调用写 `is_error`）。
+- **只认两个过滤参数**：`range`（实时模式按请求重新聚合）与 `agent`；`project` / `q` 对这份
+  聚合没有意义（它没有项目维度），传了忽略。
+- 非法 `range` 与其它接口一样返回 **400 + `{error:{code,message,path}}`**。
+- `sessions` 目前始终是空数组：会话级工具明细留给后续版本，免得把几千行塞进每份
+  dashboard payload（快照也随之变大）。
+
+**"快照没带这份数据"与"确实没有工具调用"必须分得清**：
+
+| 情况 | `/api/tools` | `/api/health.toolsAvailable` | `dashboard.tools` |
+| --- | --- | --- | --- |
+| 实时扫描（不论有没有调用） | `200` + `{agents, totals}` | `true` | 有（可能全零） |
+| 快照带 `tools`（哪怕全零） | `200` + `{agents, totals}` | `true` | 有 |
+| 快照不带 `tools`（旧格式） | `200` + `{agents:[], totals:全零, unavailable:true}` | `false` | 缺省（`undefined`） |
+
+`unavailable: true` 是旧快照唯一的标志位：只有它出现时，"空"才表示"这份文件当时没有记工具
+调用"，而不是"这些 agent 一个工具都没调"。
 
 ---
 
@@ -356,6 +400,15 @@ CLI 的 `bin` / `files` / `version` 未改动。
                         "firstUsage": 0, "lastUsage": 0,
                         "own": {}, "spawned": {}, "total": {} } ],
   "models": [], "bands": [], "repo": { "name": "demo-app", "root": "…", "kind": "main" } }
+
+// tools：这一份 dashboard 覆盖范围（range）内的工具调用，形状与 /api/tools 相同；
+// 只有旧快照会没有这个键，读作"这份文件没记"，不是"没有调用"（见 §3.1、§5）
+{ "agents": [ { "agent": "dsh", "calls": 10697, "records": 10063, "recordsWithCalls": 9807,
+                "ok": { "true": 10524, "false": 172, "unknown": 1 }, "bytes": 11236748,
+                "tools": [ { "name": "bash", "calls": 6742, "ok": { … }, "bytes": 6742000, "share": 63.0 } ],
+                "sessions": [] } ],
+  "totals": { "calls": 14485, "records": 13924, "recordsWithCalls": 13506,
+              "ok": { "true": 14021, "false": 323, "unknown": 141 }, "bytes": 12345678 } }
 ```
 
 ### 数字口径（和 CLI 一致，且每一级都能对上）
@@ -420,6 +473,21 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 
 生成的快照含真实路径与会话标题，属于本机数据：它和截图都被 `.gitignore` 排除，
 只在你自己的机器上生成（`web/mock/README.md` 写了为什么）。要分享，先自己看一眼内容。
+
+快照里的 **`tools` 是写文件那一刻算好的**，与时间序列同一语义：它是那张照片的一部分，
+没有任何 `range` 过滤能把照片没拍到的调用补回来。所以：
+
+- 快照模式下的 `?range=` 只会收窄 dashboard 的其余行；`tools` 始终是文件里那份
+  （实时模式才会按请求重新聚合）；
+- **写快照之前入库的旧文件没有 `tools` 键**：`/api/tools` 会明说 `unavailable: true`，
+  `/api/health.toolsAvailable` 为 `false`，页面据此把工具视图隐藏而不是画一张空表；
+- `agent-usages usage --agent all --json` 那份报告 JSON 也永远不含 `tools`（它不是 dashboard
+  快照），同样走 `unavailable` 这条路，并附它自己那条"没有逐请求时间戳"的告警。
+
+重新生成时如果快照里的工具数据是 0，先确认不是**扫描缓存**的问题：缓存的每个数据根
+按文件指纹决定要不要重解析，而缓存条目可能早于"适配器开始抽工具调用"这个版本——用
+`serve --write-snapshot <文件> --no-store` 可以绕过缓存重新解析全部文件再写（2026-10-08 实测：
+同一台机器上带缓存写出 pi 0 次调用、`--no-store` 写出 3,651 次）。
 
 ---
 
