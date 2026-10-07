@@ -602,12 +602,13 @@ async function loadSqlite(): Promise<SqliteModule> {
  * @param path - the database path, or `:memory:`.
  * @param toolVersion - version of the tool, recorded in `meta`.
  * @param driver - the loaded `node:sqlite` module.
- * @returns the open connection.
+ * @returns the open connection, and whether the rows in it were written by
+ *   another version (see {@link readerVersionChanged}).
  * @throws NewerSchemaError, MigrationError, MissingTablesError, or a SQLite error
  *   for a path that cannot be opened; {@link UsageStore.open} turns each into a
  *   structured answer.
  */
-function connect(path: string, toolVersion: string, driver: SqliteModule): DatabaseSync {
+function connect(path: string, toolVersion: string, driver: SqliteModule): Connection {
   let version = 0;
   if (path !== ':memory:' && existsSync(path)) {
     try {
@@ -626,6 +627,7 @@ function connect(path: string, toolVersion: string, driver: SqliteModule): Datab
   if (version > 0 && version < STORE_SCHEMA_VERSION) backup = takeBackup(path, version, driver);
 
   const db = new driver.DatabaseSync(path);
+  let readerChanged = false;
   try {
     // The key between a root and its rows is composite, so the pragma is what
     // makes a root's data one unit rather than three unrelated tables.
@@ -636,6 +638,10 @@ function connect(path: string, toolVersion: string, driver: SqliteModule): Datab
     db.exec('PRAGMA journal_mode = WAL');
     const onDisk = schemaVersionOf(db);
     if (onDisk > STORE_SCHEMA_VERSION) throw new NewerSchemaError(onDisk);
+    // Read the version that wrote what is in here *before* anything records this
+    // one: the comparison is the whole point, and a write first would erase it.
+    // A file with no schema yet has no meta table to read, and nothing in it.
+    const previous = onDisk >= 1 ? readToolVersion(db) : undefined;
     if (onDisk < STORE_SCHEMA_VERSION) {
       // A version the read-only probe could not report (a WAL that needs
       // recovery, say) still gets its copy here — later, but before any change
@@ -656,6 +662,7 @@ function connect(path: string, toolVersion: string, driver: SqliteModule): Datab
       verifySchema(db);
       recordToolVersion(db, toolVersion);
     }
+    readerChanged = readerVersionChanged(db, previous, toolVersion);
   } catch (error) {
     try {
       db.close();
@@ -664,7 +671,15 @@ function connect(path: string, toolVersion: string, driver: SqliteModule): Datab
     }
     throw error;
   }
-  return db;
+  return { db, readerChanged };
+}
+
+/** An open connection, and what its stored rows are worth to this reader. */
+interface Connection {
+  /** The connection itself. */
+  db: DatabaseSync;
+  /** See {@link readerVersionChanged}: the rows were written by another version. */
+  readerChanged: boolean;
 }
 
 /**
@@ -721,10 +736,54 @@ function migrate(db: DatabaseSync, from: number, toolVersion: string): void {
 }
 
 /**
- * Note which tool version last touched the file.
+ * The tool version that last wrote to this file, or `undefined` when it never
+ * said.
  *
- * Informational: it says whether a bug was seen by the build it was reported
- * against, and it is the one meta row that changes on every open.
+ * Read before {@link recordToolVersion} overwrites it: the old value is what
+ * decides whether anything in the file may be reused, and a write first would
+ * destroy the only evidence of it.
+ * @param db - the connection.
+ * @returns the recorded version, if there is one.
+ */
+function readToolVersion(db: DatabaseSync): string | undefined {
+  const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('tool_version') as { value: string } | undefined;
+  return row?.value;
+}
+
+/**
+ * Whether the rows already in the file were written by a different reader.
+ *
+ * A dataset is only as fresh as the code that produced it. Two runs can see
+ * byte-identical logs and still disagree about the data — one build extracts
+ * tool calls, the next extracts tool calls *and* thinking blocks — so the
+ * version that wrote the rows is part of what decides whether they may be
+ * served again. Without this, a field a new build learned to read stays empty
+ * for every source that has not changed since the upgrade, which is every
+ * source: the files do not move just because the reader did.
+ *
+ * A file with no recorded version but with roots in it is treated the same way:
+ * something wrote those rows and did not say what, which is no reason to trust
+ * them. A file with nothing in it has nothing to invalidate.
+ * @param db - the connection.
+ * @param previous - the version read before this open recorded its own.
+ * @param toolVersion - the version opening the file now.
+ * @returns `true` when stored rows must be re-read rather than reused.
+ */
+function readerVersionChanged(db: DatabaseSync, previous: string | undefined, toolVersion: string): boolean {
+  if (previous !== undefined) return previous !== toolVersion;
+  const row = db.prepare('SELECT 1 AS one FROM roots LIMIT 1').get();
+  return row !== undefined;
+}
+
+/**
+ * Note which tool version last opened the file.
+ *
+ * It records *who is looking at this file*, and it is the one meta row that
+ * changes on every open. It is deliberately not the whole answer to "may these
+ * rows be reused": it says a build opened the file, not that it finished
+ * re-reading anything, so the decision itself is made from the value read
+ * *before* this write (see {@link readerVersionChanged}) and tracked per root
+ * while the run lasts.
  * @param db - the connection.
  * @param toolVersion - the version to record.
  */
@@ -757,9 +816,33 @@ export class UsageStore {
   /** Set by {@link close}; every other method refuses to run after it. */
   #closed = false;
 
-  private constructor(path: string, db: DatabaseSync) {
+  /**
+   * Whether another version of the tool wrote the rows in this database.
+   *
+   * A dataset is only as good as the reader that produced it: a build that
+   * learned to extract something new — tool calls, say — cannot serve rows a
+   * build that did not know about it wrote, however unchanged the source files
+   * look. So the reader version is part of what makes a cache entry fresh, and
+   * when it changed this store answers "nothing is stored here" for every root
+   * it has not itself written during this run (see {@link #rewritten}).
+   */
+  #readerChanged: boolean;
+
+  /**
+   * Roots this run has written itself.
+   *
+   * The version in `meta` is one value for the whole file, so it cannot say
+   * *which* roots the new build has already re-read; remembering them here is
+   * what keeps a long-running process (the server, rescanning on a refresh
+   * interval) from re-reading every root on every pass while the file still says
+   * an older version wrote them.
+   */
+  #rewritten = new Set<string>();
+
+  private constructor(path: string, db: DatabaseSync, readerChanged: boolean) {
     this.path = path;
     this.#db = db;
+    this.#readerChanged = readerChanged;
   }
 
   /**
@@ -797,7 +880,8 @@ export class UsageStore {
     });
 
     try {
-      return { store: new UsageStore(path, connect(path, toolVersion, driver)), reset: null };
+      const connection = connect(path, toolVersion, driver);
+      return { store: new UsageStore(path, connection.db, connection.readerChanged), reset: null };
     } catch (error) {
       if (error instanceof NewerSchemaError) {
         return {
@@ -816,8 +900,9 @@ export class UsageStore {
       if (error instanceof MissingTablesError || isCorrupt(error)) {
         const backup = await backupAside(path, new Date());
         try {
+          const connection = connect(path, toolVersion, driver);
           return {
-            store: new UsageStore(path, connect(path, toolVersion, driver)),
+            store: new UsageStore(path, connection.db, connection.readerChanged),
             reset: { reason: 'corrupt', path, backup, detail: detailOf(error) },
           };
         } catch (later) {
@@ -840,7 +925,8 @@ export class UsageStore {
    * @returns the store.
    */
   static #ephemeral(path: string, toolVersion: string, driver: SqliteModule): UsageStore {
-    return new UsageStore(path, connect(':memory:', toolVersion, driver));
+    const connection = connect(':memory:', toolVersion, driver);
+    return new UsageStore(path, connection.db, connection.readerChanged);
   }
 
   /**
@@ -877,16 +963,30 @@ export class UsageStore {
 
   /**
    * What the sources looked like when the root was last read.
+   *
+   * This is the question "may this root's stored data be used instead of reading
+   * its files again?", so it answers `undefined` — "nothing usable is stored
+   * here" — in both of the cases where reuse would be wrong: a root this store
+   * has never heard of, and a root whose rows were written by a different version
+   * of the tool. The caller then reads the sources and writes the root back, and
+   * the data in the store catches up with what the reader can now see.
+   *
+   * `readRoot` deliberately keeps answering for such a root: rows that cannot be
+   * re-read (a session from a log that is gone) are still history worth showing.
    * @param agent - the agent that read it.
    * @param rootId - identity of the root.
-   * @returns one entry per stored source file, or `undefined` when this store
-   *   has never been told about the root. An empty array means the root is
-   *   known and was read with no sources at all.
+   * @returns one entry per stored source file, or `undefined` when this store has
+   *   nothing reusable for the root. An empty array means the root is known, was
+   *   read with no sources at all, and was written by this version.
    */
   fingerprintOf(agent: string, rootId: string): readonly SourceFingerprint[] | undefined {
     this.#assertOpen();
     const root = this.#rootPath(agent, rootId);
     if (root === undefined) return undefined;
+    // Written by another build, and not yet re-read by this one: the files may be
+    // untouched and the stored dataset still be out of date, because what the
+    // reader extracts is not in the files' fingerprints.
+    if (this.#readerChanged && !this.#rewritten.has(`${agent}|${rootId}`)) return undefined;
     const rows = this.#all<FileRow>(
       'SELECT rel_path, size, mtime_ms, head_hash, status FROM files WHERE agent = ? AND root_id = ? ORDER BY rel_path',
       agent,
@@ -1021,6 +1121,9 @@ export class UsageStore {
    * one dataset holding several agents' sessions — belongs in the store only
    * after it has been split back into the root each agent read.
    *
+   * Writing a root is also what makes it reusable again: from here on, this run
+   * answers {@link fingerprintOf} for it, whatever version wrote it last time.
+   *
    * @param input - the agent, the root, what was read and what it looked like.
    */
   writeRoot(input: WriteRootInput): void {
@@ -1040,6 +1143,9 @@ export class UsageStore {
       }
       throw error;
     }
+    // Only once the rows are committed: a transaction that rolled back wrote
+    // nothing, so the root is still the old version's work.
+    this.#rewritten.add(`${agent}|${rootId}`);
   }
 
   /**

@@ -195,6 +195,49 @@ PRAGMA user_version = 1;
   db.close();
 }
 
+/**
+ * A dataset as a build that knew nothing about tool calls wrote it.
+ *
+ * The shape of every database on disk before the extraction existed, and of the
+ * ones a released build left behind: real sessions and records, no events.
+ */
+function eventlessDataset(root: string, sessionId: string): UsageDataset {
+  const worker = session({
+    id: sessionId,
+    agent: 'dsh',
+    sourceFile: join(root, 'logs', `${sessionId}.jsonl`),
+    records: [record({ id: `r-${sessionId}`, time: 1_700_000_000_000 })],
+  });
+  return dataset([project({ id: 'p', sessions: [worker] })], {
+    agent: 'dsh',
+    agents: ['dsh'],
+    source: root,
+    stats: { filesRead: [join(root, 'logs', `${sessionId}.jsonl`)], sessions: 1, records: 1 },
+  });
+}
+
+/** The same root, read by a build that extracts the tool call it made. */
+function toolsDataset(root: string, sessionId: string): UsageDataset {
+  const worker = session({
+    id: sessionId,
+    agent: 'dsh',
+    sourceFile: join(root, 'logs', `${sessionId}.jsonl`),
+    records: [
+      record({
+        id: `r-${sessionId}`,
+        time: 1_700_000_000_000,
+        events: [{ kind: 'tool_call', ordinal: 0, name: 'Read' }],
+      }),
+    ],
+  });
+  return dataset([project({ id: 'p', sessions: [worker] })], {
+    agent: 'dsh',
+    agents: ['dsh'],
+    source: root,
+    stats: { filesRead: [join(root, 'logs', `${sessionId}.jsonl`)], sessions: 1, records: 1 },
+  });
+}
+
 /** Read one column of one row, straight from the file. */
 function cell(path: string, sql: string, ...params: string[]): unknown {
   const db = new DatabaseSync(path, { readOnly: true });
@@ -264,7 +307,7 @@ describe('opening', () => {
 
   it('reopens an existing file without losing or resetting anything', async () => {
     const root = join(dir, 'home');
-    const first = await openStore();
+    const first = await openStore(dbPath, '1.2.3');
     first.store.writeRoot({
       agent: 'dsh',
       rootId: 'r-1',
@@ -276,14 +319,167 @@ describe('opening', () => {
     const created = cell(dbPath, 'SELECT value FROM meta WHERE key = ?', 'created_at');
     first.store.close();
 
-    const second = await openStore(dbPath, '9.9.9');
+    // The same version again: the cache is used, nothing is rebuilt, and the
+    // file's own bookkeeping rows stay put.
+    const second = await openStore(dbPath, '1.2.3');
     expect(second.reset).toBeNull();
     expect(second.store.fingerprintOf('dsh', 'r-1')).toHaveLength(1);
     expect(second.store.readRoot('dsh', 'r-1')?.dataset.sessions).toHaveLength(2);
-    // Only the informational tool version moved.
+    expect(second.store.readRoot('dsh', 'r-1')?.lastSeen).toBe(1);
     expect(cell(dbPath, 'SELECT value FROM meta WHERE key = ?', 'created_at')).toBe(created);
-    expect(cell(dbPath, 'SELECT value FROM meta WHERE key = ?', 'tool_version')).toBe('9.9.9');
+    expect(cell(dbPath, 'SELECT value FROM meta WHERE key = ?', 'tool_version')).toBe('1.2.3');
     expect(Number(cell(dbPath, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
+  });
+
+  it('treats every root as a cache miss when another version wrote the database', async () => {
+    const root = join(dir, 'home');
+    const quiet = eventlessDataset(root, 's-old');
+
+    // A database as the released build left it: version 0.0.3, a real dataset,
+    // and no events — that build could not extract them.
+    const old = await openStore(dbPath, '0.0.3');
+    old.store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 1, dataset: quiet, fingerprint: [fingerprintFor(root, 'logs/s-old.jsonl')] });
+    expect(old.store.fingerprintOf('dsh', 'r-1')).toHaveLength(1);
+    expect(column(dbPath, 'SELECT ordinal FROM events')).toEqual([]);
+    old.store.close();
+
+    // The new build opens it: the files have not changed, but what a reader
+    // extracts from them has, so nothing here may be served as a hit.
+    const upgraded = await openStore(dbPath, '0.1.0');
+    expect(upgraded.reset).toBeNull();
+    expect(upgraded.store.fingerprintOf('dsh', 'r-1')).toBeUndefined();
+    expect(upgraded.store.fingerprintOf('dsh', 'never')).toBeUndefined();
+    // Not a reset: the rows are still there to be read, and nothing was cleared.
+    expect(upgraded.store.readRoot('dsh', 'r-1')?.dataset.sessions).toHaveLength(1);
+    expect(upgraded.store.rootsOf('dsh')).toHaveLength(1);
+    // The version is recorded as the one looking at the file now.
+    expect(cell(dbPath, 'SELECT value FROM meta WHERE key = ?', 'tool_version')).toBe('0.1.0');
+
+    // The scan that follows re-reads the root and writes it back: the new field
+    // is there, and the root is a cache entry again.
+    upgraded.store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 2,
+      dataset: toolsDataset(root, 's-old'),
+      fingerprint: [fingerprintFor(root, 'logs/s-old.jsonl')],
+    });
+    expect(upgraded.store.fingerprintOf('dsh', 'r-1')).toHaveLength(1);
+    expect(upgraded.store.readRoot('dsh', 'r-1')?.dataset.sessions[0]?.records[0]?.events).toEqual([
+      { kind: 'tool_call', ordinal: 0, name: 'Read' },
+    ]);
+    expect(column(dbPath, 'SELECT name FROM events')).toEqual(['Read']);
+    upgraded.store.close();
+
+    // And the next run of the same version hits the cache — an upgrade costs one
+    // re-read, not a re-read every time.
+    const settled = await openStore(dbPath, '0.1.0');
+    expect(settled.store.fingerprintOf('dsh', 'r-1')).toHaveLength(1);
+    expect(settled.store.readRoot('dsh', 'r-1')?.lastSeen).toBe(2);
+  });
+
+  it('keeps reading a stale entry for a root this run has not re-read', async () => {
+    // A server rescans on a timer: the first pass after an upgrade re-reads every
+    // root, and later passes must not re-read them again just because the file
+    // still says an older version wrote them.
+    const root = join(dir, 'home');
+    const other = join(dir, 'other');
+    const old = await openStore(dbPath, '0.0.3');
+    old.store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 1, dataset: eventlessDataset(root, 's-1'), fingerprint: [] });
+    old.store.writeRoot({ agent: 'dsh', rootId: 'r-2', root: other, now: 1, dataset: eventlessDataset(other, 's-2'), fingerprint: [] });
+    old.store.close();
+
+    const store = (await openStore(dbPath, '0.1.0')).store;
+    expect(store.fingerprintOf('dsh', 'r-1')).toBeUndefined();
+    expect(store.fingerprintOf('dsh', 'r-2')).toBeUndefined();
+    store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 2, dataset: toolsDataset(root, 's-1'), fingerprint: [] });
+    // The one it rewrote is current; the one it has not touched is still a miss.
+    expect(store.fingerprintOf('dsh', 'r-1')).toHaveLength(0);
+    expect(store.fingerprintOf('dsh', 'r-2')).toBeUndefined();
+  });
+
+  it('records its version even when a run re-read nothing, so the cache is not stale forever', async () => {
+    const root = join(dir, 'home');
+    const old = await openStore(dbPath, '0.0.3');
+    old.store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 1, dataset: eventlessDataset(root, 's-1'), fingerprint: [] });
+    old.store.close();
+
+    // A run that opens the newer version but reads nothing at all — every root is
+    // a tombstone, or the user asked for something the run did not need to scan.
+    const idle = await openStore(dbPath, '0.1.0');
+    expect(idle.store.fingerprintOf('dsh', 'r-1')).toBeUndefined();
+    idle.store.close();
+    expect(cell(dbPath, 'SELECT value FROM meta WHERE key = ?', 'tool_version')).toBe('0.1.0');
+
+    // The next run of that version has the roots back: a store that stays "not
+    // mine" would lose every tombstone — a root whose directory is gone is only
+    // reported because the store still answers for it. The cost of this, stated
+    // plainly: after a run that re-read nothing, rows the old version wrote are
+    // trusted again, which is the price of one version stamp for the whole file.
+    const next = await openStore(dbPath, '0.1.0');
+    expect(next.store.fingerprintOf('dsh', 'r-1')).toHaveLength(0);
+    expect(next.store.readRoot('dsh', 'r-1')?.dataset.sessions).toHaveLength(1);
+  });
+
+  it('keeps a tombstone session and its events across a version change', async () => {
+    const root = join(dir, 'home');
+    const gone = session({
+      id: 's-gone',
+      agent: 'dsh',
+      sourceFile: join(root, 'logs', 'gone.jsonl'),
+      records: [record({ id: 'r-gone', time: 5, events: [
+        { kind: 'tool_call', ordinal: 0, name: 'Bash', detail: 'npm test', ok: false },
+      ] })],
+    });
+    const live = session({
+      id: 's-live',
+      agent: 'dsh',
+      sourceFile: join(root, 'logs', 'live.jsonl'),
+      records: [record({ id: 'r-live', time: 6, events: [{ kind: 'tool_call', ordinal: 0, name: 'Read' }] })],
+    });
+    const both = dataset([project({ id: 'p', sessions: [gone, live] })], { agent: 'dsh', agents: ['dsh'], source: root });
+    const files = [fingerprintFor(root, 'logs/gone.jsonl'), fingerprintFor(root, 'logs/live.jsonl')];
+
+    // The old build reads the root, then sees one of its two files disappear: the
+    // session it fed becomes a tombstone, and nothing can read it back from a log.
+    const old = await openStore(dbPath, '0.1.0');
+    old.store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 1, dataset: both, fingerprint: files });
+    old.store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 2,
+      dataset: dataset([project({ id: 'p', sessions: [live] })], { agent: 'dsh', agents: ['dsh'], source: root }),
+      fingerprint: [fingerprintFor(root, 'logs/live.jsonl')],
+      vanishedFiles: ['logs/gone.jsonl'],
+    });
+    expect(old.store.readRoot('dsh', 'r-1')?.staleSessionIds).toEqual(['s-gone']);
+    old.store.close();
+
+    // A version that never saw that log opens the file: the tombstone and what it
+    // did are still readable, and re-reading the root does not lose them.
+    const newer = (await openStore(dbPath, '0.2.0')).store;
+    const before = newer.readRoot('dsh', 'r-1');
+    expect(before?.staleSessionIds).toEqual(['s-gone']);
+    expect(before?.dataset.sessions[0]?.records[0]?.events).toEqual([
+      { kind: 'tool_call', ordinal: 0, name: 'Bash', detail: 'npm test', ok: false },
+    ]);
+    newer.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 3,
+      dataset: toolsDataset(root, 's-live'),
+      fingerprint: [fingerprintFor(root, 'logs/live.jsonl')],
+      vanishedFiles: ['logs/gone.jsonl'],
+    });
+    const after = newer.readRoot('dsh', 'r-1');
+    expect(after?.staleSessionIds).toEqual(['s-gone']);
+    expect(after?.dataset.sessions[0]?.records[0]?.events).toEqual([
+      { kind: 'tool_call', ordinal: 0, name: 'Bash', detail: 'npm test', ok: false },
+    ]);
+    expect(column(dbPath, 'SELECT name FROM events ORDER BY name')).toEqual(['Bash', 'Read']);
   });
 
   it('migrates a version 0 file in place, without touching a newer one', async () => {

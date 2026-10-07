@@ -244,6 +244,13 @@ src/
 连着**指纹**（该根下每个会影响结果的文件：`size` + `mtimeMs` + 前 4 KiB 的 sha256）一起写进
 `sessions` / `records` 表；指纹逐项相同就直接从库里读回数据集，**不解析、数字与首次完全一致**。
 
+缓存的判据是**指纹 + 读取器版本**，两者缺一不可：文件一模一样，也不代表上一版代码从里面读出来的东西
+和这一版一样（0.1.0 开始抽取工具调用，旧库里的 `events` 行永远是 0，而日志不会因为换了读者就变）。
+所以库里的 `meta.tool_version` 不再只是记录——打开时先读旧值、再写新值，**两者不同则本次运行把所有根
+都当缓存未命中**（`fingerprintOf` 返回 `undefined`），照常重扫、按根整体重写；升级后第一次运行会重扫
+一遍，这是刻意的。库里的行一条都不清：根消失后被当墓碑保留的会话是日志里再也拿不回来的东西，陈旧只
+影响「要不要复用」。同一个版本再次运行则与从前完全一致（指纹命中、不重扫）。
+
 - **指纹覆盖哪些文件由适配器决定**（`AgentAdapter.listSources`），硬约束是它必须覆盖 `load()` 读到的
   每个文件——日志、标题、子代理元数据、DSH 的投影缓存、Codex 的标题库都算；`listSources` 与 `load`
   共用同一段「找文件」的代码，`test/unit/list-sources.test.ts` 守着这条不变量。
@@ -256,9 +263,13 @@ src/
   （它由价格表决定，查询时按当时的价目表重算）。行按 `(agent, root_id, …)` 存，跨根并集仍由合并层做，
   所以直接 SQL 查询时同一会话可能多行，要 `GROUP BY agent, session_id` 归并。
 - 驱动是 Node 内置的 `node:sqlite`（v22.13 起不需要 flag）：不用原生依赖（`better-sqlite3` 这类
-  要编译），也不引 ORM 与迁移框架——表就是 `sessions` / `records` 两张，SQL 手写、schema 用
-  `PRAGMA user_version` 自己迁移，少一层生成代码，"库里到底存了什么"才好核对。
-- 为「agent 到底在干什么」预留：schema v2 会加 `events`（工具调用等）表，父键是 `records`。
+  要编译），也不引 ORM 与迁移框架——表就是 `roots` / `files` / `sessions` / `records` / `events`
+  几张，SQL 手写、schema 用 `PRAGMA user_version` 自己迁移，少一层生成代码，"库里到底存了什么"才好核对。
+  要迁移时先 `VACUUM INTO` 出一份 `usage.db.bak-v<旧版本>`（含 WAL 里没 checkpoint 的行），备份写不出来
+  就不动用户的库。
+- 「agent 到底在干什么」有了落点：schema v2 的 `events` 表（工具调用：`kind` / `ordinal` / `name` /
+  `detail` / `bytes` / `ok`）以 `records` 为父键，一个请求做了什么与它花了多少 token 存在一起，
+  以后按工具、按项目、按时间聚合都是 SQL。
 
 `web/` 是唯一的工作区包（Vite + React + Tailwind + ECharts），只依赖 `src/serve/types.ts`
 的 HTTP 契约，不 import 服务端代码；构建产物 `web/dist` 由 `serve` 静态托管。设计、API 与
