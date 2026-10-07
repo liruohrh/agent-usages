@@ -377,3 +377,66 @@ describe('configured projects', () => {
     expect([...resolveProjectSelectors(merged.projects, ['project:Memolink']).keys]).toEqual(['project:Memolink']);
   });
 });
+
+describe('sessions that look copied', () => {
+  /** One dataset holding one session, whose single request is named by `recordId`. */
+  const one = (id: string, recordId: string, time = 1_000) =>
+    dataset(
+      [
+        project({
+          id: `p-${id}`,
+          name: id,
+          path: '/tmp/shared',
+          sessions: [
+            session({ id, agent: 'claudecode', cwd: '/tmp/shared', records: [record({ id: recordId, time })] }),
+          ],
+        }),
+      ],
+      { agent: 'claudecode', agents: ['claudecode'], source: `/data/${id}` },
+    );
+
+  it('says so when two different sessions hold identical records', async () => {
+    // Two ids are two conversations, so the tool cannot fold them; it can only
+    // tell the reader that the same work appears twice.
+    const merged = await mergeDatasets([one('a', 'a:m1'), one('b', 'b:m1')]);
+    const copied = merged.warnings.filter((entry) => entry.code === 'sessionsLookCopied');
+    expect(copied).toHaveLength(1);
+    expect(copied[0]?.params).toMatchObject({
+      first: 'claudecode:a',
+      second: 'claudecode:b',
+      requests: '1',
+    });
+    expect(merged.sessions).toHaveLength(2);
+  });
+
+  it('stays quiet when the records differ or a session billed nothing', async () => {
+    const different = await mergeDatasets([one('a', 'a:m1'), one('b', 'b:m1', 2_000)]);
+    expect(different.warnings.map((entry) => entry.code)).not.toContain('sessionsLookCopied');
+
+    const empty = dataset(
+      [
+        project({
+          id: 'p-empty',
+          name: 'empty',
+          path: '/tmp/shared',
+          sessions: [session({ id: 'z', agent: 'claudecode', cwd: '/tmp/shared', records: [] })],
+        }),
+      ],
+      { agent: 'claudecode', agents: ['claudecode'], source: '/data/empty' },
+    );
+    const quiet = await mergeDatasets([empty, one('a', 'a:m1')]);
+    expect(quiet.warnings.map((entry) => entry.code)).not.toContain('sessionsLookCopied');
+  });
+
+  it('names five groups and sums the rest', async () => {
+    const datasets = [];
+    for (let index = 0; index < 6; index += 1) {
+      datasets.push(one(`x${index}`, `x${index}:m1`, 1_000 + index), one(`y${index}`, `y${index}:m1`, 1_000 + index));
+    }
+    const merged = await mergeDatasets(datasets);
+    const codes = merged.warnings.map((entry) => entry.code);
+    expect(codes.filter((code) => code === 'sessionsLookCopied')).toHaveLength(5);
+    const summary = merged.warnings.find((entry) => entry.code === 'sessionsLookCopiedSummary');
+    expect(summary?.params).toMatchObject({ count: '6', limit: '5' });
+  });
+});

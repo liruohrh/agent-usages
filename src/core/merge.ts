@@ -22,6 +22,8 @@
  * construction — every level is the sum of the same session summaries.
  */
 
+import { createHash } from 'node:crypto';
+
 import { repoOf } from './git.ts';
 import { basenameOf, canonicalPath, normalizePath } from './paths.ts';
 import { UserError, type Warning } from '../i18n/errors.ts';
@@ -37,6 +39,34 @@ import type { DatasetStats, ProjectRecord, RepoInfo, RepoKind, SessionRecord, Us
  * warnings say less than five and a count.
  */
 const NAMED_FOLD_LIMIT = 5;
+
+/**
+ * A digest of what a session *did*, independent of what it is called.
+ *
+ * Two logs holding the same calls — same provider call ids, times, models and
+ * token counts — are the same work; whether they also share a session id decides
+ * whether the tool can fold them into one row. The session id is left out on
+ * purpose (a renamed copy would otherwise look different), but the *call* ids are
+ * in: a parent and its subagent can bill the same shape of request, and only
+ * their message ids tell them apart.
+ *
+ * @param session - the session to digest.
+ * @returns a hex digest, or `null` for a session with no billed requests.
+ */
+function contentDigestOf(session: SessionRecord): string | null {
+  if (session.records.length === 0) return null;
+  const prefix = `${session.id}:`;
+  const parts = [...session.records]
+    .sort((left, right) => left.time - right.time || left.id.localeCompare(right.id))
+    .map((record) => {
+      const { input, output, cacheRead, cacheWrite, reasoning } = record.tokens;
+      // The session id is baked into most adapters' record ids; what is left is
+      // the provider's own identifier for the call.
+      const callId = record.id.startsWith(prefix) ? record.id.slice(prefix.length) : record.id;
+      return `${callId}|${record.time}|${record.model}|${input},${output},${cacheRead},${cacheWrite},${reasoning}`;
+    });
+  return createHash('sha256').update(parts.join('\n')).digest('hex');
+}
 
 /**
  * A project the user declared in `~/.config/agent-usages/config.json`.
@@ -375,6 +405,40 @@ export async function mergeDatasets(
         count: String(foldedSessions.length),
         limit: String(NAMED_FOLD_LIMIT),
         sources: sources.length === 0 ? t().errors.mergedSourcesUnknown : sources.join(t().period.listJoin),
+      }),
+    );
+  }
+  // Sessions with *different* identities but the same content are almost always a
+  // copy somebody made — and unlike the case above, the tool has no way to fold
+  // them: two ids are two conversations, so each one is billed. Saying so is the
+  // only honest option; guessing would risk dropping real usage.
+  const byContent = new Map<string, SessionRecord[]>();
+  for (const session of sessions) {
+    const digest = contentDigestOf(session);
+    if (digest === null) continue;
+    const group = byContent.get(digest);
+    if (group === undefined) byContent.set(digest, [session]);
+    else group.push(session);
+  }
+  const copies = [...byContent.values()]
+    .filter((group) => group.length > 1)
+    .sort((left, right) => `${left[0]?.agent}:${left[0]?.id}`.localeCompare(`${right[0]?.agent}:${right[0]?.id}`));
+  for (const group of copies.slice(0, NAMED_FOLD_LIMIT)) {
+    const [first, second] = group;
+    if (first === undefined || second === undefined) continue;
+    warnings.push(
+      new UserError('sessionsLookCopied', {
+        first: `${first.agent}:${first.id}`,
+        second: `${second.agent}:${second.id}`,
+        requests: String(first.records.length),
+      }),
+    );
+  }
+  if (copies.length > NAMED_FOLD_LIMIT) {
+    warnings.push(
+      new UserError('sessionsLookCopiedSummary', {
+        count: String(copies.length),
+        limit: String(NAMED_FOLD_LIMIT),
       }),
     );
   }

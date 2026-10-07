@@ -470,6 +470,10 @@ export const en: Messages = {
       `${p.count} sessions appear in more than one data source (${p.sources}); the first ${p.limit} are listed above. Each one is merged into a single session by record id, so no request is charged twice.`,
     sessionMergedAcrossSources: (p: { agent: string; id: string; count: string; files: string }) =>
       `session ${p.agent}:${p.id} appears in ${p.count} data sources (${p.files}); they are merged into one session by record id, so no request is charged twice. If they are really two separate conversations, keep them in different data directories.`,
+    sessionsLookCopied: (p: { first: string; second: string; requests: string }) =>
+      `sessions ${p.first} and ${p.second} hold identical records (${p.requests} requests each), which usually means one was copied: their ids differ, so each is counted. If they are one conversation, give them the same session id.`,
+    sessionsLookCopiedSummary: (p: { count: string; limit: string }) =>
+      `${p.count} groups of sessions hold identical records (the first ${p.limit} are listed above); each group is counted separately.`,
     claudecodeHomeNotAbsolute: (p: { value: string }) => `the Claude Code config directory must be an absolute path, got ${p.value}`,
     claudecodeNoData: (p: { source: string }) =>
       `no Claude Code sessions under ${p.source}; point --home at the config directory (default ~/.claude) or set CLAUDE_CONFIG_DIR`,

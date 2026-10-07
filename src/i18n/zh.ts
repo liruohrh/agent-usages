@@ -538,6 +538,10 @@ export const zh = {
       `一共 ${p.count} 个会话出现在多个数据来源（${p.sources}），上面列出了前 ${p.limit} 个；每一条都按记录 id 合并成一条会话，请求不会重复计费。`,
     sessionMergedAcrossSources: (p: { agent: string; id: string; count: string; files: string }) =>
       `会话 ${p.agent}:${p.id} 出现在 ${p.count} 个数据来源（${p.files}）；已按记录 id 合并成一条会话，请求不会重复计费。若这两份其实是两段独立对话，请把它们放在不同的数据目录下分别统计。`,
+    sessionsLookCopied: (p: { first: string; second: string; requests: string }) =>
+      `会话 ${p.first} 与 ${p.second} 的记录完全相同（各 ${p.requests} 次请求），很可能是复制出来的：两条 id 不同，会被各算一次；如果其实是同一段对话，请让它们用同一个会话 id。`,
+    sessionsLookCopiedSummary: (p: { count: string; limit: string }) =>
+      `一共 ${p.count} 组会话内容完全相同（上面列了前 ${p.limit} 组），每一组都会被各算一次。`,
     claudecodeHomeNotAbsolute: (p: { value: string }) => `Claude Code 配置目录必须是绝对路径，收到 ${p.value}`,
     claudecodeNoData: (p: { source: string }) =>
       `在 ${p.source} 下没有找到 Claude Code 会话；用 --home 指定配置目录（默认 ~/.claude），或用 CLAUDE_CONFIG_DIR 覆盖`,
