@@ -50,6 +50,43 @@ export type CacheWriteTtl = '5m' | '1h';
 /** Every cache-write TTL tier the schema knows, in ascending order of life. */
 export const CACHE_WRITE_TTLS: readonly CacheWriteTtl[] = ['5m', '1h'];
 
+/**
+ * One thing an agent did inside a request, as far as its own log records it.
+ *
+ * Token counts say what a request *cost*; these say what it *did* — which tools
+ * the agent reached for, on what, and whether they failed. That is the question
+ * behind "what is the agent actually doing", and it is stored next to the record
+ * it belongs to so a database query can answer it.
+ *
+ * Only tool calls are extracted today. `kind` exists so that thinking blocks,
+ * file edits or compactions can be added later without a second table.
+ */
+export interface UsageEvent {
+  /** What kind of event this is. */
+  kind: 'tool_call';
+  /**
+   * Position of the event inside its record.
+   *
+   * A record's events are stored in this order; it is what makes the stored list
+   * reproducible when two events share everything else.
+   */
+  ordinal: number;
+  /** Tool name as the agent spelled it (`Read`, `Bash`, `shell`, `edit`, …). */
+  name: string;
+  /**
+   * A bounded excerpt of the arguments, for a human reading the database.
+   *
+   * Never the whole payload: a `Write` call can carry a whole file, and the store
+   * is a file the user keeps. Truncation is not a secret — {@link bytes} says how
+   * much there was.
+   */
+  detail?: string | undefined;
+  /** Size of the full argument payload in bytes, so a trimmed `detail` is honest. */
+  bytes?: number | undefined;
+  /** Whether the agent recorded the call as failed; absent when it did not say. */
+  ok?: boolean | undefined;
+}
+
 /** One billed request. */
 export interface UsageRecord {
   /** Adapter-stable identifier for the record, unique within its session. */
@@ -90,6 +127,13 @@ export interface UsageRecord {
   turn?: number | undefined;
   /** Step number inside the turn, when the agent tracks steps. */
   step?: number | undefined;
+  /**
+   * What the request did, when the agent's log says (see {@link UsageEvent}).
+   *
+   * Absent means the log did not record any — not that nothing happened: an
+   * adapter only fills this for the events it can actually read.
+   */
+  events?: readonly UsageEvent[] | undefined;
 }
 
 /** One session: a conversation, or a subagent spawned from one. */
