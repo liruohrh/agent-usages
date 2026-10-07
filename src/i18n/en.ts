@@ -175,6 +175,8 @@ export const en: Messages = {
     provider: 'pin prices to one table (default: pick the table per record, from its model; see `agents`)',
     json: 'print JSON',
     noUpdate: 'do not check for price or rate updates this run; use the local cache',
+    noCache: 'ignore the local scan cache: parse every file again and write nothing (history of vanished sources is not shown either)',
+    cacheDir: 'directory holding the scan cache (default $XDG_CACHE_HOME/agent-usages, else ~/.cache/agent-usages)',
     usage: 'token usage and cost',
     range: 'time range: today/week/month/year (with an offset such as month-1) or "start..end" (half-open)',
     subagent: 'split every project and session into total / direct / subagents',
@@ -406,6 +408,17 @@ export const en: Messages = {
     agentDirNoData: (p: { agent: string; path: string }) => `${p.agent}: nothing under ${p.path}, skipped that directory.`,
     agentDirUnreadable: (p: { agent: string; path: string; reason: string }) =>
       `${p.agent}: ${p.path} could not be read (${p.reason}), skipped that directory.`,
+    /* ---- persistence: the scan cache ---- */
+    scanCacheReasonCorrupt: 'the file is damaged or is not valid JSON',
+    scanCacheReasonFormat: 'the cache format version differs',
+    scanCacheReasonTool: 'a different tool version wrote it',
+    scanCacheReasonUnreadable: 'the file could not be read',
+    scanCacheRebuilt: (p: { path: string; reason: string }) =>
+      `the scan cache at ${p.path} could not be used (${p.reason}); it was rebuilt, so this run scanned everything.`,
+    scanCacheSourceVanished: (p: { agent: string; path: string; lastSeen: string }) =>
+      `${p.agent}: the data directory ${p.path} was not seen by this scan (last seen ${p.lastSeen}); its history still counts from the cache — use --no-cache to see only what exists now.`,
+    scanCacheUnwritable: (p: { path: string; reason: string }) =>
+      `the scan cache could not be written (${p.path}: ${p.reason}); this run's numbers are unaffected, the next one just parses everything again.`,
     servePortNotInteger: (p: { value: string }) => `--port wants an integer 0…65535, got ${p.value}`,
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh wants a non-negative number of seconds, got ${p.value}`,
     serveOptionUnsupported: (p: { option: string }) =>

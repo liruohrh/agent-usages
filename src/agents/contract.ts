@@ -85,6 +85,29 @@ export interface AgentAdapter {
    */
   hasData(source: string): Promise<boolean>;
   /**
+   * Every file under one root that a scan of that root reads.
+   *
+   * The hard constraint: the returned set must **cover every file
+   * {@link AgentAdapter.load} reads** at that root — the logs *and* the
+   * auxiliary files a scan consults (a session's title stored beside it, a
+   * subagent's metadata, a prompt history, a database of thread names). A file
+   * left out is a file whose change does not invalidate a cached scan: the
+   * numbers would keep looking fresh while the log moved on.
+   *
+   * Implementations share the walk that decides *which* files a scan reads, so
+   * the two lists cannot drift apart. Listing a file the scan turns out not to
+   * read is harmless — it costs a rescan and nothing else; missing one is not.
+   *
+   * Files outside the root are deliberately absent even when they shape a
+   * report: a session's git facts come from the repository its working
+   * directory happens to be in, and a fingerprint of that repository is not a
+   * property of this data root.
+   *
+   * @param root - an absolute data root, the same value handed to `load` as `home`.
+   * @returns the absolute paths, repeatably and without side effects.
+   */
+  listSources(root: string): Promise<readonly string[]>;
+  /**
    * Read the usage dataset.
    * @param options - resolved adapter options.
    * @returns the dataset.

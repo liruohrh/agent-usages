@@ -18,7 +18,7 @@
 import { Command, InvalidArgumentError } from 'commander';
 
 import { AGENT_ADAPTERS, type AgentAdapter } from '../agents/index.ts';
-import { loadPlannedAgents, planAgentSources } from '../agents/sources.ts';
+import { loadPlannedAgents, planAgentSources, saveScanCache, scanCacheResetWarning } from '../agents/sources.ts';
 import {
   PRICING_PROVIDERS,
   createPricingEngine,
@@ -42,6 +42,8 @@ import { resolveLanguage, setLanguage, t } from '../i18n/index.ts';
 import { openInBrowser } from '../serve/open.ts';
 import { renderDiagnostic, UserError, type Warning } from '../i18n/errors.ts';
 import { mergeDatasets } from '../core/merge.ts';
+import { TOOL_VERSION } from '../core/version.ts';
+import { ScanCache, defaultScanCacheDir } from '../store/index.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -99,6 +101,12 @@ interface GlobalOptions {
   json?: boolean;
   /** Commander turns `--no-update` into `update: false`; absence means updates are allowed. */
   update?: boolean;
+  /** `--no-cache`: parse every file again and leave no cache behind. */
+  noCache?: boolean;
+  /** Commander's own name for `--no-cache`: `false` once the flag is given. */
+  cache?: boolean;
+  /** `--cache-dir <dir>`: where the scan cache lives (default: the user's cache dir). */
+  cacheDir?: string;
 }
 
 /** Options accepted by `usage`. */
@@ -213,6 +221,8 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
     // user asked for it — otherwise an ancestor's default would clobber the
     // leaf's own `--no-update`.
     if (entry.update === false) merged.update = false;
+    if (entry.cache === false) merged.noCache = true;
+    if (entry.cacheDir !== undefined) merged.cacheDir = entry.cacheDir;
   }
   if (options.agent !== undefined) merged.agent = options.agent;
   if (options.agentDir !== undefined) merged.agentDir = options.agentDir;
@@ -220,6 +230,8 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
   if (options.provider !== undefined) merged.provider = options.provider;
   if (options.json !== undefined) merged.json = options.json;
   if (options.update === false) merged.update = false;
+  if (options.cache === false) merged.noCache = true;
+  if (options.cacheDir !== undefined) merged.cacheDir = options.cacheDir;
   return { ...options, ...merged };
 }
 
@@ -252,6 +264,16 @@ async function loadOrExit(
   config: ResolvedConfig,
 ): Promise<Loaded | undefined> {
   try {
+    // The scan cache remembers what each root held last time, so an unchanged
+    // root is answered without parsing; a root that is gone keeps its history and
+    // says so. `--no-cache` measures the machine as it is now, cache and all.
+    const opened =
+      options.noCache === true
+        ? undefined
+        : await ScanCache.open({
+            dir: options.cacheDir ?? defaultScanCacheDir(),
+            toolVersion: TOOL_VERSION,
+          });
     // One directory per root, one root or more per agent: `--agent-dir`, then the
     // agent's own environment variable, then its standard location. A directory
     // that is unreadable or empty is skipped with a warning rather than failing
@@ -260,6 +282,7 @@ async function loadOrExit(
       agent: options.agent,
       agentDirs: options.agentDir,
       ...(options.home === undefined ? {} : { home: options.home }),
+      ...(opened === undefined ? {} : { cache: opened.cache }),
     });
     if (plan.planned.length === 0) {
       const known = AGENT_ADAPTERS.map((adapter) => adapter.id).join(t().period.listJoin);
@@ -268,7 +291,11 @@ async function loadOrExit(
       );
     }
     const adapters = plan.planned.map((entry) => entry.adapter);
-    const { datasets, warnings: sourceWarnings } = await loadPlannedAgents(plan.planned, { enrich: true });
+    const { datasets, warnings: sourceWarnings } = await loadPlannedAgents(plan.planned, {
+      enrich: true,
+      ...(opened === undefined ? {} : { cache: opened.cache }),
+    });
+    const cacheWriteWarning = opened === undefined ? undefined : await saveScanCache(opened.cache);
     // Every agent's projects become one project per place: the same directory
     // read by two agents is one row, a repository's worktrees are one row, and
     // the configuration can group what the filesystem cannot.
@@ -276,6 +303,10 @@ async function loadOrExit(
     // A skipped directory belongs with the adapters' other warnings: both report
     // tables read `dataset.warnings`, so this is the one place it has to land.
     dataset.warnings.push(...sourceWarnings);
+    if (opened?.reset != null) {
+      dataset.warnings.push(scanCacheResetWarning(opened.reset));
+    }
+    if (cacheWriteWarning !== undefined) dataset.warnings.push(cacheWriteWarning);
     // Which tables this run may draw on. `--provider` pins one; otherwise every
     // shipped table is a candidate and the model in each record picks between them
     // (see `createRoutingEngine`), so `codex` is priced by OpenAI and `claudecode`
@@ -932,6 +963,8 @@ async function runServe(options: ServeOptions): Promise<void> {
     ...(options.agentDir === undefined ? {} : { agentDirs: options.agentDir }),
     ...(options.home === undefined ? {} : { home: options.home }),
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
+    ...(options.noCache === true ? { noCache: true } : {}),
+    ...(options.cacheDir === undefined ? {} : { cacheDir: options.cacheDir }),
     // Unlike the library default, the command follows the CLI's convention: the
     // price list and the rates are refreshed when they are stale, unless the run
     // says `--no-update`.
@@ -1011,6 +1044,8 @@ function commonOptions(command: Command): Command {
     .option('--home <dir>', t().help.home)
     .option('--provider <id>', t().help.provider)
     .option('--json', t().help.json)
+    .option('--no-cache', t().help.noCache)
+    .option('--cache-dir <dir>', t().help.cacheDir)
     .option('--no-update', t().help.noUpdate);
 }
 
@@ -1022,7 +1057,7 @@ export function buildProgram(): Command {
   program
     .name('agent-usages')
     .description(t().help.program)
-    .version('0.0.3');
+    .version(TOOL_VERSION);
   commonOptions(program);
 
   commonOptions(

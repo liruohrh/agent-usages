@@ -223,6 +223,14 @@ export interface UsageDataset {
   stats: DatasetStats;
   /** Non-fatal problems worth surfacing to the user. */
   warnings: Warning[];
+  /**
+   * `true` when this dataset came from the scan cache because its source is gone.
+   *
+   * A directory that was deleted or moved is not a reason for its history to
+   * disappear from a total: the cached dataset is kept, marked here, and reported
+   * with a warning. A run without a cache never produces one.
+   */
+  stale?: true | undefined;
 }
 
 /** What an adapter read, and where it read it from. */

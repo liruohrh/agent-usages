@@ -23,9 +23,56 @@
 import type { UsageDataset } from '../core/types.ts';
 import { UserError, type Warning } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
+import {
+  fingerprintOf,
+  fingerprintsEqual,
+  fromJson,
+  rootIdOf,
+  toJson,
+  type ScanCache,
+  type ScanCacheReset,
+} from '../store/index.ts';
 import type { AgentAdapter } from './contract.ts';
 import { splitRoots, uniqueRoots } from './roots.ts';
 import { AGENT_ADAPTERS, detectAgents, findAgent, requireAgent } from './registry.ts';
+
+/** `YYYY-MM-DD HH:MM` on the local clock: when a missing source was last read. */
+function localDateText(instant: number): string {
+  const date = new Date(instant);
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** The warning a source the cache remembers, but this run cannot find, deserves. */
+function vanishedWarning(adapter: AgentAdapter, path: string, lastSeen: number): Warning {
+  return new UserError('scanCacheSourceVanished', {
+    agent: adapter.label,
+    path,
+    lastSeen: localDateText(lastSeen),
+  });
+}
+
+/**
+ * Save a scan cache, turning a failure into a warning.
+ *
+ * A cache that cannot be written costs the next run its speed, not this run its
+ * numbers — the directory may be read-only, or the home directory may not exist.
+ * So the failure comes back as something to report instead of something to throw.
+ *
+ * @param cache - the cache to write.
+ * @returns the warning to add to the report, or `undefined` when it was saved.
+ */
+export async function saveScanCache(cache: ScanCache): Promise<Warning | undefined> {
+  // Nothing was learned, so nothing is written: a warm run must not rewrite a
+  // multi-megabyte file just to say the same thing again.
+  if (!cache.dirty) return undefined;
+  try {
+    await cache.save();
+    return undefined;
+  } catch (error) {
+    return new UserError('scanCacheUnwritable', { path: cache.path, reason: (error as Error).message });
+  }
+}
 
 /**
  * Split `--agent` values into the names they ask for.
@@ -154,6 +201,14 @@ export async function planAgentSources(options: {
    * page rather than letting it disappear from the list of things it read.
    */
   detect?: boolean | undefined;
+  /**
+   * The scan cache, when the run has one.
+   *
+   * An agent whose directories are all gone would otherwise drop out of an
+   * "everything" plan, and its history with it — the cache remembers it, so it is
+   * planned like any other and comes back marked stale.
+   */
+  cache?: ScanCache | undefined;
 }): Promise<AgentSourcePlan> {
   const env = options.env ?? process.env;
   const wanted = requestedAgents(options.agent);
@@ -187,9 +242,24 @@ export async function planAgentSources(options: {
   }
 
   if (everything) {
-    const present =
-      options.detect === false ? [...AGENT_ADAPTERS] : await detectAgents({ dirs, env });
-    const planned: PlannedAgent[] = present.map((adapter) => ({ adapter, roots: rootsFor(adapter, dirs, env) }));
+    const detected = options.detect === false ? [...AGENT_ADAPTERS] : await detectAgents({ dirs, env });
+    // An agent whose *current* roots the cache still remembers is planned even
+    // when nothing is found there now: those roots will come back stale, with a
+    // warning, instead of usage vanishing from a total that used to include it.
+    // An agent remembered only under directories this run does not name is simply
+    // not selected — a narrower plan is a choice, not a disappearance.
+    const remembered =
+      options.cache === undefined
+        ? []
+        : AGENT_ADAPTERS.filter(
+            (adapter) =>
+              !detected.includes(adapter) &&
+              rootsFor(adapter, dirs, env).some((root) => options.cache?.get(adapter.id, rootIdOf(root)) !== undefined),
+          );
+    const planned: PlannedAgent[] = [...detected, ...remembered].map((adapter) => ({
+      adapter,
+      roots: rootsFor(adapter, dirs, env),
+    }));
     return { planned, everything: true };
   }
 
@@ -216,6 +286,47 @@ export interface AgentLoadResult {
 }
 
 /**
+ * The warning a discarded cache file deserves.
+ *
+ * The store reports *why* a file was not trusted as a bare reason; the sentence
+ * belongs to the catalogue, so the translation happens here, once, for both the
+ * CLI and the server.
+ *
+ * @param reset - the reset the store reported.
+ * @returns the warning to add to the run's report.
+ */
+export function scanCacheResetWarning(reset: ScanCacheReset): Warning {
+  const reason =
+    reset.reason === 'corrupt'
+      ? t().errors.scanCacheReasonCorrupt
+      : reset.reason === 'format'
+        ? t().errors.scanCacheReasonFormat
+        : reset.reason === 'tool'
+          ? t().errors.scanCacheReasonTool
+          : t().errors.scanCacheReasonUnreadable;
+  return new UserError('scanCacheRebuilt', { path: reset.path, reason });
+}
+
+/** What {@link loadPlannedAgents} may be told. */
+export interface AgentLoadOptions {
+  /** Environment the adapters read their own variables from. */
+  env?: NodeJS.ProcessEnv | undefined;
+  /** Whether to read the expensive extras (titles, repositories). */
+  enrich?: boolean | undefined;
+  /**
+   * An opened scan cache, or `undefined` to parse every file again.
+   *
+   * With a cache, a root whose files still hold what they held last time is
+   * answered from the cache (same numbers, no parsing), and a root the cache
+   * knows but this run no longer sees comes back marked `stale` — history is not
+   * silently dropped when a directory is removed or moved.
+   */
+  cache?: ScanCache | undefined;
+  /** Clock for `lastSeen`; injectable so a test can pin it. */
+  now?: (() => number) | undefined;
+}
+
+/**
  * Read every planned root of every planned agent.
  *
  * One dataset per *root*, because an adapter reads the directory it is handed;
@@ -228,17 +339,23 @@ export interface AgentLoadResult {
  * more so its own diagnostic ("no Codex sessions under /nope") is what the user
  * sees, rather than a generic "nothing found".
  *
+ * A cache hit is decided by the *fingerprint* of the files the adapter says it
+ * reads, never by a clock: the same files with the same sizes, mtimes and heads
+ * answer the same numbers, and anything else re-reads the root.
+ *
  * @param planned - agents and their roots, from {@link planAgentSources}.
- * @param options - environment and whether to read the expensive extras.
+ * @param options - environment, extras, and the optional scan cache.
  * @returns every dataset read, and one warning per skipped directory.
  * @throws whatever an adapter throws when it has no usable root at all.
  */
 export async function loadPlannedAgents(
   planned: readonly PlannedAgent[],
-  options: { env?: NodeJS.ProcessEnv | undefined; enrich?: boolean | undefined } = {},
+  options: AgentLoadOptions = {},
 ): Promise<AgentLoadResult> {
   const env = options.env ?? process.env;
   const enrich = options.enrich ?? true;
+  const cache = options.cache;
+  const now = options.now ?? Date.now;
   const datasets: UsageDataset[] = [];
   const warnings: Warning[] = [];
   for (const { adapter, roots } of planned) {
@@ -249,13 +366,42 @@ export async function loadPlannedAgents(
     const skipped: Warning[] = [];
     let loaded = 0;
     for (const root of roots) {
+      const rootId = rootIdOf(root);
       try {
+        const files = cache === undefined ? undefined : await adapter.listSources(root);
+        const fingerprint = files === undefined ? undefined : await fingerprintOf(files);
+        const cached = cache?.get(adapter.id, rootId);
+        if (cached !== undefined && fingerprint !== undefined && fingerprintsEqual(cached.fingerprint, fingerprint)) {
+          // The files still hold what they held: the numbers are the cached ones,
+          // and nothing is parsed again.
+          datasets.push(fromJson(cached.dataset));
+          loaded += 1;
+          continue;
+        }
         if (!(await adapter.hasData(root))) {
+          if (cached !== undefined) {
+            // Still named, but holding nothing now: the directory may be gone, or
+            // every log in it. Either way the cache has the history, so it comes
+            // back marked stale and named in a warning — never silently dropped.
+            datasets.push({ ...fromJson(cached.dataset), stale: true });
+            warnings.push(vanishedWarning(adapter, cached.root, cached.lastSeen));
+            loaded += 1;
+            continue;
+          }
           skipped.push(new UserError('agentDirNoData', { agent: adapter.label, path: root }));
           continue;
         }
-        datasets.push(await adapter.load({ home: root, env, enrich }));
+        const dataset = await adapter.load({ home: root, env, enrich });
+        datasets.push(dataset);
         loaded += 1;
+        if (cache !== undefined && fingerprint !== undefined) {
+          cache.set(adapter.id, rootId, {
+            root,
+            fingerprint,
+            dataset: toJson(dataset),
+            lastSeen: now(),
+          });
+        }
       } catch (error) {
         skipped.push(
           new UserError('agentDirUnreadable', {

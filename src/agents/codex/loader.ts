@@ -43,7 +43,7 @@ import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRec
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
-import { splitRoots, uniqueRoots } from '../roots.ts';
+import { fileIfPresent, splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable Codex honours for its home directory. */
 const ENV_HOME = 'CODEX_HOME';
@@ -78,6 +78,22 @@ function asInstant(value: unknown): number | null {
   const parsed = Date.parse(text);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
+/**
+ * The files Codex keeps beside its rollouts, each of which changes a scan.
+ *
+ * `state_5.sqlite` carries the thread titles, `logs_2.sqlite` the side-turn
+ * usage, `history.jsonl` the prompts of threads that never got a rollout. They
+ * are named once so the readers and {@link listSources} can never drift apart.
+ */
+const AUXILIARY = {
+  /** Thread titles (`threads.name` / `threads.title`). */
+  threads: 'state_5.sqlite',
+  /** One line per sampled turn, including turns of threads with no rollout. */
+  sideTurns: 'logs_2.sqlite',
+  /** Prompts, including threads that persisted no rollout. */
+  history: 'history.jsonl',
+} as const;
 
 /**
  * Longest title kept. A longer text is clipped at a sentence or word boundary
@@ -519,7 +535,7 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
       }),
     );
   } else {
-    const btw = await countUnpersistedSessions(join(source, 'history.jsonl'), known);
+    const btw = await countUnpersistedSessions(join(source, AUXILIARY.history), known);
     if (btw > 0) warnings.push(new UserError('sideQuestionsUncounted', { count: String(btw), agent: 'Codex' }));
   }
 
@@ -598,7 +614,7 @@ async function readSideTurnUsage(
   const perThread = new Map<string, { turns: number; tokens: number }>();
   try {
     const { DatabaseSync } = await import('node:sqlite');
-    const db = new DatabaseSync(join(home, 'logs_2.sqlite'), { readOnly: true });
+    const db = new DatabaseSync(join(home, AUXILIARY.sideTurns), { readOnly: true });
     try {
       const rows = db
         .prepare("SELECT thread_id, feedback_log_body FROM logs WHERE feedback_log_body LIKE '%post sampling token usage%'")
@@ -673,7 +689,7 @@ async function countUnpersistedSessions(path: string, known: ReadonlySet<string>
  */
 async function readThreadTitles(home: string): Promise<Map<string, string>> {
   const titles = new Map<string, string>();
-  const path = join(home, 'state_5.sqlite');
+  const path = join(home, AUXILIARY.threads);
   try {
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(path, { readOnly: true });
@@ -708,6 +724,22 @@ function defaultSources(env: NodeJS.ProcessEnv): readonly string[] {
   return named.length > 0 ? named : [join(homedir(), '.codex')];
 }
 
+/**
+ * Every file a scan of this root reads.
+ *
+ * The rollouts hold the usage; the three auxiliary files change what the same
+ * rollouts are reported as (a title, a side question, a thread that never wrote
+ * a rollout), so a changed one has to invalidate the scan too.
+ */
+async function listSources(root: string): Promise<readonly string[]> {
+  const files = await findRollouts(join(root, 'sessions'));
+  for (const name of [AUXILIARY.threads, AUXILIARY.sideTurns, AUXILIARY.history]) {
+    const path = join(root, name);
+    if (await fileIfPresent(path)) files.push(path);
+  }
+  return files;
+}
+
 export const codexAgent: AgentAdapter = {
   id: 'codex',
   label: 'Codex CLI',
@@ -717,6 +749,7 @@ export const codexAgent: AgentAdapter = {
   envVars: [ENV_HOME],
   defaultSources,
   hasData: async (source) => (await findRollouts(join(source, 'sessions'))).length > 0,
+  listSources,
   load,
   notes: () => t().errors.codexNotes(),
 };

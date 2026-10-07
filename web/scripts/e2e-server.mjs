@@ -7,8 +7,9 @@
  * works but measures the machine as it grows.
  */
 
-import { existsSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,8 +26,15 @@ const port = process.env.E2E_PORT ?? '4317';
 isolateConfig(repo, 'zh');
 
 const args = ['serve', '--port', port, '--no-update'];
-if (existsSync(snapshot)) args.push('--snapshot', snapshot);
-else process.stdout.write(`e2e: no snapshot at ${snapshot}, scanning live data\n`);
+if (existsSync(snapshot)) {
+  args.push('--snapshot', snapshot);
+} else {
+  // A live scan writes a scan cache; keep it out of the developer's own cache
+  // directory, the way `isolateConfig` keeps the settings out of their config.
+  const cacheDir = mkdtempSync(join(tmpdir(), 'agent-usages-e2e-cache-'));
+  args.push('--cache-dir', cacheDir);
+  process.stdout.write(`e2e: no snapshot at ${snapshot}, scanning live data\n`);
+}
 
 const child = spawn(process.execPath, [join(repo, 'src', 'cli', 'index.ts'), ...args], { stdio: 'inherit' });
 const stop = () => {

@@ -12,6 +12,8 @@
  * every other adapter) in.
  */
 
+import { stat } from 'node:fs/promises';
+
 import { normalizePath } from '../core/paths.ts';
 
 /**
@@ -48,4 +50,22 @@ export function uniqueRoots(roots: readonly string[]): string[] {
     unique.push(trimmed);
   }
   return unique;
+}
+
+/**
+ * Whether a path is a file that exists.
+ *
+ * Adapters list every file a scan reads, and a missing auxiliary file is not one
+ * of them — there is nothing to fingerprint, and the scan simply does without
+ * it. A directory of that name is not a file either.
+ *
+ * @param path - the candidate path.
+ * @returns `true` when it exists and is not a directory.
+ */
+export async function fileIfPresent(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
 }

@@ -43,7 +43,7 @@ import type {
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
-import { splitRoots, uniqueRoots } from '../roots.ts';
+import { fileIfPresent, splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable Claude Code honours for its config directory. */
 const ENV_CONFIG_DIR = 'CLAUDE_CONFIG_DIR';
@@ -412,27 +412,78 @@ interface WalkedSession {
   meta: Record<string, unknown> | undefined;
 }
 
-/** Read a session file and the subagent files filed under it. */
-async function walk(
-  file: string,
-  id: string,
-  found: WalkedSession[],
-  warnings: Warning[],
-  source: string,
-): Promise<void> {
-  let session = await scanSession(file, id);
+/** One session log, and the auxiliary files filed beside it. */
+interface SessionFile {
+  /** The `<uuid>.jsonl` itself. */
+  log: string;
+  /** `custom-title.json` beside it, when the file exists. */
+  customTitle: string | undefined;
+  /** The subagent runs filed under it, with the meta file each has. */
+  subagents: readonly { log: string; meta: string | undefined }[];
+}
+
+/**
+ * The session files of one data root, in the order a scan reads them.
+ *
+ * This is the walk that decides *which* files a scan reads, and both
+ * {@link load} and {@link listSources} drive it: a file the scan reads but this
+ * walk does not name would be a file whose change never invalidates a cached
+ * scan, so the two cannot be allowed to drift.
+ *
+ * Subagent logs are listed even when the parent turns out to be unreadable (a
+ * scan stops there, this walk does not): over-listing costs a rescan, missing a
+ * file costs correctness.
+ *
+ * @param projectsRoot - `<root>/projects`.
+ * @returns every project with its sessions, in read order.
+ */
+async function sessionFilesOf(projectsRoot: string): Promise<{ projectKey: string; sessions: SessionFile[] }[]> {
+  const projects: { projectKey: string; sessions: SessionFile[] }[] = [];
+  for (const projectKey of await readdirOrEmpty(projectsRoot)) {
+    const projectDir = join(projectsRoot, projectKey);
+    const sessions: SessionFile[] = [];
+    for (const entry of await readdirOrEmpty(projectDir)) {
+      if (!entry.endsWith('.jsonl')) continue;
+      const log = join(projectDir, entry);
+      const dir = log.replace(/\.jsonl$/, '');
+      const customTitle = join(dir, 'custom-title.json');
+      const subagentDir = join(dir, 'subagents');
+      const subagents: { log: string; meta: string | undefined }[] = [];
+      for (const child of await readdirOrEmpty(subagentDir)) {
+        if (!child.startsWith('agent-') || !child.endsWith('.jsonl')) continue;
+        const meta = join(subagentDir, child.replace(/\.jsonl$/, '.meta.json'));
+        subagents.push({ log: join(subagentDir, child), meta: (await fileIfPresent(meta)) ? meta : undefined });
+      }
+      sessions.push({
+        log,
+        customTitle: (await fileIfPresent(customTitle)) ? customTitle : undefined,
+        subagents,
+      });
+    }
+    if (sessions.length > 0) projects.push({ projectKey, sessions });
+  }
+  return projects;
+}
+
+/** Read one session file and the subagent files filed under it. */
+async function walk(files: SessionFile, found: WalkedSession[], warnings: Warning[], source: string): Promise<void> {
+  const { log } = files;
+  const id = basename(log).replace(/\.jsonl$/, '');
+  let session = await scanSession(log, id);
   if (session === undefined || session.records.length === 0) {
     // A session that never billed a request (an aborted run) is still a session,
     // but only if it has anything at all to say.
     if (session === undefined) {
-      warnings.push(new UserError('claudecodeSessionUnreadable', { path: relative(source, file).split(sep).join('/') }));
+      warnings.push(new UserError('claudecodeSessionUnreadable', { path: relative(source, log).split(sep).join('/') }));
       return;
     }
   }
   // Claude Code keeps a user-set session name next to the log. A name the user
   // chose outranks everything the log itself offers — including an opening
   // prompt, which used to occupy the title and hide the name.
-  const custom = await readFile(join(file.replace(/\.jsonl$/, ''), 'custom-title.json'), 'utf8').catch(() => undefined);
+  const custom = files.customTitle === undefined
+    ? undefined
+    : await readFile(files.customTitle, 'utf8').catch(() => undefined);
   if (custom !== undefined) {
     try {
       const parsed = asRecord(JSON.parse(custom));
@@ -442,33 +493,55 @@ async function walk(
       // An unreadable title is not worth failing a report over.
     }
   }
-  found.push({ session, file, parentId: null, depth: 0, isSubagent: false, meta: undefined });
+  found.push({ session, file: log, parentId: null, depth: 0, isSubagent: false, meta: undefined });
   // Subagents live one level down, in a directory named after the session file.
-  const subagents = join(file.replace(/\.jsonl$/, ''), 'subagents');
-  for (const entry of await readdirOrEmpty(subagents)) {
-    if (!entry.startsWith('agent-') || !entry.endsWith('.jsonl')) continue;
-    const metaText = await readFile(join(subagents, entry.replace(/\.jsonl$/, '.meta.json')), 'utf8').catch(() => undefined);
+  for (const child of files.subagents) {
+    const metaText = child.meta === undefined ? undefined : await readFile(child.meta, 'utf8').catch(() => undefined);
     const meta = metaText === undefined ? undefined : asRecord(JSON.parse(metaText));
     // A subagent's entries keep the *parent's* `sessionId`, so its identity has
     // to come from the file: `agent-<agentId>.jsonl`.
-    const agentId = entry.replace(/^agent-/, '').replace(/\.jsonl$/, '');
-    const child = await scanSession(join(subagents, entry), agentId);
-    if (child === undefined) continue;
+    const agentId = basename(child.log).replace(/^agent-/, '').replace(/\.jsonl$/, '');
+    const subagent = await scanSession(child.log, agentId);
+    if (subagent === undefined) continue;
     const depth = typeof meta?.['spawnDepth'] === 'number' ? Number(meta['spawnDepth']) : 1;
     // A subagent's own log has no title; the meta file's description is what
     // the parent asked it to do, which is exactly what a title should say.
     const described = asString(meta?.['description']);
     // The description the parent gave it beats its own opening prompt.
-    const title = described ?? child.title;
+    const title = described ?? subagent.title;
     found.push({
-      session: { ...child, id: agentId, title },
-      file: join(subagents, entry),
+      session: { ...subagent, id: agentId, title },
+      file: child.log,
       parentId: session.id,
       depth,
       isSubagent: true,
       meta,
     });
   }
+}
+
+/**
+ * Every file a scan of this root reads.
+ *
+ * The session logs and subagent logs are the walk above; `custom-title.json`
+ * and `subagents/agent-*.meta.json` decide titles, and `history.jsonl` decides
+ * the side-question warning — all of them change what a scan reports.
+ */
+async function listSources(root: string): Promise<readonly string[]> {
+  const files: string[] = [];
+  for (const { sessions } of await sessionFilesOf(projectsRootOf(root))) {
+    for (const session of sessions) {
+      files.push(session.log);
+      if (session.customTitle !== undefined) files.push(session.customTitle);
+      for (const child of session.subagents) {
+        files.push(child.log);
+        if (child.meta !== undefined) files.push(child.meta);
+      }
+    }
+  }
+  const history = join(root, 'history.jsonl');
+  if (await fileIfPresent(history)) files.push(history);
+  return files;
 }
 
 /** Assemble one neutral session record. */
@@ -524,15 +597,10 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     throw new UserError('claudecodeHomeNotAbsolute', { value: JSON.stringify(options.home) });
   }
 
-  const projectsRoot = projectsRootOf(source);
   const walked = new Map<string, WalkedSession[]>();
-  for (const projectKey of await readdirOrEmpty(projectsRoot)) {
-    const projectDir = join(projectsRoot, projectKey);
+  for (const { projectKey, sessions } of await sessionFilesOf(projectsRootOf(source))) {
     const found: WalkedSession[] = [];
-    for (const entry of await readdirOrEmpty(projectDir)) {
-      if (!entry.endsWith('.jsonl')) continue;
-      await walk(join(projectDir, entry), entry.replace(/\.jsonl$/, ''), found, warnings, source);
-    }
+    for (const session of sessions) await walk(session, found, warnings, source);
     if (found.length > 0) walked.set(projectKey, found);
   }
   if (walked.size === 0) {
@@ -735,6 +803,7 @@ export const claudecodeAgent: AgentAdapter = {
   },
   envVars: [ENV_CONFIG_DIR],
   defaultSources,
+  listSources,
   hasData: async (source) => {
     const root = projectsRootOf(source);
     for (const projectKey of await readdirOrEmpty(root)) {

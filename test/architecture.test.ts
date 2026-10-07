@@ -96,13 +96,17 @@ function layerOf(file: string): string | null {
 const MAY_IMPORT: Record<string, readonly string[]> = {
   core: ['i18n'],
   i18n: [],
-  agents: ['core', 'i18n'],
+  // The durable scan cache: file fingerprints and serialised datasets. It reads
+  // the same neutral model the kernel does, and `i18n` only for the warning
+  // objects a cached dataset carries back (`UserError`, not a sentence).
+  store: ['core', 'i18n'],
+  agents: ['core', 'i18n', 'store'],
   pricing: ['core', 'i18n'],
   config: ['core', 'i18n', 'pricing'],
   report: ['core', 'i18n', 'pricing'],
   render: ['core', 'i18n', 'pricing', 'report'],
-  serve: ['agents', 'config', 'core', 'i18n', 'pricing', 'report'],
-  cli: ['agents', 'config', 'core', 'i18n', 'pricing', 'render', 'report', 'serve'],
+  serve: ['agents', 'config', 'core', 'i18n', 'pricing', 'report', 'store'],
+  cli: ['agents', 'config', 'core', 'i18n', 'pricing', 'render', 'report', 'serve', 'store'],
 };
 
 /**
@@ -112,6 +116,7 @@ const MAY_IMPORT: Record<string, readonly string[]> = {
 const MAY_USE: Record<string, readonly string[]> = {
   core: [],
   i18n: [],
+  store: [],
   agents: [],
   pricing: [],
   config: [],

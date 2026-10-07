@@ -191,6 +191,11 @@ src/
 │   └── html.ts            纯排版：单文件 HTML 报告（内联样式与 SVG，无脚本）
 ├── i18n/                  文案目录（zh 是源、en 按类型对齐）与带 code 的诊断
 │                          （网页自己那一份在 web/src/i18n/，同一个套路）
+├── store/                 持久化：扫描缓存（跨越多次运行记住每个数据根读到过什么）
+│   ├── fingerprint.ts     一个根的文件指纹（size + mtime + 前 4 KiB 的 sha256）与根 id
+│   ├── dataset-json.ts    UsageDataset ↔ JSON（warnings 只存 code+params，读回按当时语言渲染）
+│   ├── cache.ts           scan-cache.json：版本不符或文件损坏就重建，写入是原子的
+│   └── location.ts        默认位置：$XDG_CACHE_HOME/agent-usages（没有则 ~/.cache/agent-usages）
 ├── serve/                 本地 Web 分析平台的服务端（HTTP + 前端静态托管；唯一的写是语言设置）
 │   ├── data.ts            逐 adapter 读盘 → merge.ts 合并 → runQuery → 仪表盘 JSON
 │   ├── server.ts          Express 应用、startServer()、`--dev` 代理
@@ -202,10 +207,28 @@ src/
 └── index.ts               库入口：公开 API 的 re-export
 ```
 
-依赖方向是**单向**的，自下而上：`core`/`i18n` → `agents`/`pricing` → `config` → `report` → `render` →
-`cli`/`serve`。三条容易踩的规矩：`pricing` 自带价目表与汇率表，不反过来依赖 `config`；`serve` 只用
+依赖方向是**单向**的，自下而上：`core`/`i18n` → `store` → `agents`/`pricing` → `config` → `report` →
+`render` → `cli`/`serve`。三条容易踩的规矩：`pricing` 自带价目表与汇率表，不反过来依赖 `config`；`serve` 只用
 `report` 的类型与查询，不 import `render`/`cli`；只有 `cli` 能 import `render`。这条规则由
 `test/architecture.test.ts` 守着（它读 import 图，而不是靠约定）。
+
+### 扫描缓存（`src/store/`）
+
+一次扫描的代价与历史长度成正比，而绝大多数文件两次运行之间并没有变。所以每个 `(agent, 数据根)` 的结果
+连着**指纹**（该根下每个会影响结果的文件：`size` + `mtimeMs` + 前 4 KiB 的 sha256）一起存在
+`scan-cache.json` 里：指纹逐项相同就直接用缓存里的数据集，**不解析、数字与首次完全一致**；不同则重扫该根
+并覆盖。`--no-cache` 完全绕过缓存（也不带下面的 tombstone），`--cache-dir` 指位置。
+
+- **指纹覆盖哪些文件由适配器决定**（`AgentAdapter.listSources`），硬约束是它必须覆盖 `load()` 读到的
+  每个文件——日志、标题、子代理元数据、DSH 的投影缓存、Codex 的标题库都算；`listSources` 与 `load`
+  共用同一段「找文件」的代码，`test/unit/list-sources.test.ts` 守着这条不变量。
+- **来源消失不缩水**：某个计划内的根这次什么都没有（目录被删 / 搬走 / 清空），缓存里的那份会被标成
+  `stale` 继续计入，并给一条 `scanCacheSourceVanished` 告警——只有 `--no-cache` 才给出「只看现存来源」
+  的数字。根内单个文件被删仍按重扫处理（文件级保留是后续增量）。
+- **缓存不可信就重建**：格式版本或工具版本不符、JSON 损坏、文件读不了，都只是重建 + 一条
+  `scanCacheRebuilt` 告警，绝不让命令失败；写不进去也只是一条 `scanCacheUnwritable` 告警。
+- 缓存里存的是**数据集**，不是句子：warnings 以 `{code, params}` 保存，读回时按当时的语言渲染，所以换
+  语言不会让旧缓存说错话。什么都没学到的一次运行不写文件。
 
 `web/` 是唯一的工作区包（Vite + React + Tailwind + ECharts），只依赖 `src/serve/types.ts`
 的 HTTP 契约，不 import 服务端代码；构建产物 `web/dist` 由 `serve` 静态托管。设计、API 与

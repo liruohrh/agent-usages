@@ -23,8 +23,10 @@
  */
 
 import { existsSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { isolateConfig } from './tmp-config.mjs';
 
@@ -543,7 +545,14 @@ if (!existsSync(snapshotPath)) {
 await run({ port: 0, snapshot: snapshotPath }, false);
 
 if (process.argv.includes('--live')) {
-  await run({ port: 0 }, true);
+  // A live scan writes a scan cache: give it a scratch directory so the run never
+  // touches the one the developer's own commands use.
+  const cacheDir = await mkdtemp(join(tmpdir(), 'agent-usages-smoke-cache-'));
+  try {
+    await run({ port: 0, cacheDir }, true);
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
 } else {
   process.stdout.write('\n（跳过实时扫描；加 --live 会再跑一遍真实数据）\n');
 }

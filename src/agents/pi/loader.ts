@@ -24,7 +24,9 @@
  * renamed, so the last one wins — the same rule as DSH's `session/title`.
  */
 
+import { createReadStream } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
+import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
@@ -34,7 +36,7 @@ import type { ProjectRecord, SessionRecord, TokenBuckets, UsageDataset, UsageRec
 import { UserError, renderDiagnostic, type Warning } from '../../i18n/errors.ts';
 import { t } from '../../i18n/index.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
-import { splitRoots, uniqueRoots } from '../roots.ts';
+import { fileIfPresent, splitRoots, uniqueRoots } from '../roots.ts';
 
 /** Environment variable pi honours for its agent directory. */
 const ENV_AGENT_DIR = 'PI_CODING_AGENT_DIR';
@@ -232,6 +234,94 @@ async function childRuns(sessionFile: string): Promise<string[]> {
   return runs;
 }
 
+/**
+ * Every session log under one sessions root, in the order a scan reads it.
+ *
+ * The walk that decides *which* files a scan reads, shared by `load` and
+ * {@link listSources}: a file one of them saw and the other did not would be a
+ * file whose change never invalidates a cached scan.
+ *
+ * @param sessionsRoot - `<agent dir>/sessions`, or the directory the sessions
+ *   variable points at.
+ * @returns each project directory with the `.jsonl` files directly in it.
+ */
+async function sessionFilesOf(sessionsRoot: string): Promise<{ projectKey: string; files: string[] }[]> {
+  const projects: { projectKey: string; files: string[] }[] = [];
+  for (const projectKey of await readdirOrEmpty(sessionsRoot)) {
+    const projectDir = join(sessionsRoot, projectKey);
+    const files = (await readdirOrEmpty(projectDir))
+      .filter((entry) => entry.endsWith('.jsonl'))
+      .map((entry) => join(projectDir, entry));
+    if (files.length > 0) projects.push({ projectKey, files });
+  }
+  return projects;
+}
+
+/**
+ * The path a session's header names as the session it was forked from.
+ *
+ * pi writes the header first, so the scan reads it from the top; the rule here
+ * is the same one `scanSession` applies to a `session` event.
+ *
+ * @param file - one session log.
+ * @returns the resolved origin path, or `null` when the header names none.
+ */
+async function forkOriginOf(file: string): Promise<string | null> {
+  const stream = createReadStream(file, { encoding: 'utf8' });
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of lines) {
+      if (line.trim().length === 0) continue;
+      let event: Record<string, unknown> | undefined;
+      try {
+        event = asRecord(JSON.parse(line));
+      } catch {
+        continue;
+      }
+      if (event === undefined || asString(event['type']) !== 'session') continue;
+      const origin = asString(event['parentSession']);
+      if (origin === undefined) return null;
+      return isAbsolute(origin) ? origin : join(dirname(file), origin);
+    }
+  } catch {
+    // An unreadable log is the scan's problem, not the source list's.
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
+  return null;
+}
+
+/**
+ * Every file a scan of this root reads.
+ *
+ * The session logs, the subagent run files filed under them, the origin a forked
+ * session copies its history from — and both session directories when the
+ * sessions variable points somewhere else than the agent directory does: the
+ * caller's environment may differ from this process's, and naming a directory a
+ * scan does not read only costs a rescan.
+ *
+ * @param root - the pi agent directory.
+ * @returns the absolute paths, in no particular order.
+ */
+async function listSources(root: string): Promise<readonly string[]> {
+  const roots = [join(root, 'sessions')];
+  const override = process.env[ENV_SESSION_DIR];
+  if (override !== undefined && override.trim().length > 0) roots.push(override.trim());
+  const files: string[] = [];
+  for (const sessionsRoot of roots) {
+    for (const { files: logs } of await sessionFilesOf(sessionsRoot)) {
+      for (const log of logs) {
+        files.push(log);
+        for (const run of await childRuns(log)) files.push(run);
+        const origin = await forkOriginOf(log);
+        if (origin !== null && (await fileIfPresent(origin))) files.push(origin);
+      }
+    }
+  }
+  return files;
+}
+
 /** A session plus the facts the walk learned about its place in the tree. */
 interface WalkedSession {
   session: ScannedSession;
@@ -336,16 +426,10 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
   }
 
   const sessionsRoot = sessionsRootOf(source, env);
-  const projectKeys = await readdirOrEmpty(sessionsRoot);
   const walked = new Map<string, WalkedSession[]>(); // project key → its sessions
-  for (const projectKey of projectKeys) {
-    const projectDir = join(sessionsRoot, projectKey);
-    const entries = await readdirOrEmpty(projectDir);
+  for (const { projectKey, files } of await sessionFilesOf(sessionsRoot)) {
     const found = walked.get(projectKey) ?? [];
-    for (const entry of entries) {
-      if (!entry.endsWith('.jsonl')) continue;
-      await walk(join(projectDir, entry), null, 0, found, warnings, source);
-    }
+    for (const file of files) await walk(file, null, 0, found, warnings, source);
     if (found.length > 0) walked.set(projectKey, found);
   }
 
@@ -406,7 +490,9 @@ async function load(options: AdapterOptions = {}): Promise<UsageDataset> {
     projects,
     sessions,
     stats: {
-      filesRead: [...walked.values()].flat().map((entry) => entry.session.id),
+      // The files a scan read, like every other adapter (`stats.filesRead` is a
+      // file list; it used to hold session ids here by mistake).
+      filesRead: [...walked.values()].flat().map((entry) => entry.file),
       sessions: sessions.length,
       records: sessions.reduce((total, session) => total + session.records.length, 0),
     },
@@ -443,6 +529,7 @@ export const piAgent: AgentAdapter = {
   },
   envVars: [ENV_AGENT_DIR, ENV_SESSION_DIR],
   defaultSources,
+  listSources,
   hasData: async (source) => {
     const root = sessionsRootOf(source, process.env);
     for (const projectKey of await readdirOrEmpty(root)) {

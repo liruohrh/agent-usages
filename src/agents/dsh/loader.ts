@@ -37,7 +37,7 @@ import type {
 import { repoOf } from '../../core/git.ts';
 import { normalizePath, workspacePathsOf } from '../../core/paths.ts';
 import type { AdapterOptions, AgentAdapter } from '../contract.ts';
-import { splitRoots, uniqueRoots } from '../roots.ts';
+import { fileIfPresent, splitRoots, uniqueRoots } from '../roots.ts';
 import { readSessionLogIndex, locateSessionLogs, type SessionLogInfo } from './sessionlog.ts';
 
 /** Narrow an unknown JSON value to a record. */
@@ -73,7 +73,7 @@ interface SessionMeta {
 /** Read the projection cache into a flat session-id → metadata map. */
 async function readSessionMeta(home: string, warnings: Warning[]): Promise<Map<string, SessionMeta>> {
   const result = new Map<string, SessionMeta>();
-  const path = join(home, 'storages', 'session_projcache.json');
+  const path = join(home, 'storages', STORAGES.projection);
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(path, 'utf8'));
@@ -140,7 +140,7 @@ function bareId(id: string): string {
 /** Read the workspace registry. */
 async function readWorkspaceRegistry(home: string, warnings: Warning[]): Promise<WorkspaceRegistry> {
   const empty: WorkspaceRegistry = { workspaces: [], archivedIds: new Set() };
-  const path = join(home, 'storages', 'workspace.json');
+  const path = join(home, 'storages', STORAGES.workspaces);
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(path, 'utf8'));
@@ -216,6 +216,27 @@ function resolveProjectKey(
 ): string | null {
   if (cwd === null) return null;
   return workspaceByPath.get(pathKey(cwd))?.workspaceId ?? null;
+}
+
+/**
+ * Every file a scan of this root reads.
+ *
+ * The session logs the locator picks — the highest `session.v<N>` stream per
+ * session directory, exactly the one `load` reads — plus the two storages: a
+ * projection cache (sessions that never wrote a log, titles, cwds) and the
+ * workspace registry (project titles, archived sessions). A changed cache
+ * changes the same logs' report, so it is a source too.
+ *
+ * @param root - the DSH home.
+ * @returns the absolute paths, in no particular order.
+ */
+async function listSources(root: string): Promise<readonly string[]> {
+  const files: string[] = (await locateSessionLogs(root)).map((log) => log.path);
+  for (const name of [STORAGES.projection, STORAGES.workspaces]) {
+    const path = join(root, 'storages', name);
+    if (await fileIfPresent(path)) files.push(path);
+  }
+  return files;
 }
 
 /**
@@ -446,6 +467,20 @@ export function lastUsageOf(session: SessionRecord): number {
 }
 
 /**
+ * The two caches DSH keeps beside its session logs, each of which a scan reads.
+ *
+ * Named once so the readers, `hasData` and `listSources` cannot drift apart: a
+ * changed projection cache or workspace registry changes what the same logs are
+ * reported as.
+ */
+const STORAGES = {
+  /** Projection cache: sessions that never wrote a log, plus titles and cwds. */
+  projection: 'session_projcache.json',
+  /** Workspace registry: project titles and the archived-session list. */
+  workspaces: 'workspace.json',
+} as const;
+
+/**
  * Default DSH homes, honouring the same environment the harness does.
  *
  * `DSH_HOME` may name several homes, comma-separated. With no home directory at
@@ -488,6 +523,7 @@ export const dshAgent: AgentAdapter = {
   },
   envVars: ['DSH_HOME'],
   defaultSources,
+  listSources,
   hasData: async (source) => {
     try {
       if ((await locateSessionLogs(source)).length > 0) return true;
@@ -496,7 +532,7 @@ export const dshAgent: AgentAdapter = {
     }
     try {
       const names = await readdir(join(source, 'storages'));
-      return names.includes('session_projcache.json');
+      return names.includes(STORAGES.projection);
     } catch {
       return false;
     }
