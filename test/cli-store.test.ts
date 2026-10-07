@@ -333,3 +333,159 @@ describe('the usage store', () => {
     }
   });
 });
+/** Run the CLI with a full command line: the `store` family is not `usage`. */
+async function runStore(args: string[], extraEnv: Record<string, string> = {}): Promise<Result> {
+  try {
+    const { stdout, stderr } = await run(process.execPath, [CLI, ...args], {
+      env: {
+        ...process.env,
+        LANG: 'zh_CN.UTF-8',
+        HOME: configHome,
+        XDG_CONFIG_HOME: configHome,
+        CLAUDE_CONFIG_DIR: root,
+        ...extraEnv,
+      },
+    });
+    return { code: 0, stdout, stderr };
+  } catch (error) {
+    const failure = error as { code?: number; stdout?: string; stderr?: string };
+    return { code: failure.code ?? -1, stdout: failure.stdout ?? '', stderr: failure.stderr ?? '' };
+  }
+}
+
+/** How many roots and sessions one database holds. */
+async function storeCounts(path: string): Promise<{ roots: number; sessions: number }> {
+  const { DatabaseSync } = await import('node:sqlite');
+  const database = new DatabaseSync(path);
+  try {
+    const roots = database.prepare('SELECT count(*) AS n FROM roots').get() as { n: number };
+    const sessions = database.prepare('SELECT count(*) AS n FROM sessions').get() as { n: number };
+    return { roots: Number(roots.n), sessions: Number(sessions.n) };
+  } finally {
+    database.close();
+  }
+}
+
+describe('the store command', () => {
+  it('says a missing database is empty, and does not create one to say it', async () => {
+    const missing = join(storeDir, 'never-written.db');
+    const result = await runStore(['store', 'list', '--db', missing]);
+    expect(result.code).toBe(2);
+    expect(result.stdout).toContain('库是空的');
+    // Listing is a read: the file it was asked about must still not exist.
+    await expect(stat(missing)).rejects.toThrow();
+  });
+
+  it('lists what it holds, along the dimension asked for', async () => {
+    await report();
+    const roots = await runStore(['store', 'list', '--db', storePath()]);
+    expect(roots.code).toBe(0);
+    expect(roots.stdout).toContain(root);
+
+    const byCwd = await runStore(['store', 'list', '--db', storePath(), '--by', 'cwd', '--json']);
+    expect(byCwd.code).toBe(0);
+    const document = JSON.parse(byCwd.stdout) as { by: string; nodes: { key: string }[] };
+    expect(document.by).toBe('cwd');
+    expect(document.nodes.map((node) => node.key)).toContain('/tmp/demo');
+
+    const bad = await runStore(['store', 'list', '--db', storePath(), '--by', 'nope']);
+    expect(bad.code).toBe(1);
+  });
+
+  it('costs an excluded root without ever storing it', async () => {
+    const excludedDb = join(storeDir, 'excluded.db');
+    const controlDb = join(storeDir, 'control.db');
+    const args = (db: string): string[] => [
+      'usage', '--agent', 'claudecode', '--home', root, '--db', db, '--no-update', '--json',
+    ];
+
+    const excluded = await runStore([...args(excludedDb), '--store-exclude', root]);
+    expect(excluded.code, excluded.stderr).toBe(0);
+    // The figures are the same as a stored run's: exclusion decides where rows go,
+    // never what the report says.
+    expect((JSON.parse(excluded.stdout) as Report).totals.requests).toBe(3);
+    expect(await storeCounts(excludedDb)).toEqual({ roots: 0, sessions: 0 });
+
+    const control = await runStore(args(controlDb));
+    expect(control.code, control.stderr).toBe(0);
+    expect(await storeCounts(controlDb)).toEqual({ roots: 1, sessions: 2 });
+
+    // A second excluded run still writes nothing — the root is not remembered either.
+    await runStore([...args(excludedDb), '--store-exclude', root]);
+    expect(await storeCounts(excludedDb)).toEqual({ roots: 0, sessions: 0 });
+  });
+
+  it('dry-runs a forget, and only deletes with --yes', async () => {
+    await report();
+    const before = await stat(storePath());
+    const dry = await runStore([
+      'store', 'forget', '--db', storePath(), '--session', '11111111-1111-4111-8111-111111111111',
+    ]);
+    expect(dry.code).toBe(0);
+    expect(dry.stdout).toContain('预演');
+    // A dry run is the real deletion rolled back: the file is untouched.
+    expect((await stat(storePath())).mtimeMs).toBe(before.mtimeMs);
+    expect((await storeCounts(storePath())).sessions).toBe(2);
+
+    const yes = await runStore([
+      'store', 'forget', '--db', storePath(), '--session', '11111111-1111-4111-8111-111111111111', '--yes',
+    ]);
+    expect(yes.code).toBe(0);
+    expect(yes.stdout).toContain('已删除');
+    expect((await storeCounts(storePath())).sessions).toBe(1);
+  });
+
+  it('refuses a selector-less forget, an unconfirmed --all, and reports no match', async () => {
+    await report();
+    const none = await runStore(['store', 'forget', '--db', storePath()]);
+    expect(none.code).toBe(1);
+    expect(none.stderr).toContain('要说明删什么');
+
+    const unconfirmed = await runStore(['store', 'forget', '--db', storePath(), '--all']);
+    expect(unconfirmed.code).toBe(1);
+    expect((await storeCounts(storePath())).roots).toBe(1);
+
+    const noMatch = await runStore(['store', 'forget', '--db', storePath(), '--session', 'nope']);
+    expect(noMatch.code).toBe(2);
+    expect(noMatch.stdout).toContain('没有匹配');
+  });
+
+  it('reclaims the space a deletion held', async () => {
+    await report();
+    // `bytes` counts the database plus its WAL, which is where a fresh write
+    // actually sits until the log is folded back in — the figure a reader sees.
+    const bytesOf = async (): Promise<number> => {
+      const listed = await runStore(['store', 'list', '--db', storePath(), '--json']);
+      // An emptied store answers exit 2 and still prints its document: the JSON
+      // owns stdout, and 2 is the "there is nothing to list" code.
+      expect([0, 2], listed.stderr).toContain(listed.code);
+      return (JSON.parse(listed.stdout) as { bytes: number }).bytes;
+    };
+    const before = await bytesOf();
+
+    const removed = await runStore(['store', 'forget', '--db', storePath(), '--agent', 'claudecode', '--yes']);
+    expect(removed.code).toBe(0);
+    expect((await storeCounts(storePath())).roots).toBe(0);
+
+    const vacuum = await runStore(['store', 'vacuum', '--db', storePath()]);
+    expect(vacuum.code).toBe(0);
+    expect(vacuum.stdout).toContain('已回收');
+    // The fixture is small enough to sit at SQLite's minimum page size, so the
+    // claim is "no bigger, and the write-ahead log is folded back in".
+    expect(await bytesOf()).toBeLessThanOrEqual(before);
+    const wal = `${storePath()}-wal`;
+    const walSize = await stat(wal).then((entry) => entry.size).catch(() => 0);
+    expect(walSize).toBe(0);
+  });
+
+  it('names an older build as the reader when the logs are gone', async () => {
+    await report();
+    await ageStore('0.0.1');
+    // With the logs gone nothing can be read again, so the rows stay as that
+    // build left them — and the report has to say whose reading it is showing.
+    await rm(root, { recursive: true, force: true });
+    const after = await report();
+    expect(warningCodes(after)).toContain('storeSourceOutdated');
+    expect(after.warnings.find((warning) => warning.code === 'storeSourceOutdated')?.message).toContain('0.0.1');
+  });
+});

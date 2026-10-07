@@ -32,6 +32,7 @@ import {
   type UsageStoreReset,
 } from '../store/index.ts';
 import type { AgentAdapter } from './contract.ts';
+import { TOOL_VERSION } from '../core/version.ts';
 import { splitRoots, uniqueRoots } from './roots.ts';
 import { AGENT_ADAPTERS, detectAgents, findAgent, requireAgent } from './registry.ts';
 
@@ -48,6 +49,23 @@ function vanishedWarning(adapter: AgentAdapter, path: string, lastSeen: number):
     agent: adapter.label,
     path,
     lastSeen: localDateText(lastSeen),
+  });
+}
+
+/**
+ * The warning a remembered source read by an older build deserves.
+ *
+ * Its logs are gone, so nothing can re-derive the fields that build never wrote
+ * — tool calls, for one. Saying so is the difference between "this agent called
+ * no tools" and "nobody asked the question yet"; the figures stay, but they come
+ * with the reason they may be short.
+ */
+function outdatedWarning(adapter: AgentAdapter, path: string, readerVersion: string | null): Warning {
+  return new UserError('storeSourceOutdated', {
+    agent: adapter.label,
+    path,
+    reader: readerVersion ?? t().errors.storeUnknownReader,
+    current: TOOL_VERSION,
   });
 }
 
@@ -441,6 +459,14 @@ export async function loadPlannedAgents(
             // back marked stale and named in a warning — never silently dropped.
             datasets.push({ ...markStaleSessions(read.dataset, read.staleSessionIds), stale: true });
             warnings.push(vanishedWarning(adapter, read.root, read.lastSeen));
+            // A remembered root whose logs are gone can never be read again, so
+            // whatever build wrote its rows is the last word on them. When that
+            // build is not this one, the report says so instead of letting a
+            // field it never wrote read as zero.
+            const reader = active === undefined ? undefined : active.readerVersionOf(adapter.id, rootId);
+            if (reader !== undefined && reader !== TOOL_VERSION) {
+              warnings.push(outdatedWarning(adapter, read.root, reader));
+            }
             loaded += 1;
             continue;
           }

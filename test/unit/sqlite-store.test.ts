@@ -1668,6 +1668,39 @@ describe('forgetting', () => {
     expect(store.readRoot('codex', 'r-b1')?.dataset.sessions).toHaveLength(1);
   });
 
+  it('counts a dry run exactly like the real one, and rolls it back', async () => {
+    const store = await stocked();
+    const before = store.stats().bytes;
+    const walked = store.forget({ rootPrefix: join(dir, 'datas') }, { dryRun: true });
+    // The figures `--yes` would print are the deletion's own, not an estimate.
+    expect(walked.total).toBe(15);
+    expect(walked.roots).toHaveLength(3);
+    // Rolled back: every root is still there, with its fingerprint and reader version.
+    expect(store.rootSummaries()).toHaveLength(3);
+    expect(store.fingerprintOf('dsh', 'r-a1')).toHaveLength(1);
+    expect(store.stats().bytes).toBe(before);
+
+    // And the real call on the same selector does exactly what the dry run said.
+    const real = store.forget({ rootPrefix: join(dir, 'datas') });
+    expect(real.total).toBe(walked.total);
+    expect(store.rootSummaries()).toEqual([]);
+  });
+
+  it('says which build wrote a root, and tells an unknown root apart from an old one', async () => {
+    const store = await stocked();
+    expect(store.readerVersionOf('dsh', 'r-a1')).toBe('1.2.3');
+    // Never heard of it: not the same answer as "written before the column existed".
+    expect(store.readerVersionOf('dsh', 'r-nope')).toBeUndefined();
+
+    const raw = new DatabaseSync(dbPath);
+    try {
+      raw.exec("UPDATE roots SET reader_version = NULL WHERE root_id = 'r-a1'");
+    } finally {
+      raw.close();
+    }
+    expect(store.readerVersionOf('dsh', 'r-a1')).toBeNull();
+  });
+
   it('forgets every root under a path prefix, by whole path segment', async () => {
     const store = await stocked();
     const parent = join(dir, 'datas');

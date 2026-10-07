@@ -488,6 +488,17 @@ export interface ForgetResult {
   roots: readonly ForgottenRoot[];
 }
 
+/** How {@link UsageStore.forget} should behave. */
+export interface ForgetOptions {
+  /**
+   * Count what the selector would remove and roll the transaction back.
+   *
+   * A dry run is the real deletion minus the commit, so the figures a caller
+   * prints are the ones `--yes` will produce — not an estimate.
+   */
+  dryRun?: boolean | undefined;
+}
+
 /** What {@link UsageStore.writeRoot} stores. */
 export interface WriteRootInput {
   /** Agent that read the root. */
@@ -1399,6 +1410,27 @@ export class UsageStore {
   }
 
   /**
+   * Which tool version wrote the rows of one root.
+   *
+   * The answer a caller needs to say "these figures were read by an older build,
+   * so a field added since then is missing rather than zero".
+   *
+   * @param agent - agent that read the root.
+   * @param rootId - identity of the root.
+   * @returns the stamped version, `null` when the rows predate the column, or
+   *   `undefined` when the store has never heard of the root.
+   */
+  readerVersionOf(agent: string, rootId: string): string | null | undefined {
+    this.#assertOpen();
+    const row = this.#get<{ reader_version: string | null }>(
+      'SELECT reader_version FROM roots WHERE agent = ? AND root_id = ?',
+      agent,
+      rootId,
+    );
+    return row === undefined || row.reader_version === undefined ? undefined : row.reader_version;
+  }
+
+  /**
    * What this store is: which file, which schema, which tool wrote it last.
    * @returns the store's own facts.
    */
@@ -1439,10 +1471,13 @@ export class UsageStore {
    * than a cleanup.
    *
    * @param selector - what to forget; see {@link ForgetSelector}.
+   * @param options - `dryRun` counts the same rows and rolls the transaction back,
+   *   which is how a caller can print exactly what `--yes` would remove without
+   *   guessing at the selector's reach.
    * @returns the rows deleted per table and the roots affected.
    * @throws when the selector names nothing, or mixes `all` with a condition.
    */
-  forget(selector: ForgetSelector): ForgetResult {
+  forget(selector: ForgetSelector, options: ForgetOptions = {}): ForgetResult {
     this.#assertOpen();
     const conditions = Object.entries(selector).filter(([, value]) => value !== undefined);
     if (conditions.length === 0) {
@@ -1465,7 +1500,8 @@ export class UsageStore {
       } else {
         this.#forgetRoots(selector, deleted, affected);
       }
-      this.#db.exec('COMMIT');
+      if (options.dryRun === true) this.#db.exec('ROLLBACK');
+      else this.#db.exec('COMMIT');
     } catch (error) {
       try {
         this.#db.exec('ROLLBACK');

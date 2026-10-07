@@ -177,6 +177,19 @@ export const en: Messages = {
     noUpdate: 'do not check for price or rate updates this run; use the local cache',
     noStore: 'ignore the scan database: parse every file again and write nothing (history of vanished directories and files is not shown either)',
     db: 'where the scan database lives (default $XDG_DATA_HOME/agent-usages/usage.db, else ~/.local/share/agent-usages/usage.db)',
+    storeExclude: 'data directories whose roots are neither stored nor remembered this run (still read, still costed); path-segment prefix match, repeatable',
+    storeCommand: 'inspect and clean the scan database (maintenance: what is in it, how to take it out)',
+    storeList: 'list what the database holds: --by agent|root|project|cwd|session, default by data root',
+    storeListBy: 'which dimension to list (agent|root|project|cwd|session)',
+    storeForget: 'remove what a selector matches, as a dry run unless --yes is given (this evicts cache, never logs)',
+    storeForgetRoot: 'match this data root; a path-segment prefix, so one value can cover several',
+    storeForgetCwd: 'match sessions that ran in this directory or under it',
+    storeForgetProject: 'match sessions filed under this project (id or name)',
+    storeForgetSession: 'match this one session id',
+    storeForgetAgent: 'match every root this agent read',
+    storeForgetAll: 'match everything in the database (must be given with --yes)',
+    storeYes: 'really delete (without it the run only prints what would go)',
+    storeVacuum: 'hand the space freed by deleted rows back to the system (VACUUM + fold the WAL)',
     usage: 'token usage and cost',
     range: 'time range: today/week/month/year (with an offset such as month-1) or "start..end" (half-open)',
     subagent: 'split every project and session into total / direct / subagents',
@@ -272,6 +285,54 @@ export const en: Messages = {
     colSession: 'Session',
     colAgent: 'Agent',
     colTopTools: 'Top tools',
+  },
+
+  /**
+   * Inspecting and cleaning the scan database (maintenance, not a daily command).
+   *
+   * Two rules only: never invent a figure (rows another build wrote say so
+   * instead of passing as current), and say "there is nothing here" in words
+   * rather than drawing an empty table that reads like a result.
+   */
+  store: {
+    header: (p: { path: string; schema: string; tool: string; bytes: string }) =>
+      `scan database ${p.path} (schema v${p.schema}, last written by ${p.tool}, ${p.bytes} on disk)`,
+    empty: (path: string) => `the database is empty: ${path} holds nothing yet (or the file is not there).`,
+    columnAgent: 'agent',
+    columnRoot: 'data root',
+    columnProject: 'project',
+    columnCwd: 'directory',
+    columnSession: 'session',
+    columnTitle: 'title / id',
+    columnLastSeen: 'last scan',
+    columnReader: 'read by',
+    columnSessions: 'sessions',
+    columnRecords: 'records',
+    columnEvents: 'events',
+    columnLastActivity: 'last activity',
+    columnRoots: 'roots',
+    readerOld: (version: string) => `${version} (older build)`,
+    readerUnknown: 'unknown (before that column)',
+    readerMixed: (versions: string) => `mixed: ${versions}`,
+    forgetDryRun: 'dry run: the database is untouched (add --yes to delete)',
+    forgetExecuted: (rows: string) => `deleted ${rows} rows`,
+    forgetRoot: (p: { agent: string; root: string; rows: string; reset: string }) =>
+      `${p.agent}  ${p.root}  ${p.rows} rows (${p.reset})`,
+    forgetReset: 'cache memory cleared, so the whole root is read again next scan',
+    forgetKept: 'whole root removed',
+    forgetTotal: (rows: string) => `${rows} rows in total`,
+    forgetNothing: 'nothing matched.',
+    forgetHint:
+      'note: store forget only evicts cache — a log that is still there and not passed to --store-exclude is read again on the next scan. Use --store-exclude to keep it out.',
+    forgetVacuumHint: 'the space is not back yet: run store vacuum when you want it.',
+    vacuumDone: (p: { before: string; after: string; disk: string }) =>
+      `reclaimed: ${p.before} → ${p.after} (${p.disk} on disk)`,
+    vacuumNoop: 'an in-memory database has no space to reclaim.',
+    unknownBy: (p: { value: string; known: string }) => `unknown --by ${p.value} (use: ${p.known})`,
+    selectorNeeded: 'say what to forget: --root / --cwd / --project / --session / --agent / --all (they combine).',
+    allNeedsYes: '--all must be given together with --yes; nothing is confirmed interactively.',
+    projectAmbiguous: (p: { value: string; ids: string }) =>
+      `--project ${p.value} matches several projects: ${p.ids} (use a full id)`,
   },
 
   html: {
@@ -455,6 +516,9 @@ export const en: Messages = {
       `the usage store at ${p.path} could not be opened (${p.reason}); this run counts in memory and writes nothing — fixing that path restores it.`,
     storeSourceVanished: (p: { agent: string; path: string; lastSeen: string }) =>
       `${p.agent}: the data directory ${p.path} was not seen by this scan (last seen ${p.lastSeen}); its history still counts from the store — use --no-store to see only what exists now.`,
+    storeSourceOutdated: (p: { agent: string; path: string; reader: string; current: string }) =>
+      `${p.agent}: these rows under ${p.path} were read by ${p.reader} (this build is ${p.current}) and their logs are gone, so they cannot be read again; a field added since then (tool calls, say) is "never asked", not zero.`,
+    storeUnknownReader: 'a build older than that record',
     storeFilesVanished: (p: { agent: string; root: string; count: string; files: string }) =>
       `${p.agent}: ${p.count} files under ${p.root} are gone (${p.files}); the sessions they held still count and are marked stale — use --no-store for only what exists now.`,
     storeWriteFailed: (p: { path: string; reason: string }) =>

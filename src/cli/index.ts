@@ -47,7 +47,9 @@ import { renderDiagnostic, UserError, type Warning } from '../i18n/errors.ts';
 import { mergeDatasets } from '../core/merge.ts';
 import { TOOL_VERSION } from '../core/version.ts';
 import { UsageStore, defaultStorePath } from '../store/index.ts';
-import { readFileSync, writeFileSync } from 'node:fs';
+import type { ForgetSelector, StoreOverviewNode, StoreRootDetail, StoreStats } from '../store/index.ts';
+import { byteSize } from '../render/tools.ts';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,6 +86,14 @@ import {
 } from '../render/format.ts';
 import { renderHtmlReport } from '../render/html.ts';
 import { formatToolsReport, toolsToJson } from '../render/tools.ts';
+import {
+  formatForgetResult,
+  formatStoreList,
+  forgetResultToJson,
+  storeListToJson,
+  type StoreLevel,
+  type StoreRow,
+} from '../render/store.ts';
 import type { UsageDataset } from '../core/types.ts';
 
 const EXIT_OK = 0;
@@ -111,6 +121,14 @@ interface GlobalOptions {
   store?: boolean;
   /** `--db <path>`: where the scan database lives (default: the user's data dir). */
   db?: string;
+  /**
+   * `--store-exclude <path>`: data roots this run reads but never stores.
+   *
+   * A maintenance switch, not a user setting: it is how a borrowed corpus — a
+   * directory of somebody else's logs opened for testing — is costed without
+   * landing in the reader's own database.
+   */
+  storeExclude?: string[];
 }
 
 /** Options accepted by `usage`. */
@@ -264,6 +282,7 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
     if (entry.update === false) merged.update = false;
     if (entry.store === false) merged.noStore = true;
     if (entry.db !== undefined) merged.db = entry.db;
+    if (entry.storeExclude !== undefined) merged.storeExclude = entry.storeExclude;
   }
   if (options.agent !== undefined) merged.agent = options.agent;
   if (options.agentDir !== undefined) merged.agentDir = options.agentDir;
@@ -273,6 +292,7 @@ function withGlobals<T extends GlobalOptions>(command: Command, options: T): T {
   if (options.update === false) merged.update = false;
   if (options.store === false) merged.noStore = true;
   if (options.db !== undefined) merged.db = options.db;
+  if (options.storeExclude !== undefined) merged.storeExclude = options.storeExclude;
   return { ...options, ...merged };
 }
 
@@ -320,6 +340,7 @@ async function loadOrExit(
       agent: options.agent,
       agentDirs: options.agentDir,
       ...(options.home === undefined ? {} : { home: options.home }),
+      ...(options.storeExclude === undefined ? {} : { excludedRoots: options.storeExclude }),
       ...(opened === undefined ? {} : { store: opened.store }),
     });
     if (plan.planned.length === 0) {
@@ -331,6 +352,7 @@ async function loadOrExit(
     const adapters = plan.planned.map((entry) => entry.adapter);
     const { datasets, warnings: sourceWarnings } = await loadPlannedAgents(plan.planned, {
       enrich: true,
+      ...(options.storeExclude === undefined ? {} : { excludedRoots: options.storeExclude }),
       ...(opened === undefined ? {} : { store: opened.store }),
     });
     opened?.store.close();
@@ -722,6 +744,286 @@ async function runTools(options: ToolsOptions): Promise<void> {
   // document, and the exit code already says the answer was "nothing".
   if (report.totals.calls === 0 && options.json === true) process.stderr.write(`${t().tools.none}\n`);
   emit(toolsToJson(report), text, options.json === true, report.totals.calls);
+}
+
+/** Project ids a `--project` value names: an exact id or name, else a unique id prefix. */
+function projectIdsMatching(overview: readonly StoreOverviewNode[], value: string): string[] {
+  const projects: StoreOverviewNode[] = [];
+  const walk = (nodes: readonly StoreOverviewNode[]): void => {
+    for (const node of nodes) {
+      if (node.kind === 'project') projects.push(node);
+      walk(node.children);
+    }
+  };
+  walk(overview);
+  const exact = projects.filter((node) => node.id === value || node.label === value);
+  if (exact.length > 0) return exact.map((node) => node.id);
+  return projects.filter((node) => node.id.startsWith(value)).map((node) => node.id);
+}
+
+/** Options accepted by the `store` command family. */
+interface StoreCommandOptions extends GlobalOptions {
+  /** `--by <dimension>` for `store list`. */
+  by?: string;
+  /** `--yes`: `store forget` really deletes; without it the run only reports. */
+  yes?: boolean;
+  /** `--root`, `--cwd`, `--project`, `--session`: `store forget` selectors. */
+  root?: string;
+  cwd?: string;
+  project?: string;
+  session?: string;
+  /** `--all`: every row in the database. */
+  all?: boolean;
+}
+
+/** The levels `--by` accepts, in the order the help lists them. */
+const STORE_LEVELS: readonly StoreLevel[] = ['agent', 'root', 'project', 'cwd', 'session'];
+
+/**
+ * Whether the database file is there at all.
+ *
+ * `store list` must not *create* a database to answer "there is nothing in it",
+ * so the file is checked before anything opens it.
+ */
+function storeFileExists(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Every node of one level, in tree order. */
+function nodesAt(nodes: readonly StoreOverviewNode[], kind: StoreOverviewNode['kind']): StoreOverviewNode[] {
+  const found: StoreOverviewNode[] = [];
+  for (const node of nodes) {
+    if (node.kind === kind) found.push(node);
+    found.push(...nodesAt(node.children, kind));
+  }
+  return found;
+}
+
+/** Walk up the tree to name the agent a node belongs to. */
+function agentOf(nodes: readonly StoreOverviewNode[], target: StoreOverviewNode): string {
+  const walk = (list: readonly StoreOverviewNode[], agent: string): string | undefined => {
+    for (const node of list) {
+      const here = node.kind === 'agent' ? node.id : agent;
+      if (node === target) return here;
+      const deeper = walk(node.children, here);
+      if (deeper !== undefined) return deeper;
+    }
+    return undefined;
+  };
+  return walk(nodes, '') ?? '';
+}
+
+/**
+ * Flatten the store's tree into the plain rows `store list` prints.
+ *
+ * The renderer is handed rows rather than the database's own nodes: printing
+ * lives below `cli` in the import graph, and a type from `store/` there would
+ * make the arrows point upward.
+ *
+ * @param by - which dimension to flatten.
+ * @param roots - per-root summaries, used for the `root` level.
+ * @param overview - the tree, used for every other level.
+ * @returns the rows, in the order the store lists them.
+ */
+function storeRows(by: StoreLevel, roots: readonly StoreRootDetail[], overview: readonly StoreOverviewNode[]): StoreRow[] {
+  if (by === 'root') {
+    return [...roots]
+      .sort((a, b) => b.lastSeen - a.lastSeen || a.root.localeCompare(b.root))
+      .map((root) => ({
+        agent: root.agent,
+        key: root.root,
+        detail: root.rootId,
+        sessions: root.sessions,
+        records: root.records,
+        events: root.events,
+        lastActivity: root.lastSeen,
+        readers: [root.readerVersion],
+      }));
+  }
+  return nodesAt(overview, by).map((node) => ({
+    agent: agentOf(overview, node),
+    key: node.id,
+    detail: node.label === node.id ? '' : node.label,
+    sessions: node.sessions,
+    records: node.records,
+    events: node.events,
+    lastActivity: node.lastActivity,
+    readers: node.readerVersions,
+  }));
+}
+
+/**
+ * `store list`: what the scan database holds, along one dimension.
+ *
+ * A maintenance view of the cache, so it prints rows and reader versions rather
+ * than money, and it never creates the database it is asked about.
+ *
+ * @param options - the command line, already merged with the global options.
+ */
+async function runStoreList(options: StoreCommandOptions): Promise<void> {
+  const by = (options.by ?? 'root') as StoreLevel;
+  if (!STORE_LEVELS.includes(by)) {
+    process.stderr.write(
+      `agent-usages: ${t().store.unknownBy({ value: JSON.stringify(options.by), known: STORE_LEVELS.join('|') })}\n`,
+    );
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+  const path = options.db ?? defaultStorePath();
+  let stats: StoreStats | null = null;
+  let roots: readonly StoreRootDetail[] = [];
+  let overview: readonly StoreOverviewNode[] = [];
+  if (storeFileExists(path)) {
+    const { store } = await UsageStore.open({ path, toolVersion: TOOL_VERSION });
+    stats = store.stats();
+    roots = store.rootSummaries();
+    overview = store.storeOverview();
+    store.close();
+  }
+  const input = {
+    path,
+    exists: stats !== null,
+    schemaVersion: stats?.schemaVersion ?? null,
+    toolVersion: stats?.toolVersion ?? null,
+    bytes: stats?.bytes ?? 0,
+    by,
+    rows: stats === null ? [] : storeRows(by, roots, overview),
+    currentVersion: TOOL_VERSION,
+    labels: t().store,
+  };
+  const text = formatStoreList(input);
+  const empty = input.rows.length === 0;
+  // Same convention as the reports: the JSON document owns stdout, and the
+  // sentence saying "there is nothing here" goes to stderr beside it.
+  if (options.json === true) {
+    if (empty) process.stderr.write(`${text}\n`);
+    process.stdout.write(`${JSON.stringify(storeListToJson(input), null, 2)}\n`);
+  } else {
+    process.stdout.write(`${text}\n`);
+  }
+  process.exitCode = empty ? EXIT_NO_DATA : EXIT_OK;
+}
+
+/** The selector as the user spelled it, for the output line that names the target. */
+function selectorText(options: StoreCommandOptions): string {
+  const parts: string[] = [];
+  const given: readonly [string, string | undefined][] = [
+    ['--root', options.root],
+    ['--cwd', options.cwd],
+    ['--project', options.project],
+    ['--session', options.session],
+    ['--agent', options.agent?.join(',')],
+  ];
+  for (const [flag, value] of given) if (value !== undefined) parts.push(`${flag} ${value}`);
+  if (options.all === true) parts.push('--all');
+  return parts.join(' ');
+}
+
+/**
+ * `store forget`: drop what a selector matches.
+ *
+ * Eviction, not deletion of history — the sentence saying so is part of the
+ * output because the difference decides whether the rows come back on the next
+ * scan. A dry run is the real deletion rolled back, so the figures are the ones
+ * `--yes` will produce rather than an estimate.
+ *
+ * @param options - the command line, already merged with the global options.
+ */
+async function runStoreForget(options: StoreCommandOptions): Promise<void> {
+  const path = options.db ?? defaultStorePath();
+  if (!storeFileExists(path)) {
+    process.stderr.write(`agent-usages: ${t().store.empty(path)}\n`);
+    process.exitCode = EXIT_NO_DATA;
+    return;
+  }
+  const named: ForgetSelector = {
+    ...(options.root === undefined ? {} : { rootPrefix: options.root }),
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.session === undefined ? {} : { session: options.session }),
+    ...(options.agent === undefined ? {} : { agent: options.agent.join(',') }),
+    ...(options.all === true ? { all: true as const } : {}),
+  };
+  if (Object.keys(named).length === 0 && options.project === undefined) {
+    process.stderr.write(`agent-usages: ${t().store.selectorNeeded}\n`);
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+  if (options.all === true && options.yes !== true) {
+    process.stderr.write(`agent-usages: ${t().store.allNeedsYes}\n`);
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+  const executed = options.yes === true;
+  const { store } = await UsageStore.open({ path, toolVersion: TOOL_VERSION });
+  // `--project` reaches the store as the id rows are filed under, but an id is
+  // not what a reader has in hand: a name (or a unique id prefix) is resolved
+  // through the same tree `store list --by project` prints.
+  let project = options.project;
+  if (project !== undefined) {
+    const ids = projectIdsMatching(store.storeOverview(), project);
+    if (ids.length > 1) {
+      store.close();
+      process.stderr.write(
+        `agent-usages: ${t().store.projectAmbiguous({ value: JSON.stringify(project), ids: ids.join(', ') })}\n`,
+      );
+      process.exitCode = EXIT_ERROR;
+      return;
+    }
+    project = ids[0] ?? project;
+  }
+  const selector: ForgetSelector = {
+    ...named,
+    ...(project === undefined ? {} : { project }),
+  };
+  if (Object.keys(selector).length === 0) {
+    store.close();
+    process.stderr.write(`agent-usages: ${t().store.selectorNeeded}\n`);
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+  if (options.all === true && options.yes !== true) {
+    store.close();
+    process.stderr.write(`agent-usages: ${t().store.allNeedsYes}\n`);
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+  const result = store.forget(selector, { dryRun: !executed });
+  store.close();
+  const text = formatForgetResult(result, executed, t().store, selectorText(options));
+  if (options.json === true) {
+    if (result.total === 0) process.stderr.write(`${text}\n`);
+    process.stdout.write(`${JSON.stringify(forgetResultToJson(result, executed), null, 2)}\n`);
+  } else {
+    process.stdout.write(`${text}\n`);
+  }
+  process.exitCode = result.total === 0 ? EXIT_NO_DATA : EXIT_OK;
+}
+
+/**
+ * `store vacuum`: hand the pages of deleted rows back to the system.
+ *
+ * @param options - the command line, already merged with the global options.
+ */
+async function runStoreVacuum(options: StoreCommandOptions): Promise<void> {
+  const path = options.db ?? defaultStorePath();
+  if (!storeFileExists(path)) {
+    process.stderr.write(`agent-usages: ${t().store.empty(path)}\n`);
+    process.exitCode = EXIT_NO_DATA;
+    return;
+  }
+  const { store } = await UsageStore.open({ path, toolVersion: TOOL_VERSION });
+  const before = store.stats().bytes;
+  store.vacuum();
+  const after = store.stats().bytes;
+  store.close();
+  const disk = statSync(path).size;
+  process.stdout.write(
+    `${t().store.vacuumDone({ before: byteSize(before), after: byteSize(after), disk: byteSize(disk) })}\n`,
+  );
 }
 
 /** Options accepted by `session list`. */
@@ -1147,6 +1449,7 @@ function commonOptions(command: Command): Command {
     .option('--json', t().help.json)
     .option('--no-store', t().help.noStore)
     .option('--db <path>', t().help.db)
+    .option('--store-exclude <path>', t().help.storeExclude, collectOne)
     .option('--no-update', t().help.noUpdate);
 }
 
@@ -1244,6 +1547,39 @@ export function buildProgram(): Command {
   commonOptions(program.command('agents').description(t().help.agents)).action(
     (options: GlobalOptions, command: Command) => {
       runAgents(withGlobals(command, options));
+    },
+  );
+
+  // Maintenance, not a report: `store` looks inside the scan database and takes
+  // things out of it. Only the options these commands actually read are declared
+  // — a `--provider` on a command that never prices anything is noise. The
+  // program-level globals still work before the subcommand.
+  const storeCommand = program.command('store').description(t().help.storeCommand);
+  /** What a `store` subcommand reads: the database, and JSON for scripting. */
+  const storeOptions = (command: Command): Command =>
+    command.option('--db <path>', t().help.db).option('--json', t().help.json);
+
+  storeOptions(storeCommand.command('list').description(t().help.storeList))
+    .option('--by <what>', t().help.storeListBy)
+    .action(async (options: StoreCommandOptions, command: Command) => {
+      await runStoreList(withGlobals(command, options));
+    });
+
+  storeOptions(storeCommand.command('forget').description(t().help.storeForget))
+    .option('--agent <id>', t().help.storeForgetAgent, collectList)
+    .option('--root <path>', t().help.storeForgetRoot)
+    .option('--cwd <path>', t().help.storeForgetCwd)
+    .option('--project <id>', t().help.storeForgetProject)
+    .option('--session <id>', t().help.storeForgetSession)
+    .option('--all', t().help.storeForgetAll)
+    .option('--yes', t().help.storeYes)
+    .action(async (options: StoreCommandOptions, command: Command) => {
+      await runStoreForget(withGlobals(command, options));
+    });
+
+  storeOptions(storeCommand.command('vacuum').description(t().help.storeVacuum)).action(
+    async (options: StoreCommandOptions, command: Command) => {
+      await runStoreVacuum(withGlobals(command, options));
     },
   );
 

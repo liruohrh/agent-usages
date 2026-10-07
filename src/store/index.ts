@@ -38,6 +38,7 @@ export {
   STORE_MIGRATION_BACKUP_SUFFIX,
   STORE_SCHEMA_VERSION,
   UsageStore,
+  type ForgetOptions,
   type ForgetResult,
   type ForgetSelector,
   type ForgottenRoot,

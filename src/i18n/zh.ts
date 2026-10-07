@@ -228,6 +228,19 @@ export const zh = {
     noUpdate: '本次不检查价格表/汇率更新，直接用本地缓存',
     noStore: '不读也不写扫描数据库：重新解析所有文件，只看现存的来源（看不到已消失目录 / 文件的历史）',
     db: '扫描数据库放哪（默认 $XDG_DATA_HOME/agent-usages/usage.db，没有则 ~/.local/share/agent-usages/usage.db）',
+    storeExclude: '命中的数据目录本次不写库、也不被记住（照常读、照常算钱）；按路径分段前缀匹配，可重复',
+    storeCommand: '查看与清理扫描数据库（维护用：库里有什么、怎么把它拿出来）',
+    storeList: '列出库里有什么：--by agent|root|project|cwd|session，默认按数据根',
+    storeListBy: '按哪个维度列出（agent|root|project|cwd|session）',
+    storeForget: '删掉库里匹配的内容：默认只预演，加 --yes 才真删（删的是缓存，不是日志）',
+    storeForgetRoot: '匹配这个数据根；按路径分段前缀，一次可命中多个',
+    storeForgetCwd: '匹配在这个目录（含子目录）里跑过的会话',
+    storeForgetProject: '匹配归到这个项目（id 或名称）的会话',
+    storeForgetSession: '匹配这一个会话 id',
+    storeForgetAgent: '匹配这个 agent 读过的根',
+    storeForgetAll: '匹配库里全部内容（必须与 --yes 同时给）',
+    storeYes: '真的删除（不给只预演，不会改动库）',
+    storeVacuum: '回收已删除行占用的空间（VACUUM + 折叠 WAL）',
     usage: '计算 token 消耗与费用',
     range: '时间范围：today/week/month/year（可加偏移，如 month-1）或 "起始..结束"（左闭右开）',
     subagent: '每个项目与会话额外拆成 总 / 自身 / 子代理',
@@ -325,6 +338,67 @@ export const zh = {
     colSession: '会话',
     colAgent: 'Agent',
     colTopTools: '常用工具',
+  },
+
+  /**
+   * 扫描数据库的查看与清理（维护/调试用，不是日常命令）。
+   *
+   * 口径只有两条：**不编数字**（别的构建写下的行要说出它是谁写的，不能冒充当前版本），
+   * 以及**"没有"要用话说出来**（不打一张空表让它看起来像结论）。
+   */
+  store: {
+    /** 列表头部：库路径、schema、最后由谁写、占用。 */
+    header: (p: { path: string; schema: string; tool: string; bytes: string }) =>
+      `扫描数据库 ${p.path}（schema v${p.schema}，最后由 ${p.tool} 写入，占用 ${p.bytes}）`,
+    /** 文件不存在或读不出来。 */
+    empty: (path: string) => `库是空的：${path} 还没有内容（或文件不存在）。`,
+    columnAgent: 'agent',
+    columnRoot: '数据根',
+    columnProject: '项目',
+    columnCwd: '目录',
+    columnSession: '会话',
+    columnTitle: '标题 / id',
+    columnLastSeen: '最后扫描',
+    columnReader: '谁读的',
+    columnSessions: '会话',
+    columnRecords: '记录',
+    columnEvents: '事件',
+    columnLastActivity: '最后活动',
+    columnRoots: '数据根数',
+    /** 不是当前版本写的行：点名，别让它冒充当前口径。 */
+    readerOld: (version: string) => `${version}（旧版本）`,
+    /** 早于 reader_version 这一列的行。 */
+    readerUnknown: '未知（早于该列）',
+    /** 一个节点下混了多个版本。 */
+    readerMixed: (versions: string) => `混合：${versions}`,
+    /** 预演：还没有动库。 */
+    forgetDryRun: '预演：不会改动库（加 --yes 才真删）',
+    /** 真删之后。 */
+    forgetExecuted: (rows: string) => `已删除 ${rows} 行`,
+    /** 一行一个受影响的根。 */
+    forgetRoot: (p: { agent: string; root: string; rows: string; reset: string }) =>
+      `${p.agent}  ${p.root}  ${p.rows} 行（${p.reset}）`,
+    forgetReset: '缓存记忆一并作废，下次扫描会重读整个根',
+    forgetKept: '整根已删除',
+    forgetTotal: (rows: string) => `合计 ${rows} 行`,
+    /** 选择器没匹配到任何东西。 */
+    forgetNothing: '没有匹配。',
+    /** 必须说的那句实话。 */
+    forgetHint:
+      '提醒：store forget 只是缓存驱逐——日志还在、又没被 --store-exclude 排除，下次扫描会重新读进来。要它不再进来，用 --store-exclude。',
+    forgetVacuumHint: '空间还没还给系统：需要时跑 store vacuum。',
+    vacuumDone: (p: { before: string; after: string; disk: string }) =>
+      `已回收：${p.before} → ${p.after}（磁盘上 ${p.disk}）`,
+    vacuumNoop: '内存库没有可回收的空间。',
+    /** `--by` 不认识的值。 */
+    unknownBy: (p: { value: string; known: string }) => `无法识别的 --by ${p.value}（可用：${p.known}）`,
+    /** `store forget` 一个选择器都没给。 */
+    selectorNeeded: '要说明删什么：--root / --cwd / --project / --session / --agent / --all（可以组合）。',
+    /** `--all` 必须显式确认。 */
+    allNeedsYes: '--all 必须与 --yes 一起给；不会交互式确认。',
+    /** `--project` 命中了多个项目。 */
+    projectAmbiguous: (p: { value: string; ids: string }) =>
+      `--project ${p.value} 命中了多个项目：${p.ids}（请用完整 id）`,
   },
 
   /** The HTML report. */
@@ -519,6 +593,9 @@ export const zh = {
       `扫描数据 ${p.path} 打不开（${p.reason}），本次只在内存里统计、不写盘；修好这个路径就会恢复正常。`,
     storeSourceVanished: (p: { agent: string; path: string; lastSeen: string }) =>
       `${p.agent}：数据目录 ${p.path} 本次扫描没有出现（最后见到 ${p.lastSeen}），仍从库里计入历史；只看现存来源用 --no-store。`,
+    storeSourceOutdated: (p: { agent: string; path: string; reader: string; current: string }) =>
+      `${p.agent}：${p.path} 的这些行是 ${p.reader} 读的（当前 ${p.current}），日志已不在、无法重读；此后新增的字段（如工具调用）在这里是"没问过"，不是 0。`,
+    storeUnknownReader: '早于该记录的版本',
     storeFilesVanished: (p: { agent: string; root: string; count: string; files: string }) =>
       `${p.agent}：${p.root} 下有 ${p.count} 个文件本次不存在（${p.files}），它们上次的会话仍计入并标为陈旧；要按现状统计用 --no-store。`,
     storeWriteFailed: (p: { path: string; reason: string }) =>

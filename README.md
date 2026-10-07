@@ -156,7 +156,7 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 | `--rate-mode <mode>` | `latest`（默认，全程一个汇率）/ `historical`（按每条记录当天的汇率） |
 | `--agent <id,...>` | 读哪些 agent；默认 `all`（所有已安装的），可逗号分隔或重复；见[目标 agent](#目标-agent-与数据目录) |
 | `--agent-dir` / `--home` / `--provider` / `--json` / `--no-update` | 见上 |
-| `--no-store` / `--db <路径>` | 用量数据库：默认把每个数据根上次读到的结果（连着文件指纹）写进 `$XDG_DATA_HOME/agent-usages/usage.db`，没变的根下次不再解析，数字与首次一致；它是**你可以备份、也能用 sqlite3 直接读的数据**。`--no-store` 绕过它（重新解析全部文件，只看现存来源），`--db` 换位置。详见[架构](docs/architecture.md#用量数据库srcstore) |
+| `--no-store` / `--db <路径>` / `--store-exclude <路径>` | 用量数据库：默认把每个数据根上次读到的结果（连着文件指纹）写进 `$XDG_DATA_HOME/agent-usages/usage.db`，没变的根下次不再解析，数字与首次一致；它是**你可以备份、也能用 sqlite3 直接读的数据**。`--no-store` 绕过它（重新解析全部文件，只看现存来源），`--db` 换位置，`--store-exclude` 让其中某些根不入库（读与计价照常，见 [`store`](#store维护--调试)）。详见[架构](docs/architecture.md#用量数据库srcstore) |
 
 ### `tools`
 
@@ -228,6 +228,24 @@ read          343   9.4%    337     6       0     39 KB
 ### `check-config`
 
 校验 `config/pricing.json` 与 `config/rates.json`，提交前跑一次；`--json` 输出结构化结果。
+
+### `store`（维护 / 调试）
+
+扫描数据库是本工具自己的缓存，不是 agent 的数据。这几个命令用来在排查时看清它、清理它；默认写库，`--no-store` / `--store-exclude` 负责把它按住。
+
+```bash
+agent-usages store list                                        # 库里有什么（默认按数据根）
+agent-usages store list --by project                           # 也可以 --by cwd（目录）/ session / agent
+agent-usages store forget --root ~/Downloads/agentdatas        # 预演：只打印会删什么，不动库
+agent-usages store forget --root ~/Downloads/agentdatas --yes  # 真删
+agent-usages store forget --project <id|项目名> --yes          # 按项目删；--cwd / --session / --agent / --all 同理
+agent-usages store vacuum                                      # 回收删除后仍占着的空间
+```
+
+- **`store forget` 是缓存驱逐，不是"永远不要"**：日志还在、又没被 `--store-exclude` 排除，下次扫描就会重新读进来。要它不再进来，用 `--store-exclude <路径>`（可重复，按路径分段前缀匹配）——它命中的根照常读、照常算钱，但不写库、也不被记住。
+- 删子集（`--session` / `--project` / `--cwd`）会**连带作废所属根的缓存记忆**，于是下次扫描重读整个根；否则库里会留下"指纹说文件没变、数据集却缺了一块"的状态。
+- `store list` 是只读的：库文件不存在时它不会顺手建一个，只告诉你"库是空的"。`forget` 默认预演，只有 `--yes` 才动手；`--all` 必须与 `--yes` 同时给。
+- 每个根都显示**谁读的**（`reader_version`）。日志已经不在了的根只能保留旧版本读出来的行（工具调用这类后加的字段因此是 0），`store list` 与报告都会点名说明——那是"没问过"，不是"没有"。
 
 ### `serve`
 
