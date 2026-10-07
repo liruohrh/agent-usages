@@ -19,9 +19,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { UserError } from '../../src/i18n/errors.ts';
 import { setLanguage } from '../../src/i18n/index.ts';
-import type { SessionRecord, UsageDataset } from '../../src/core/types.ts';
+import type { SessionRecord, UsageDataset, UsageRecord } from '../../src/core/types.ts';
 import {
   STORE_BACKUP_SUFFIX,
+  STORE_MIGRATION_BACKUP_SUFFIX,
   STORE_SCHEMA_VERSION,
   UsageStore,
   type SourceFingerprint,
@@ -86,8 +87,21 @@ function richDataset(root: string): UsageDataset {
         seq: 7,
         turn: 2,
         step: 3,
+        // Every shape an event can take: a trimmed payload with its true size, a
+        // failure, an empty argument payload, and one the log said nothing else
+        // about.
+        events: [
+          { kind: 'tool_call', ordinal: 0, name: 'Read', detail: 'src/store/sqlite.ts', bytes: 4096, ok: true },
+          { kind: 'tool_call', ordinal: 1, name: 'Bash', bytes: 0, ok: false },
+          { kind: 'tool_call', ordinal: 2, name: 'Grep' },
+        ],
       }),
-      record({ id: 'r-2', time: 1_700_000_002_000, tokens: buckets({ input: 1 }) }),
+      record({
+        id: 'r-2',
+        time: 1_700_000_002_000,
+        tokens: buckets({ input: 1 }),
+        events: [{ kind: 'tool_call', ordinal: 0, name: 'Edit', detail: '' }],
+      }),
     ],
   });
   const second = session({
@@ -112,6 +126,73 @@ function richDataset(root: string): UsageDataset {
       new UserError('configIgnored', { path: join(root, 'config.json'), reason: 'bad json' }),
     ],
   });
+}
+
+/**
+ * Write a schema version 1 database by hand, as the previous release left it.
+ *
+ * The DDL is copied from the shipped version 1 rather than imported, because the
+ * point of the test is that a file on a user's disk — written by code that is no
+ * longer here — opens and upgrades. Rows go in for this release's reader to find
+ * afterwards.
+ */
+function seedVersion1(path: string): void {
+  const db = new DatabaseSync(path);
+  db.exec(`
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE roots (
+  agent TEXT NOT NULL, root_id TEXT NOT NULL, root TEXT NOT NULL, last_seen INTEGER NOT NULL,
+  agents_json TEXT NOT NULL, projects_json TEXT NOT NULL, warnings_json TEXT NOT NULL, stats_json TEXT NOT NULL,
+  PRIMARY KEY (agent, root_id)
+);
+CREATE TABLE files (
+  agent TEXT NOT NULL, root_id TEXT NOT NULL, rel_path TEXT NOT NULL, size INTEGER NOT NULL,
+  mtime_ms REAL NOT NULL, head_hash TEXT NOT NULL, status TEXT NOT NULL,
+  PRIMARY KEY (agent, root_id, rel_path),
+  FOREIGN KEY (agent, root_id) REFERENCES roots(agent, root_id) ON DELETE CASCADE
+);
+CREATE TABLE sessions (
+  agent TEXT NOT NULL, root_id TEXT NOT NULL, session_id TEXT NOT NULL, title TEXT, cwd TEXT,
+  created_at INTEGER, parent_id TEXT, depth INTEGER NOT NULL, is_subagent INTEGER NOT NULL,
+  archived INTEGER NOT NULL, parent_known INTEGER NOT NULL, child_ids_json TEXT NOT NULL,
+  source_file TEXT, extra_json TEXT, state TEXT NOT NULL,
+  PRIMARY KEY (agent, root_id, session_id),
+  FOREIGN KEY (agent, root_id) REFERENCES roots(agent, root_id) ON DELETE CASCADE
+);
+CREATE TABLE records (
+  agent TEXT NOT NULL, root_id TEXT NOT NULL, session_id TEXT NOT NULL, record_id TEXT NOT NULL,
+  time INTEGER NOT NULL, model TEXT NOT NULL, model_label TEXT NOT NULL, input INTEGER NOT NULL,
+  output INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, reasoning INTEGER NOT NULL,
+  cache_write_ttl TEXT, cache_write_tiers_json TEXT, seq INTEGER, turn INTEGER, step INTEGER,
+  PRIMARY KEY (agent, root_id, session_id, record_id),
+  FOREIGN KEY (agent, root_id, session_id) REFERENCES sessions(agent, root_id, session_id) ON DELETE CASCADE
+);
+CREATE INDEX records_time ON records(time);
+CREATE INDEX records_model ON records(model);
+CREATE INDEX sessions_created_at ON sessions(created_at);
+CREATE INDEX sessions_source_file ON sessions(source_file);
+PRAGMA user_version = 1;
+`);
+  const meta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)');
+  meta.run('schema_version', '1');
+  meta.run('tool_version', '1.0.0');
+  meta.run('created_at', '1600000000000');
+  db.prepare(
+    'INSERT INTO roots (agent, root_id, root, last_seen, agents_json, projects_json, warnings_json, stats_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    'dsh', 'r-v1', '/home/old', 1_600_000_000_000, '["dsh"]',
+    '[{"id":"p-v1","name":"old project","path":"/home/old/p","agents":["dsh"],"workspaces":["/home/old/p"],"sessionIds":["s-v1"]}]',
+    '[]', '{"filesRead":["/home/old/logs/a.jsonl"],"sessions":1,"records":1}',
+  );
+  db.prepare('INSERT INTO files (agent, root_id, rel_path, size, mtime_ms, head_hash, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run('dsh', 'r-v1', 'logs/a.jsonl', 10, 1.5, 'abc', 'ok');
+  db.prepare(
+    'INSERT INTO sessions (agent, root_id, session_id, title, cwd, created_at, parent_id, depth, is_subagent, archived, parent_known, child_ids_json, source_file, extra_json, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run('dsh', 'r-v1', 's-v1', 'a session from before', '/home/old/p', 1_600_000_000_000, null, 0, 0, 0, 1, '[]', 'logs/a.jsonl', null, 'live');
+  db.prepare(
+    'INSERT INTO records (agent, root_id, session_id, record_id, time, model, model_label, input, output, cache_read, cache_write, reasoning, cache_write_ttl, cache_write_tiers_json, seq, turn, step) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run('dsh', 'r-v1', 's-v1', 'rec-v1', 1_600_000_000_001, 'old-model', 'old model', 42, 1, 2, 3, 4, null, null, null, null, null);
+  db.close();
 }
 
 /** Read one column of one row, straight from the file. */
@@ -161,9 +242,16 @@ describe('opening', () => {
     expect(Number(cell(dbPath, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
 
     const tables = column(dbPath, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name");
-    expect(tables).toEqual(['files', 'meta', 'records', 'roots', 'sessions']);
+    expect(tables).toEqual(['events', 'files', 'meta', 'records', 'roots', 'sessions']);
     const indexes = column(dbPath, "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-    expect(indexes).toEqual(['records_model', 'records_time', 'sessions_created_at', 'sessions_source_file']);
+    expect(indexes).toEqual([
+      'events_name',
+      'events_session_id',
+      'records_model',
+      'records_time',
+      'sessions_created_at',
+      'sessions_source_file',
+    ]);
 
     const meta = Object.fromEntries(
       (new DatabaseSync(dbPath, { readOnly: true }).prepare('SELECT key, value FROM meta').all() as { key: string; value: string }[])
@@ -198,7 +286,7 @@ describe('opening', () => {
     expect(Number(cell(dbPath, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
   });
 
-  it('migrates a version 0 file in place, without touching a version 2 one', async () => {
+  it('migrates a version 0 file in place, without touching a newer one', async () => {
     // A file with no schema at all: the state the JSON cache era leaves behind.
     const v0Path = join(dir, 'v0.db');
     new DatabaseSync(v0Path).close();
@@ -206,6 +294,7 @@ describe('opening', () => {
     expect(migrated.reset).toBeNull();
     expect(Number(cell(v0Path, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
     expect(column(v0Path, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).toEqual([
+      'events',
       'files',
       'meta',
       'records',
@@ -216,9 +305,10 @@ describe('opening', () => {
     // A file from a newer build: opened, but not written to. Not even the
     // journal mode may change, because that is a write.
     const newerPath = join(dir, 'newer.db');
+    const future = STORE_SCHEMA_VERSION + 1;
     const newer = new DatabaseSync(newerPath);
     newer.exec('CREATE TABLE future (a TEXT)');
-    newer.exec('PRAGMA user_version = 2');
+    newer.exec(`PRAGMA user_version = ${future}`);
     newer.close();
     const before = await readFile(newerPath);
 
@@ -227,7 +317,7 @@ describe('opening', () => {
       reason: 'newer',
       path: newerPath,
       backup: null,
-      detail: 'user_version 2',
+      detail: `user_version ${future}`,
     });
     // Usable, in memory: a scan still runs, it just does not persist.
     result.store.writeRoot({
@@ -241,7 +331,148 @@ describe('opening', () => {
     expect(result.store.readRoot('dsh', 'r-1')?.dataset.sessions).toHaveLength(2);
     result.store.close();
     expect(await readFile(newerPath)).toEqual(before);
-    expect(Number(cell(newerPath, 'PRAGMA user_version'))).toBe(2);
+    expect(Number(cell(newerPath, 'PRAGMA user_version'))).toBe(future);
+  });
+
+  it('upgrades a version 1 database in place, keeping every row and a copy of it', async () => {
+    const v1Path = join(dir, 'v1.db');
+    seedVersion1(v1Path);
+
+    const { store, reset } = await openStore(v1Path, '2.0.0');
+    expect(reset).toBeNull();
+    expect(Number(cell(v1Path, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
+    expect(cell(v1Path, 'SELECT value FROM meta WHERE key = ?', 'schema_version')).toBe(String(STORE_SCHEMA_VERSION));
+    expect(cell(v1Path, 'SELECT value FROM meta WHERE key = ?', 'tool_version')).toBe('2.0.0');
+    expect(column(v1Path, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).toEqual([
+      'events',
+      'files',
+      'meta',
+      'records',
+      'roots',
+      'sessions',
+    ]);
+
+    // The rows that were there before are still there, and readable: a migration
+    // that loses a year of usage is worse than no store at all.
+    const read = store.readRoot('dsh', 'r-v1');
+    expect(read?.root).toBe('/home/old');
+    expect(read?.lastSeen).toBe(1_600_000_000_000);
+    expect(read?.dataset.sessions.map((entry) => entry.id)).toEqual(['s-v1']);
+    expect(read?.dataset.sessions[0]?.records.map((entry) => entry.id)).toEqual(['rec-v1']);
+    expect(read?.dataset.sessions[0]?.records[0]?.tokens.input).toBe(42);
+    // A v1 record has no events, and the upgrade must not invent any.
+    expect(read?.dataset.sessions[0]?.records[0]?.events).toBeUndefined();
+    expect(column(v1Path, 'SELECT ordinal FROM events')).toEqual([]);
+
+    // The copy the migration promised: the file as it was, version 1, rows included.
+    const backup = `${v1Path}${STORE_MIGRATION_BACKUP_SUFFIX}1`;
+    expect(Number(cell(backup, 'PRAGMA user_version'))).toBe(1);
+    expect(column(backup, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).toEqual([
+      'files',
+      'meta',
+      'records',
+      'roots',
+      'sessions',
+    ]);
+    expect(cell(backup, 'SELECT record_id FROM records')).toBe('rec-v1');
+    const copy = await readFile(backup);
+
+    // Opening again is a no-op: no reset, no second copy, nothing moved.
+    const again = await openStore(v1Path, '2.0.1');
+    expect(again.reset).toBeNull();
+    expect(Number(cell(v1Path, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
+    expect(await readFile(backup)).toEqual(copy);
+    expect(again.store.readRoot('dsh', 'r-v1')?.dataset.sessions[0]?.records[0]?.tokens.input).toBe(42);
+  });
+
+  it('refuses to migrate at all when the copy before it cannot be written', async () => {
+    const v1Path = join(dir, 'v1.db');
+    seedVersion1(v1Path);
+    // The name the copy would take, occupied by a directory: writing the copy
+    // fails, and the migration must not run without one.
+    await mkdir(`${v1Path}${STORE_MIGRATION_BACKUP_SUFFIX}1`);
+    const before = await readFile(v1Path);
+
+    const { store, reset } = await openStore(v1Path);
+    expect(reset?.reason).toBe('migration');
+    expect(reset?.backup).toBeNull();
+    expect(reset?.detail).toContain('refusing to migrate');
+
+    // The database was not touched: same bytes, still version 1, rows intact.
+    expect(await readFile(v1Path)).toEqual(before);
+    expect(Number(cell(v1Path, 'PRAGMA user_version'))).toBe(1);
+    expect(cell(v1Path, 'SELECT record_id FROM records')).toBe('rec-v1');
+    // This run works in memory, so the scan it belongs to still reports numbers.
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root: join(dir, 'home'),
+      now: 1,
+      dataset: richDataset(join(dir, 'home')),
+      fingerprint: [],
+    });
+    expect(store.readRoot('dsh', 'r-1')?.dataset.sessions).toHaveLength(2);
+  });
+
+  it('copies rows that are still in the write-ahead log into the migration backup', async () => {
+    const v1Path = join(dir, 'v1.db');
+    seedVersion1(v1Path);
+    // A writer that has committed a record and not closed: its rows are in
+    // `usage.db-wal`, not in the database file yet. A copy of the file alone
+    // would back up a database missing exactly the most recent usage.
+    const writer = new DatabaseSync(v1Path);
+    writer.exec('PRAGMA journal_mode = WAL');
+    writer.prepare(
+      'INSERT INTO records (agent, root_id, session_id, record_id, time, model, model_label, input, output, cache_read, cache_write, reasoning, cache_write_ttl, cache_write_tiers_json, seq, turn, step) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run('dsh', 'r-v1', 's-v1', 'rec-wal', 1_600_000_000_002, 'old-model', 'old model', 7, 0, 0, 0, 0, null, null, null, null, null);
+    expect(column(v1Path, 'SELECT record_id FROM records ORDER BY record_id')).toEqual(['rec-v1', 'rec-wal']);
+
+    const { store, reset } = await openStore(v1Path);
+    expect(reset).toBeNull();
+    writer.close();
+
+    expect(Number(cell(v1Path, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
+    const backup = `${v1Path}${STORE_MIGRATION_BACKUP_SUFFIX}1`;
+    // The copy holds both records — the one in the file and the one the writer
+    // had left in the log.
+    expect(column(backup, 'SELECT record_id FROM records ORDER BY record_id')).toEqual(['rec-v1', 'rec-wal']);
+    expect(Number(cell(backup, 'PRAGMA user_version'))).toBe(1);
+    // And the migrated database has them too.
+    const read = store.readRoot('dsh', 'r-v1');
+    expect(read?.dataset.sessions[0]?.records.map((entry) => entry.id)).toEqual(['rec-v1', 'rec-wal']);
+  });
+
+  it('rolls a failed migration back, leaving the version 1 file as it was', async () => {
+    const v1Path = join(dir, 'v1.db');
+    seedVersion1(v1Path);
+    // Something in the v1 file that the upgrade's `CREATE TABLE events` will run
+    // into: a table by that name, from a run that got no further than this.
+    const conflict = new DatabaseSync(v1Path);
+    conflict.exec('CREATE TABLE events (placeholder TEXT)');
+    conflict.close();
+
+    const { store, reset } = await openStore(v1Path);
+    expect(reset?.reason).toBe('migration');
+    expect(reset?.detail).toContain('migrating from schema version 1 failed');
+    // The copy *was* written before the attempt, so it is named even though the
+    // file itself was left alone.
+    expect(reset?.backup).toBe(`${v1Path}${STORE_MIGRATION_BACKUP_SUFFIX}1`);
+
+    // Nothing of the upgrade survived: same version, the placeholder table still
+    // the only `events`, no indexes from v2, and the rows still readable.
+    expect(Number(cell(v1Path, 'PRAGMA user_version'))).toBe(1);
+    expect(column(v1Path, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).toEqual([
+      'events',
+      'files',
+      'meta',
+      'records',
+      'roots',
+      'sessions',
+    ]);
+    expect(cell(v1Path, "SELECT name FROM pragma_table_info('events')")).toBe('placeholder');
+    expect(column(v1Path, "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'events%'")).toEqual([]);
+    expect(cell(v1Path, 'SELECT record_id FROM records')).toBe('rec-v1');
+    expect(store.readRoot('dsh', 'r-1')).toBeUndefined();
   });
 
   it('rebuilds a file that is not a database, keeping the damaged one', async () => {
@@ -282,6 +513,7 @@ describe('opening', () => {
     expect(reset?.detail).toContain('missing');
     expect(await readFile(reset?.backup ?? '', 'utf8')).toContain('SQLite format 3');
     expect(column(half, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).toEqual([
+      'events',
       'files',
       'meta',
       'records',
@@ -762,5 +994,201 @@ describe('rows on disk', () => {
     // Nothing points at a session that is no longer there: the cascade, not a
     // second statement somewhere, is what removed them.
     expect(column(dbPath, 'SELECT record_id FROM records')).toEqual([]);
+    expect(column(dbPath, 'SELECT ordinal FROM events')).toEqual([]);
+  });
+});
+
+describe('events', () => {
+  /** One session whose single record did the given things. */
+  function toolsRoot(root: string, events: UsageRecord['events']): UsageDataset {
+    const worker = session({
+      id: 's-tools',
+      agent: 'dsh',
+      sourceFile: join(root, 'logs', 'tools.jsonl'),
+      records: [record({ id: 'r-tools', time: 1_700_000_000_000, events })],
+    });
+    return dataset([project({ id: 'p-tools', sessions: [worker] })], {
+      agent: 'dsh',
+      agents: ['dsh'],
+      source: root,
+      stats: { filesRead: [join(root, 'logs', 'tools.jsonl')], sessions: 1, records: 1 },
+    });
+  }
+
+  it('stores a row per call and gives the calls back in order', async () => {
+    const store = await emptyStore();
+    const root = join(dir, 'home');
+    store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 1, dataset: richDataset(root), fingerprint: [] });
+
+    const read = store.readRoot('dsh', 'r-1');
+    const first = read?.dataset.sessions[0]?.records[0];
+    expect(first?.events).toEqual([
+      { kind: 'tool_call', ordinal: 0, name: 'Read', detail: 'src/store/sqlite.ts', bytes: 4096, ok: true },
+      { kind: 'tool_call', ordinal: 1, name: 'Bash', bytes: 0, ok: false },
+      { kind: 'tool_call', ordinal: 2, name: 'Grep' },
+    ]);
+    // A detail the log recorded as empty is a detail, not silence.
+    expect(read?.dataset.sessions[0]?.records[1]?.events).toEqual([
+      { kind: 'tool_call', ordinal: 0, name: 'Edit', detail: '' },
+    ]);
+
+    // The rows say the same, with absence as NULL rather than as a default. The
+    // order that matters is per record: `ordinal` is a position inside a request.
+    expect(column(dbPath, 'SELECT name FROM events ORDER BY record_id, ordinal')).toEqual([
+      'Read',
+      'Bash',
+      'Grep',
+      'Edit',
+    ]);
+    expect(cell(dbPath, 'SELECT bytes FROM events WHERE name = ?', 'Bash')).toBe(0);
+    expect(cell(dbPath, 'SELECT ok FROM events WHERE name = ?', 'Bash')).toBe(0);
+    expect(cell(dbPath, 'SELECT ok FROM events WHERE name = ?', 'Grep')).toBeNull();
+    expect(cell(dbPath, 'SELECT detail FROM events WHERE name = ?', 'Edit')).toBe('');
+    expect(cell(dbPath, 'SELECT ordinal FROM events WHERE name = ?', 'Read')).toBe(0);
+    expect(cell(dbPath, 'SELECT record_id FROM events WHERE name = ?', 'Grep')).toBe('r-1');
+    // Counting tool calls is the query this table exists for, and it uses the index.
+    expect(plan(dbPath, 'SELECT count(*) FROM events WHERE name = ?')).toContain('events_name');
+  });
+
+  it('writes no rows for a record whose log said nothing about tool calls', async () => {
+    const store = await emptyStore();
+    const root = join(dir, 'home');
+    const quiet = session({ id: 's-quiet', agent: 'dsh', records: [record({ id: 'r-quiet', time: 1 })] });
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 1,
+      dataset: dataset([project({ id: 'p', sessions: [quiet] })], { agent: 'dsh', agents: ['dsh'], source: root }),
+      fingerprint: [],
+    });
+    expect(column(dbPath, 'SELECT ordinal FROM events')).toEqual([]);
+    const back = store.readRoot('dsh', 'r-1')?.dataset.sessions[0]?.records[0];
+    // Absent, not empty: an empty list would claim the request called no tools.
+    expect(back?.events).toBeUndefined();
+    expect(back).not.toHaveProperty('events');
+  });
+
+  it('brings calls back in ordinal order, whatever order they arrived in', async () => {
+    const store = await emptyStore();
+    const root = join(dir, 'home');
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 1,
+      dataset: toolsRoot(root, [
+        { kind: 'tool_call', ordinal: 2, name: 'third' },
+        { kind: 'tool_call', ordinal: 0, name: 'first' },
+        { kind: 'tool_call', ordinal: 1, name: 'second' },
+      ]),
+      fingerprint: [],
+    });
+    expect(store.readRoot('dsh', 'r-1')?.dataset.sessions[0]?.records[0]?.events?.map((event) => event.name)).toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
+  });
+
+  it('refuses a record with two events in the same position', async () => {
+    const store = await emptyStore();
+    const root = join(dir, 'home');
+    store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 1, dataset: richDataset(root), fingerprint: [] });
+
+    const broken = toolsRoot(root, [
+      { kind: 'tool_call', ordinal: 0, name: 'Read' },
+      { kind: 'tool_call', ordinal: 0, name: 'Write' },
+    ]);
+    expect(() => store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 2, dataset: broken, fingerprint: [] }))
+      .toThrow(/two events with ordinal 0/);
+
+    // And the root is left exactly as it was, not half replaced.
+    expect(column(dbPath, 'SELECT count(*) FROM events')).toEqual([4]);
+    expect(store.readRoot('dsh', 'r-1')?.dataset.sessions.map((entry) => entry.id)).toEqual(['s-1', 's-2']);
+  });
+
+  it('replaces one root’s events without touching another root’s', async () => {
+    const store = await emptyStore();
+    const rootA = join(dir, 'a');
+    const rootB = join(dir, 'b');
+    store.writeRoot({ agent: 'dsh', rootId: 'r-a', root: rootA, now: 1, dataset: toolsRoot(rootA, [
+      { kind: 'tool_call', ordinal: 0, name: 'Read' },
+      { kind: 'tool_call', ordinal: 1, name: 'Bash' },
+    ]), fingerprint: [] });
+    store.writeRoot({ agent: 'dsh', rootId: 'r-b', root: rootB, now: 2, dataset: toolsRoot(rootB, [
+      { kind: 'tool_call', ordinal: 0, name: 'Grep' },
+    ]), fingerprint: [] });
+
+    // The same scan read again, having seen one more call.
+    store.writeRoot({ agent: 'dsh', rootId: 'r-a', root: rootA, now: 3, dataset: toolsRoot(rootA, [
+      { kind: 'tool_call', ordinal: 0, name: 'Read' },
+      { kind: 'tool_call', ordinal: 1, name: 'Bash' },
+      { kind: 'tool_call', ordinal: 2, name: 'Edit' },
+    ]), fingerprint: [] });
+
+    expect(column(dbPath, 'SELECT name FROM events WHERE root_id = ? ORDER BY ordinal', 'r-a')).toEqual([
+      'Read',
+      'Bash',
+      'Edit',
+    ]);
+    expect(column(dbPath, 'SELECT name FROM events WHERE root_id = ? ORDER BY ordinal', 'r-b')).toEqual(['Grep']);
+    expect(store.readRoot('dsh', 'r-b')?.dataset.sessions[0]?.records[0]?.events).toEqual([
+      { kind: 'tool_call', ordinal: 0, name: 'Grep' },
+    ]);
+
+    // A later scan that saw fewer calls loses the calls that are gone with them.
+    store.writeRoot({ agent: 'dsh', rootId: 'r-a', root: rootA, now: 4, dataset: toolsRoot(rootA, [
+      { kind: 'tool_call', ordinal: 0, name: 'Read' },
+    ]), fingerprint: [] });
+    expect(column(dbPath, 'SELECT name FROM events WHERE root_id = ?', 'r-a')).toEqual(['Read']);
+  });
+
+  it('keeps the events of a session whose file is gone', async () => {
+    const store = await emptyStore();
+    const root = join(dir, 'home');
+    const vanished = session({
+      id: 's-gone',
+      agent: 'dsh',
+      sourceFile: join(root, 'logs', 'gone.jsonl'),
+      records: [record({ id: 'r-gone', time: 5, events: [
+        { kind: 'tool_call', ordinal: 0, name: 'Bash', detail: 'npm test', ok: false },
+      ] })],
+    });
+    const live = session({
+      id: 's-live',
+      agent: 'dsh',
+      sourceFile: join(root, 'logs', 'live.jsonl'),
+      records: [record({ id: 'r-live', time: 6, events: [{ kind: 'tool_call', ordinal: 0, name: 'Read' }] })],
+    });
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 1,
+      dataset: dataset([project({ id: 'p', sessions: [vanished, live] })], { agent: 'dsh', agents: ['dsh'], source: root }),
+      fingerprint: [fingerprintFor(root, 'logs/gone.jsonl'), fingerprintFor(root, 'logs/live.jsonl')],
+    });
+
+    // The file is gone; the session it fed is kept, and so is what it did.
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 2,
+      dataset: dataset([project({ id: 'p', sessions: [live] })], { agent: 'dsh', agents: ['dsh'], source: root }),
+      fingerprint: [fingerprintFor(root, 'logs/live.jsonl')],
+      vanishedFiles: ['logs/gone.jsonl'],
+    });
+
+    const read = store.readRoot('dsh', 'r-1');
+    expect(read?.staleSessionIds).toEqual(['s-gone']);
+    expect(read?.dataset.sessions[0]?.records[0]?.events).toEqual([
+      { kind: 'tool_call', ordinal: 0, name: 'Bash', detail: 'npm test', ok: false },
+    ]);
+    // The live session's calls were replaced with what this scan read, and the
+    // tombstone's rows are still there rather than orphaned.
+    expect(read?.dataset.sessions[1]?.records[0]?.events).toEqual([{ kind: 'tool_call', ordinal: 0, name: 'Read' }]);
+    expect(column(dbPath, 'SELECT name FROM events ORDER BY name')).toEqual(['Bash', 'Read']);
   });
 });

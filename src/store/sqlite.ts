@@ -11,8 +11,9 @@
  *
  * That goal decides the shape of everything here:
  *
- * - **Rows, not a blob.** Sessions and records are tables, so a future `events`
- *   table can hang off `records`; a schema version says when the layout moved.
+ * - **Rows, not a blob.** Sessions, records and events are tables, and an event
+ *   hangs off the request that caused it; a schema version says when the layout
+ *   moved, and a version bump copies the database before it changes it.
  * - **A row knows where it came from.** Every row is keyed `(agent, root_id, …)`:
  *   storing a root only touches that root, and "who said this?" is always
  *   answerable. The union across roots is still the merge layer's job.
@@ -29,20 +30,32 @@
  */
 
 import { mkdir, rename } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { muteSqliteExperimentalWarning } from '../core/warnings.ts';
 
-import type { DatasetStats, ProjectRecord, SessionRecord, UsageDataset, UsageRecord } from '../core/types.ts';
+import type { DatasetStats, ProjectRecord, SessionRecord, UsageDataset, UsageEvent, UsageRecord } from '../core/types.ts';
 import { warningsFromJson, warningsToJson, type WarningJson } from './dataset-json.ts';
 import type { FingerprintStatus, SourceFingerprint } from './fingerprint.ts';
 
 /** The schema this module writes. Bump it when a migration is needed. */
-export const STORE_SCHEMA_VERSION = 1;
+export const STORE_SCHEMA_VERSION = 2;
 
 /** Suffix of the file a broken database is moved aside to. */
 export const STORE_BACKUP_SUFFIX = '.corrupt-';
+
+/**
+ * Suffix of the copy a migration leaves behind, then the version it came from:
+ * `usage.db.bak-v1`.
+ *
+ * A migration is the one operation that rewrites a database the user may have
+ * been keeping for years, so it does not happen without a copy of what was there
+ * before it. The copy is made with SQLite's own `VACUUM INTO`, which reads the
+ * logical database — a plain file copy would miss whatever is still in the
+ * write-ahead log.
+ */
+export const STORE_MIGRATION_BACKUP_SUFFIX = '.bak-v';
 
 /**
  * How long a writer waits for the lock before giving up, in milliseconds.
@@ -54,12 +67,11 @@ export const STORE_BACKUP_SUFFIX = '.corrupt-';
 const BUSY_TIMEOUT_MS = 5_000;
 
 /**
- * The schema, in one transaction.
+ * Version 1: roots, their source files, and what was read from them.
  *
- * `PRAGMA user_version` carries the version; the DDL below is version 1, and a
- * migration is a function from one version to the next (see {@link migrate}).
- * The foreign keys are what make a root's rows one unit: deleting a root takes
- * its files, sessions and records with it.
+ * `PRAGMA user_version` carries the version, and each constant below is one step
+ * of the chain (see {@link MIGRATIONS}). The foreign keys are what make a root's
+ * rows one unit: deleting a root takes its files, sessions and records with it.
  */
 const SCHEMA_V1 = `
 CREATE TABLE meta (
@@ -139,6 +151,59 @@ CREATE INDEX sessions_created_at ON sessions(created_at);
 CREATE INDEX sessions_source_file ON sessions(source_file);
 `;
 
+/**
+ * Version 2: what each request *did*, not just what it cost.
+ *
+ * Token counts answer "how much"; a tool call answers "what was the agent
+ * actually doing" — which tool, on what, and whether it failed. The rows hang
+ * off `records` (one event is one thing a request did), so a query can join them
+ * to the model, the project and the day of the request that caused them, and a
+ * later `kind` (thinking, file edits, compaction) fits without a second table.
+ *
+ * `ordinal` is part of the primary key because one request can call the same
+ * tool twice, and a call that happened twice is not one call.
+ */
+const SCHEMA_V2 = `
+CREATE TABLE events (
+  agent      TEXT NOT NULL,
+  root_id    TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  record_id  TEXT NOT NULL,
+  ordinal    INTEGER NOT NULL,
+  kind       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  detail     TEXT,
+  bytes      INTEGER,
+  ok         INTEGER,
+  PRIMARY KEY (agent, root_id, session_id, record_id, ordinal),
+  FOREIGN KEY (agent, root_id, session_id, record_id)
+    REFERENCES records(agent, root_id, session_id, record_id) ON DELETE CASCADE
+);
+
+CREATE INDEX events_name ON events(name);
+CREATE INDEX events_session_id ON events(session_id);
+`;
+
+/** One step of the schema chain: the DDL that reaches `to` from `to - 1`. */
+interface MigrationStep {
+  /** `user_version` this step produces. */
+  readonly to: number;
+  /** The DDL to run, for a database that is one version behind. */
+  readonly sql: string;
+}
+
+/**
+ * Every version, in order.
+ *
+ * A file is brought up by running each step it has not had yet, one transaction
+ * per step, so an old database does not take a special path: `v0 → v2` is the
+ * same two steps as `v0 → v1` then `v1 → v2`.
+ */
+const MIGRATIONS: readonly MigrationStep[] = [
+  { to: 1, sql: SCHEMA_V1 },
+  { to: 2, sql: SCHEMA_V2 },
+];
+
 /** A project as stored: everything but its sessions, plus the ids that order them. */
 type ProjectSkeleton = Omit<ProjectRecord, 'sessions'> & { sessionIds: string[] };
 
@@ -194,6 +259,17 @@ interface RecordRow {
   step: number | null;
 }
 
+interface EventRow {
+  session_id: string;
+  record_id: string;
+  ordinal: number;
+  kind: string;
+  name: string;
+  detail: string | null;
+  bytes: number | null;
+  ok: number | null;
+}
+
 /** What {@link UsageStore.open} needs to know. */
 export interface UsageStoreOpenOptions {
   /** Where the database lives. Parent directories are created. */
@@ -204,11 +280,19 @@ export interface UsageStoreOpenOptions {
 
 /** Why a store was started empty instead of from what was on disk. */
 export interface UsageStoreReset {
-  /** `corrupt`: not a database, moved aside. `newer`: another version wrote it. `unreadable`: could not be opened. */
-  reason: 'corrupt' | 'newer' | 'unreadable';
+  /**
+   * `corrupt`: not a database, moved aside. `newer`: another version wrote it.
+   * `migration`: it could not be safely brought up to this version — the
+   * pre-migration backup or the migration itself failed — so it was left as it
+   * was. `unreadable`: could not be opened at all.
+   */
+  reason: 'corrupt' | 'newer' | 'migration' | 'unreadable';
   /** The path that was asked for. */
   path: string;
-  /** Where the damaged file was moved, or `null` when nothing was moved. */
+  /**
+   * Where the file that was replaced (or copied before a migration) went, or
+   * `null` when nothing was written anywhere.
+   */
   backup: string | null;
   /** What was wrong, for a log line or a warning. */
   detail: string;
@@ -242,7 +326,14 @@ export interface WriteRootInput {
   root: string;
   /** When this read happened, in milliseconds since the Unix epoch. */
   now: number;
-  /** What the adapter read. */
+  /**
+   * What the adapter read.
+   *
+   * Every record's `events` go with it: one row per event, keyed by the record
+   * and the event's ordinal. A record with no `events` writes no rows, and comes
+   * back with no `events` field — the absence means the log did not say, which
+   * an empty array would turn into "nothing happened".
+   */
   dataset: UsageDataset;
   /** What the sources looked like, as {@link fingerprintOf} recorded them. */
   fingerprint: readonly SourceFingerprint[];
@@ -353,8 +444,27 @@ class MissingTablesError extends Error {
   }
 }
 
-/** The tables version 1 promises. */
-const REQUIRED_TABLES: readonly string[] = ['meta', 'roots', 'files', 'sessions', 'records'];
+/**
+ * Raised internally when a database could not be brought up to this version.
+ *
+ * Either the pre-migration backup could not be written — in which case nothing
+ * was attempted, because a migration that has no way back is not worth running —
+ * or the migration itself failed and was rolled back. The file is left as it
+ * was, and the caller gets a warning instead of a store.
+ */
+class MigrationError extends Error {
+  /** The copy taken before the attempt, when one was made. */
+  readonly backup: string | null;
+
+  constructor(detail: string, backup: string | null) {
+    super(detail);
+    this.name = 'MigrationError';
+    this.backup = backup;
+  }
+}
+
+/** The tables the current schema promises. */
+const REQUIRED_TABLES: readonly string[] = ['events', 'files', 'meta', 'records', 'roots', 'sessions'];
 
 /**
  * Check that the file really holds the schema its version claims.
@@ -425,6 +535,39 @@ async function backupAside(path: string, now: Date): Promise<string | null> {
   return target;
 }
 
+/**
+ * Copy a database before it is migrated, and say where the copy is.
+ *
+ * `VACUUM INTO` rather than `copyFile`: a database in WAL mode may hold committed
+ * rows in its `-wal` sidecar, and a file copy of the main file alone would back
+ * up a database missing exactly the recent data a user would miss. `VACUUM INTO`
+ * reads through a connection, so what lands in the copy is the logical database,
+ * complete, in one file that can be opened anywhere.
+ *
+ * Synchronous, like the migration it guards: the copy has to be finished and
+ * verified before the first write, and it happens between two synchronous steps.
+ *
+ * @param path - the database to copy.
+ * @param from - the version the copy holds, for the name.
+ * @returns the path of the copy.
+ * @throws when the copy cannot be written; the caller must not migrate then.
+ */
+function backupBeforeMigration(path: string, from: number, driver: SqliteModule): string {
+  const backup = `${path}${STORE_MIGRATION_BACKUP_SUFFIX}${from}`;
+  // `VACUUM INTO` refuses to overwrite: a half-written copy from a previous
+  // attempt must not be mistaken for a good one, and the state just before *this*
+  // migration is the useful thing to keep.
+  rmSync(backup, { force: true });
+  const db = new driver.DatabaseSync(path, { readOnly: true });
+  try {
+    db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    db.exec(`VACUUM INTO '${backup.replaceAll("'", "''")}'`);
+  } finally {
+    db.close();
+  }
+  return backup;
+}
+
 /** The driver, loaded on first use so the warning filter can go in first. */
 type SqliteModule = typeof import('node:sqlite');
 
@@ -450,9 +593,19 @@ async function loadSqlite(): Promise<SqliteModule> {
 /**
  * Open a file as a store, migrating a lower schema version and refusing a
  * higher one.
+ *
+ * A migration never runs without a copy of what was there before it: the copy is
+ * taken first, and a copy that cannot be written stops the whole attempt (the
+ * caller turns that into "this run works in memory"), because a schema change
+ * with no way back is the one thing this file must not do to a user's data.
+ *
  * @param path - the database path, or `:memory:`.
  * @param toolVersion - version of the tool, recorded in `meta`.
+ * @param driver - the loaded `node:sqlite` module.
  * @returns the open connection.
+ * @throws NewerSchemaError, MigrationError, MissingTablesError, or a SQLite error
+ *   for a path that cannot be opened; {@link UsageStore.open} turns each into a
+ *   structured answer.
  */
 function connect(path: string, toolVersion: string, driver: SqliteModule): DatabaseSync {
   let version = 0;
@@ -467,6 +620,11 @@ function connect(path: string, toolVersion: string, driver: SqliteModule): Datab
   }
   if (version > STORE_SCHEMA_VERSION) throw new NewerSchemaError(version);
 
+  // Before the read-write open, so the copy is of the file as the user left it —
+  // opening it, even just to set `journal_mode`, already writes to the header.
+  let backup: string | null = null;
+  if (version > 0 && version < STORE_SCHEMA_VERSION) backup = takeBackup(path, version, driver);
+
   const db = new driver.DatabaseSync(path);
   try {
     // The key between a root and its rows is composite, so the pragma is what
@@ -478,8 +636,20 @@ function connect(path: string, toolVersion: string, driver: SqliteModule): Datab
     db.exec('PRAGMA journal_mode = WAL');
     const onDisk = schemaVersionOf(db);
     if (onDisk > STORE_SCHEMA_VERSION) throw new NewerSchemaError(onDisk);
-    if (onDisk < STORE_SCHEMA_VERSION) migrate(db, onDisk, toolVersion);
-    else {
+    if (onDisk < STORE_SCHEMA_VERSION) {
+      // A version the read-only probe could not report (a WAL that needs
+      // recovery, say) still gets its copy here — later, but before any change
+      // to the rows.
+      if (backup === null && onDisk > 0) backup = takeBackup(path, onDisk, driver);
+      try {
+        migrate(db, onDisk, toolVersion);
+      } catch (error) {
+        throw new MigrationError(
+          `migrating from schema version ${onDisk} failed: ${detailOf(error)}`,
+          backup,
+        );
+      }
+    } else {
       // A version that is current but whose tables are not is a damaged file
       // that would otherwise be reported as a confusing "no such table" much
       // later, from a read that has no way to recover.
@@ -498,23 +668,49 @@ function connect(path: string, toolVersion: string, driver: SqliteModule): Datab
 }
 
 /**
+ * Take the pre-migration copy, or refuse to migrate.
+ * @param path - the database to copy.
+ * @param from - the version it holds.
+ * @param driver - the loaded `node:sqlite` module.
+ * @returns the path of the copy.
+ * @throws MigrationError when the copy cannot be written.
+ */
+function takeBackup(path: string, from: number, driver: SqliteModule): string {
+  try {
+    return backupBeforeMigration(path, from, driver);
+  } catch (error) {
+    throw new MigrationError(
+      `refusing to migrate: the copy taken before it could not be written (${detailOf(error)})`,
+      null,
+    );
+  }
+}
+
+/**
  * Bring a database up to {@link STORE_SCHEMA_VERSION}.
  *
  * One step per version, each in its own transaction: a migration that dies is
  * rolled back whole, so the file is left at the version it was, never halfway.
+ * A file created by this call runs both steps, so there is exactly one definition
+ * of what the schema is.
  * @param db - the connection.
  * @param from - the version found on disk.
  * @param toolVersion - version of the tool, for a freshly created file.
  */
 function migrate(db: DatabaseSync, from: number, toolVersion: string): void {
-  if (from === 0) {
+  for (const step of MIGRATIONS) {
+    if (step.to <= from) continue;
     db.exec('BEGIN IMMEDIATE');
     try {
-      db.exec(SCHEMA_V1);
-      db.exec(`PRAGMA user_version = ${STORE_SCHEMA_VERSION}`);
-      const seed = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING');
-      seed.run('schema_version', String(STORE_SCHEMA_VERSION));
-      seed.run('created_at', String(Date.now()));
+      db.exec(step.sql);
+      if (step.to === 1) {
+        // Created once, when the file starts being ours.
+        db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING')
+          .run('created_at', String(Date.now()));
+      }
+      db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value')
+        .run('schema_version', String(step.to));
+      db.exec(`PRAGMA user_version = ${step.to}`);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -577,13 +773,17 @@ export class UsageStore {
    * - a file written by a newer schema is left exactly as it is and the store
    *   works in memory instead, so an older build cannot destroy a newer one's
    *   data by opening it;
+   * - a file this version must migrate is copied to `usage.db.bak-v<from>` first,
+   *   and if that copy cannot be written the file is left alone and the run
+   *   continues in memory: a schema change is never the first thing to touch a
+   *   database that has no copy of itself;
    * - a path that cannot be opened at all (a directory, no permission, a
    *   read-only disk) also falls back to memory, and the scan still runs.
    *
-   * In the last two cases `reset.backup` is `null`, nothing is written where the
-   * file was, and the store is usable — its data just does not outlive the
-   * process. The caller turns `reset` into a warning; that is a decision about
-   * language and presentation, which does not belong here.
+   * In those cases the store is usable — its data just does not outlive the
+   * process, and `reset.backup` names the copy or the moved-aside file when one
+   * was written. The caller turns `reset` into a warning; that is a decision
+   * about language and presentation, which does not belong here.
    *
    * @param options - where the database is, and which tool is opening it.
    * @returns the store, and what had to be done to get it.
@@ -610,6 +810,9 @@ export class UsageStore {
           },
         };
       }
+      if (error instanceof MigrationError) {
+        return UsageStore.#fallback(path, toolVersion, driver, error.message, error.backup, 'migration');
+      }
       if (error instanceof MissingTablesError || isCorrupt(error)) {
         const backup = await backupAside(path, new Date());
         try {
@@ -618,10 +821,12 @@ export class UsageStore {
             reset: { reason: 'corrupt', path, backup, detail: detailOf(error) },
           };
         } catch (later) {
-          return UsageStore.#fallback(path, toolVersion, driver, detailOf(later), backup);
+          return UsageStore.#fallback(path, toolVersion, driver, detailOf(later), backup, 'unreadable');
         }
       }
-      if (isUnopenable(error)) return UsageStore.#fallback(path, toolVersion, driver, detailOf(error), null);
+      if (isUnopenable(error)) {
+        return UsageStore.#fallback(path, toolVersion, driver, detailOf(error), null, 'unreadable');
+      }
       // Not a statement about the file: a bug here would be swallowed by a
       // silent fallback, so it is thrown instead.
       throw error;
@@ -643,8 +848,10 @@ export class UsageStore {
    * where the file it could not use is.
    * @param path - the path that was asked for.
    * @param toolVersion - version of the tool.
+   * @param driver - the loaded `node:sqlite` module.
    * @param detail - what was wrong.
-   * @param backup - where a damaged file was moved, when one was.
+   * @param backup - where a copy or a moved-aside file went, when one was written.
+   * @param reason - why the file could not be used as it was.
    * @returns the store and its reset reason.
    */
   static async #fallback(
@@ -653,11 +860,12 @@ export class UsageStore {
     driver: SqliteModule,
     detail: string,
     backup: string | null,
+    reason: UsageStoreReset['reason'],
   ): Promise<UsageStoreOpenResult> {
     try {
       return {
         store: UsageStore.#ephemeral(path, toolVersion, driver),
-        reset: { reason: 'unreadable', path, backup, detail },
+        reset: { reason, path, backup, detail },
       };
     } catch (error) {
       // An in-memory database needs no filesystem at all, so this is not about
@@ -734,11 +942,30 @@ export class UsageStore {
       agent,
       rootId,
     );
+    // Ordered by `ordinal`, which is what the model means by the order of a
+    // record's events: two calls to the same tool in one request keep the order
+    // they happened in, not the order their rows were written.
+    const eventRows = this.#all<EventRow>(
+      'SELECT session_id, record_id, ordinal, kind, name, detail, bytes, ok FROM events WHERE agent = ? AND root_id = ? ORDER BY ordinal',
+      agent,
+      rootId,
+    );
+
+    const eventsByRecord = new Map<string, Map<string, UsageEvent[]>>();
+    for (const row of eventRows) {
+      const byRecord = eventsByRecord.get(row.session_id) ?? new Map<string, UsageEvent[]>();
+      const list = byRecord.get(row.record_id) ?? [];
+      list.push(eventOf(row));
+      byRecord.set(row.record_id, list);
+      eventsByRecord.set(row.session_id, byRecord);
+    }
 
     const recordsBySession = new Map<string, UsageRecord[]>();
     for (const row of recordRows) {
       const list = recordsBySession.get(row.session_id) ?? [];
-      list.push(recordOf(row));
+      // A record with no events gets no `events` field at all: absent means "the
+      // log did not say", which an empty array would turn into "nothing happened".
+      list.push(recordOf(row, eventsByRecord.get(row.session_id)?.get(row.record_id)));
       recordsBySession.set(row.session_id, list);
     }
 
@@ -927,6 +1154,11 @@ export class UsageStore {
         sessionRecord.extra === undefined ? null : JSON.stringify(sessionRecord.extra),
       );
       for (const usageRecord of sessionRecord.records) {
+        const events = usageRecord.events;
+        // Only rows for events that exist: "no events" is the usual case today,
+        // and it must not cost a row, nor read back as "an empty list of things
+        // the agent did".
+        if (events !== undefined) assertOrdinals(sessionRecord.id, usageRecord.id, events);
         this.#run(
           `INSERT INTO records (agent, root_id, session_id, record_id, time, model, model_label, input, output, cache_read, cache_write, reasoning, cache_write_ttl, cache_write_tiers_json, seq, turn, step)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -936,6 +1168,16 @@ export class UsageStore {
           usageRecord.cacheWriteTiers === undefined ? null : JSON.stringify(usageRecord.cacheWriteTiers),
           usageRecord.seq ?? null, usageRecord.turn ?? null, usageRecord.step ?? null,
         );
+        // After the record row: the foreign key is what makes an event belong to
+        // its request, and what removes the events when the request goes.
+        for (const event of events ?? []) {
+          this.#run(
+            `INSERT INTO events (agent, root_id, session_id, record_id, ordinal, kind, name, detail, bytes, ok)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            agent, rootId, sessionRecord.id, usageRecord.id, event.ordinal, event.kind, event.name,
+            event.detail ?? null, event.bytes ?? null, event.ok === undefined ? null : event.ok ? 1 : 0,
+          );
+        }
       }
     }
   }
@@ -1044,6 +1286,34 @@ export class UsageStore {
 }
 
 /**
+ * Refuse a record whose events claim the same position twice.
+ *
+ * The store keys an event by its ordinal, because "the second `Bash` call in this
+ * request" is the identity the model gives it. Two events sharing one ordinal
+ * would either overwrite each other or be rejected by SQLite at the bottom of a
+ * transaction, and both read as a lost tool call — the one thing this table
+ * exists to make impossible to lose silently. So the answer is a named error
+ * before anything is written, which the caller can report as a broken adapter.
+ *
+ * @param sessionId - session the record belongs to, for the message.
+ * @param recordId - record the events claim to be from.
+ * @param events - the events to check.
+ * @throws when two of them share an ordinal.
+ */
+function assertOrdinals(sessionId: string, recordId: string, events: readonly UsageEvent[]): void {
+  if (events.length < 2) return;
+  const seen = new Set<number>();
+  for (const event of events) {
+    if (seen.has(event.ordinal)) {
+      throw new Error(
+        `session ${sessionId} record ${recordId} has two events with ordinal ${event.ordinal}`,
+      );
+    }
+    seen.add(event.ordinal);
+  }
+}
+
+/**
  * One stored session row, as the domain model. */
 function sessionOf(agent: string, root: string, row: SessionRow, records: UsageRecord[]): SessionRecord {
   return {
@@ -1065,7 +1335,7 @@ function sessionOf(agent: string, root: string, row: SessionRow, records: UsageR
 }
 
 /** One stored record row, as the domain model. */
-function recordOf(row: RecordRow): UsageRecord {
+function recordOf(row: RecordRow, events: readonly UsageEvent[] | undefined): UsageRecord {
   return {
     id: row.record_id,
     time: Number(row.time),
@@ -1085,5 +1355,20 @@ function recordOf(row: RecordRow): UsageRecord {
     ...(row.seq === null ? {} : { seq: Number(row.seq) }),
     ...(row.turn === null ? {} : { turn: Number(row.turn) }),
     ...(row.step === null ? {} : { step: Number(row.step) }),
+    ...(events === undefined ? {} : { events }),
+  };
+}
+
+/** One stored event row, as the domain model. */
+function eventOf(row: EventRow): UsageEvent {
+  return {
+    kind: row.kind as UsageEvent['kind'],
+    ordinal: Number(row.ordinal),
+    name: row.name,
+    // `null` is "the log did not say"; an empty detail or a size of zero is
+    // something the log did say, and the two must not read alike.
+    ...(row.detail === null ? {} : { detail: row.detail }),
+    ...(row.bytes === null ? {} : { bytes: Number(row.bytes) }),
+    ...(row.ok === null ? {} : { ok: row.ok !== 0 }),
   };
 }

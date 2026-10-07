@@ -164,7 +164,21 @@ function sampleDataset() {
     cwd: '/ws/app',
     sourceFile: '/data/agent/sessions/s-1/log.jsonl',
     createdAt: 1_700_000_000_000,
-    records: [record({ id: 'r-1', time: 1_700_000_000_000, tokens: buckets({ input: 10, cacheRead: 20 }) })],
+    records: [
+      record({
+        id: 'r-1',
+        time: 1_700_000_000_000,
+        tokens: buckets({ input: 10, cacheRead: 20 }),
+        events: [
+          { kind: 'tool_call', ordinal: 0, name: 'Read', detail: '/ws/app/src/main.ts', bytes: 2048, ok: true },
+          { kind: 'tool_call', ordinal: 1, name: 'Bash', bytes: 0, ok: false },
+          { kind: 'tool_call', ordinal: 2, name: 'Grep' },
+        ],
+      }),
+      // A record whose log said nothing about tool calls: it must come back
+      // without an `events` field, not with an empty list.
+      record({ id: 'r-2', time: 1_700_000_001_000 }),
+    ],
     extra: { nested: { list: [1, 2, 3], flag: true }, note: null },
   });
   const second = session({ id: 's-2', agent: 'dsh', parentId: 's-1', depth: 1, isSubagent: true, childIds: [] });
@@ -227,6 +241,26 @@ describe('dataset JSON', () => {
     expect(back.projects[0]?.sessions[0]?.extra).toEqual(original.projects[0]?.sessions[0]?.extra);
     expect(back.projects[0]?.sessions[0]?.records[0]?.tokens).toEqual(original.projects[0]?.sessions[0]?.records[0]?.tokens);
     expect(back.stats).toEqual(original.stats);
+  });
+
+  it('carries the tool calls a record made, and invents none it did not', () => {
+    const original = sampleDataset();
+    // The JSON is the same data: an event is plain data like a token count, so
+    // it travels whole and in order, with nothing to rebuild on the way back.
+    const stored = toJson(original);
+    expect(stored.sessions[0]?.records[0]?.events).toEqual([
+      { kind: 'tool_call', ordinal: 0, name: 'Read', detail: '/ws/app/src/main.ts', bytes: 2048, ok: true },
+      { kind: 'tool_call', ordinal: 1, name: 'Bash', bytes: 0, ok: false },
+      { kind: 'tool_call', ordinal: 2, name: 'Grep' },
+    ]);
+
+    const back = fromJson(JSON.parse(JSON.stringify(stored)) as ReturnType<typeof toJson>);
+    expect(back.sessions[0]?.records[0]?.events).toEqual(original.sessions[0]?.records[0]?.events);
+    // A record with no `events` key stays without one: "the log did not say" is
+    // not "the request called no tools", and an empty array would say the second.
+    expect(back.sessions[0]?.records[1]).not.toHaveProperty('events');
+    expect(back.sessions[0]?.records[1]?.events).toBeUndefined();
+    expect(back).toStrictEqual(original);
   });
 
   it('does not let the cache alias the dataset it was handed', () => {

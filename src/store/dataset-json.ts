@@ -10,6 +10,13 @@
  *
  * The module knows nothing about the cache file: it only turns a dataset into
  * something `JSON.stringify` can carry whole, and turns that back.
+ *
+ * Records' `events` — the tool calls an agent made inside a request — are plain
+ * data like the token counts, so they travel with the rest and need no handling
+ * of their own. What the round trip has to keep is the *absence* of them: a
+ * record the adapter said nothing about comes back without an `events` field,
+ * because absent means "the log did not record any" and an empty array would
+ * turn that into "this request called no tools".
  */
 
 import { UserError, type ErrorCode, type ErrorParams, type Warning } from '../i18n/errors.ts';

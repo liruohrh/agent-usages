@@ -6,8 +6,9 @@
  * - `dataset-json.ts` — a dataset as JSON: warnings travel as codes, never as
  *   sentences, so a stored warning speaks the reader's language, not the
  *   writer's.
- * - `sqlite.ts` — the usage store: roots, files, sessions and records as rows in
- *   a database the user owns, with a schema version and a migration path.
+ * - `sqlite.ts` — the usage store: roots, files, sessions, records and the
+ *   events inside them as rows in a database the user owns, with a schema
+ *   version, a checked migration path, and a copy taken before it migrates.
  * - `location.ts` — where the database goes when nobody names a path.
  *
  * Nothing here touches the CLI, the adapters or the report: the layers above
@@ -33,6 +34,7 @@ export {
 } from './dataset-json.ts';
 export {
   STORE_BACKUP_SUFFIX,
+  STORE_MIGRATION_BACKUP_SUFFIX,
   STORE_SCHEMA_VERSION,
   UsageStore,
   type ReadRootResult,
