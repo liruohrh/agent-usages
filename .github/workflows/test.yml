@@ -35,3 +35,74 @@ jobs:
       - run: node web/scripts/smoke.mjs --snapshot web/mock/ci.snapshot.json
         env:
           TZ: Asia/Shanghai
+
+  # The install path a user takes: fixed-name release assets (`install.sh` / `install.ps1`
+  # / `install.mjs` / `agent-usages.tgz`), a wrapper that only finds Node and downloads,
+  # and `install.mjs` doing the install. This runs those exact three files against a
+  # local HTTP base, so a broken one-liner or a wrapper that drops an argument fails
+  # here instead of in the README.
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - name: 三个脚本的语法
+        run: |
+          sh -n scripts/install.sh
+          node --check scripts/install.mjs
+      # The runner images ship PowerShell, so install.ps1 gets parsed on every push
+      # even though it only ever *runs* on Windows.
+      - name: install.ps1 语法
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile('scripts/install.ps1', [ref]$tokens, [ref]$errors)
+          if ($errors -and $errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          Write-Host 'install.ps1 parses'
+      - run: pnpm release:pack
+      - name: 离线装一遍（--tarball，不碰发布资产）
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          # The tarball is the one just built, not a release asset. npm still resolves
+          # this package's dependencies from the registry — the runner has network;
+          # what this check avoids is depending on GitHub Releases.
+          node scripts/install.mjs --tarball "release/agent-usages-$version.tgz" --prefix "$RUNNER_TEMP/prefix"
+          test "$("$RUNNER_TEMP/prefix/bin/agent-usages" --version)" = "$version"
+          # 覆盖安装：用户经常就是把同一条命令再跑一遍
+          node scripts/install.mjs --tarball "release/agent-usages-$version.tgz" --prefix "$RUNNER_TEMP/prefix"
+          test "$("$RUNNER_TEMP/prefix/bin/agent-usages" --version)" = "$version"
+      - name: 安装器的边界（dry-run / 不存在的 tarball）
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          node scripts/install.mjs --dry-run --tarball "release/agent-usages-$version.tgz" > /dev/null
+          if node scripts/install.mjs --tarball "$RUNNER_TEMP/does-not-exist.tgz" 2>/dev/null; then
+            echo 'a tarball that does not exist must not install'; exit 1
+          fi
+      - name: 一行脚本端到端（本地 HTTP 基址，sh 与 pwsh 两条 wrapper）
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          # 发布资产长这样：三个固定名字的脚本 + 固定名与版本名的 tarball。
+          cp "release/agent-usages-$version.tgz" release/agent-usages.tgz
+          cp scripts/install.sh scripts/install.ps1 scripts/install.mjs release/
+          python3 -m http.server 8931 --bind 127.0.0.1 --directory release > /dev/null 2>&1 &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+          for _ in $(seq 30); do
+            curl -fsS http://127.0.0.1:8931/install.mjs -o /dev/null && break
+            sleep 0.5
+          done
+          sh scripts/install.sh --base http://127.0.0.1:8931 --prefix "$RUNNER_TEMP/sh-prefix"
+          test "$("$RUNNER_TEMP/sh-prefix/bin/agent-usages" --version)" = "$version"
+          # 文档里的 Windows 一行是 `irm … | iex`（iex 没法传参），这里用 -File 走同一条代码路径。
+          pwsh -NoProfile -File scripts/install.ps1 -Base http://127.0.0.1:8931 --prefix "$RUNNER_TEMP/ps-prefix"
+          test "$("$RUNNER_TEMP/ps-prefix/bin/agent-usages" --version)" = "$version"
+          # 参数确实透传到了 install.mjs：--dry-run 应该是成功且不装
+          sh scripts/install.sh --base http://127.0.0.1:8931 --dry-run --tarball release/agent-usages.tgz

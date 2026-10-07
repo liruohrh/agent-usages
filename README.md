@@ -26,17 +26,50 @@
 
 ## 快速开始
 
-**装发布包**（推荐；用户机上不构建任何东西——tarball 里已经带了编译好的 CLI 与构建好的前端）：
+**一行装好**（Linux / macOS；脚本自己找 Node、自己下载发布包，用户机上不构建任何东西——tarball
+里已经带了编译好的 CLI 与构建好的前端）：
 
 ```bash
-# 装好（实测 12 秒；换个版本就改 URL 里的 v0.0.3）
-npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.3/agent-usages-0.0.3.tgz
+curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh
 
 # 想要常驻的分析平台（项目树 + 榜单 + 图表），一条命令起来
 agent-usages ui
+```
 
-# 不装也能跑：让 npx 直接从这个 tarball 起
-npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.3/agent-usages-0.0.3.tgz agent-usages usage --range month --open
+Windows（PowerShell 5.1+）：
+
+```powershell
+irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps1 | iex
+agent-usages ui
+```
+
+这两条 URL **不带版本号**，永远指向最新一版：发版只换资产内容，不用改文档。要装某一版就给安装器
+加 `--version`（管道里要给 `sh` 传参，所以用 `sh -s --`）：
+
+```bash
+curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh -s -- --version 0.0.3
+```
+
+不装也能跑（同一个固定名资产）：
+
+```bash
+npx --yes --package https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz agent-usages usage --range month --open
+```
+
+**手动方式**（不想用脚本时）：
+
+```bash
+# 固定版本：把 <tag> 换成 v0.0.3 这样的 tag（资产名里的版本不带 v）
+npm i -g https://github.com/liruohrh/agent-usages/releases/download/<tag>/agent-usages-<版本>.tgz
+
+# 从 GitHub 直装（跟 master 或某个 commit）：会在你的机器上装前端依赖并构建，
+# 冷缓存实测 808 秒（13 分半）、热缓存 24 秒（2026-09-26，本机）
+npm i -g github:liruohrh/agent-usages#<tag 或 commit>
+npx github:liruohrh/agent-usages ui
+
+# 只想要安装器的帮助，或者离线装一个本地文件
+node scripts/install.mjs --help
+node scripts/install.mjs --tarball ./release/agent-usages-0.0.3.tgz --prefix /tmp/prefix
 ```
 
 `ui` 就是 `serve --open`。报告也可以存成文件或进管道：
@@ -48,16 +81,11 @@ agent-usages session list                             # 项目与会话清单
 agent-usages price                                    # 价格表（含峰谷与节假日规则）
 ```
 
-要求 **Node ≥ 22.18**。每个 tag 都会自动构建一份 tarball 并挂上去，见
+要求 **Node ≥ 22.18**：安装脚本只**检查**、不代装，没有或太旧会直接把几种装法列出来
+（nodejs.org / mise / nvm / brew / winget），也可以用 `AGENT_USAGES_NODE` 指定已经装好的 node。
+另一个安装期环境变量是 `AGENT_USAGES_BASE_URL`（换下载基址：镜像、内网、本地测试，等价于
+`--base`）。每个 tag 都会自动构建一份 tarball，并按**固定名 + 版本名**挂上资产，见
 [Releases](https://github.com/liruohrh/agent-usages/releases)。
-
-**从 GitHub 直装**（该版本还没有资产、或想跟 `master`）：不需要 npm 账号，但会在**你的机器上**
-装前端依赖并构建——实测冷缓存 **808 秒（13 分半）**、热缓存 24 秒（2026-09-26，本机）：
-
-```bash
-npx github:liruohrh/agent-usages ui
-npm i -g github:liruohrh/agent-usages#<tag 或 commit>
-```
 
 > 另外两条路：**npm registry**（包已整理好，只等能注册这个包名，见文末「发布」）与
 > **本地源码**（下面那条；checkout 里不需要编译 CLI，Node 直接跑 `.ts`）。
@@ -354,17 +382,34 @@ feature-x (~/ws/apps/demo-app/feature-x)  ← ~/ws/apps/demo-app 的 worktree
 
 ## 安装与发布
 
-三种装法，按"想省多少事"排序：
+一行脚本是推荐给使用者的路：
+
+```bash
+curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh   # Linux / macOS
+```
+```powershell
+irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps1 | iex        # Windows
+```
+
+它只做三件事：找 Node（≥ 22.18，没有就告诉你怎么装，**不代装**）→ 下载 `install.mjs` → 装最新
+发布包并用 `--version` 自检。整条路径不构建：tarball 自带 `dist/` 与 `web/dist`，实测 12 秒。
+
+几种装法，按"想省多少事"排序：
 
 | 方式 | 命令 | 需要什么 |
 | --- | --- | --- |
-| **Release 资产（推荐给使用者）** | `npm i -g <release tarball URL>` | Node ≥ 22.18；用户机上**不构建**：tarball 自带 `dist/` 与 `web/dist`，实测 12 秒 |
+| **一行脚本（推荐）** | `curl … install.sh \| sh`；Windows `irm … install.ps1 \| iex` | Node ≥ 22.18；用户机上**不构建**，实测 12 秒 |
+| 固定名资产直装 | `npm i -g https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz` | 同上；URL 不带版本号 |
+| 固定版本 | `npm i -g https://github.com/liruohrh/agent-usages/releases/download/<tag>/agent-usages-<版本>.tgz` | 想钉住某一版 |
 | GitHub 直装（想跟 `master`，或该版本没有资产） | `npx github:liruohrh/agent-usages ui` | 会在本机装前端依赖并构建：冷缓存实测 808 秒、热缓存 24 秒 |
 | 全局安装（同为直装） | `npm i -g github:liruohrh/agent-usages` | 同上 |
 | npm registry（待能注册） | `npx @agent/usages ui` | 与 release 资产是同一份 `npm pack` 产物 |
-| 从源码（开发） | 见下 | Node ≥ 22.6 + pnpm；web 要先 `pnpm web:build` |
+| 从源码（开发） | 见下 | Node ≥ 22.18 + pnpm；web 要先 `pnpm web:build` |
 
-**一份源码，两种运行形态**：checkout 里 `src/*.ts` 就是程序（Node 原生类型擦除，无构建步骤）；
+**安装脚本的参数**（`install.sh` / `install.ps1` 只找 Node + 下载，其余都转给 `install.mjs`）：
+`--version <v|latest>`、`--tarball <路径|URL>`（离线/测试）、`--prefix <dir>`、`--dry-run`、
+`--help`；环境变量 `AGENT_USAGES_NODE`（用哪个 node）与 `AGENT_USAGES_BASE_URL`（换基址，等价于
+`--base`）。**一份源码，两种运行形态**：checkout 里 `src/*.ts` 就是程序（Node 原生类型擦除，无构建步骤）；
 装进 `node_modules` 的那份必须是编译好的 JS——Node 明确拒绝在 `node_modules` 里擦类型，
 实测会抛 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`。`bin/agent-usages.js` 先找
 `dist/cli/index.js`、找不到才回落到源码，两种形态共用一个入口。
@@ -397,6 +442,11 @@ git tag -a v0.0.3 -m "…" && git push origin v0.0.3   # → release.yml 构建�
 **校验不过就不会有资产**，所以 Release 上的每个 tarball 都是"装得上、跑得起来"的那一份。
 本地想先看一眼：`pnpm release:pack && pnpm release:verify release/agent-usages-0.0.3.tgz`。
 
+每个 release 挂 **5 个资产**：固定名的 `agent-usages.tgz`（与版本名那份**字节相同**的副本，`cmp`
+守着）、三个安装脚本 `install.sh` / `install.ps1` / `install.mjs`，加上版本名的
+`agent-usages-<版本>.tgz`。文档只引用 `releases/latest/download/` 下的固定名，所以**发版不用改
+文档**——新增资产在 `verify-tarball` 通过之后才上传。
+
 `publish.yml` 是**手动**的（Actions → publish → Run workflow）：`@agent/usages` 这个包名在 npm 上
 还没注册，tag 触发只会白跑一次注定失败的 `npm publish`。等能注册时，先定下 `package.json` 的
 `name`、配上仓库 secret `NPM_TOKEN`，再手动跑一次——它构建出的是**同一份 tarball**，所以资产与
@@ -404,7 +454,9 @@ registry 上的包不会有两套内容。
 
 `.github/workflows/install-check.yml` 守着**用户的安装路径**：把本仓库当 git 依赖装进
 `node_modules`，跑 `--version` / `price` / `check-config`，并确认 `serve` 真的返回页面——
-"在 checkout 里能跑"与"装完能跑"是两回事，这条 CI 专门盯后者。
+"在 checkout 里能跑"与"装完能跑"是两回事，这条 CI 专门盯后者。`test.yml` 里的 `install` job 则把
+**一行安装**真的跑一遍：本地 HTTP 基址充当发布页，sh 与 pwsh 两条 wrapper 各装一次，`--tarball`
+离线装两遍（含覆盖安装），并断言装出来的 `--version` 等于 `package.json` 的版本。
 
 包名现在是 `@agent/usages`（scoped，需要对应的 npm 组织）；要换成别的名字，改 `package.json`
 的 `name` 与本文里的 `npx` 行即可——仓库 URL、更新用的 GitHub raw 地址都与包名无关。

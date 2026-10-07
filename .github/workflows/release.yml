@@ -8,6 +8,10 @@
 #
 # The asset is the same `npm pack` output the npm registry path would publish, so
 # when the package name finally exists, `publish.yml` ships the identical bytes.
+#
+# Besides the versioned tarball, every release re-uploads the *fixed* asset names the
+# docs point at (`install.sh`, `install.ps1`, `install.mjs`, `agent-usages.tgz`), which
+# is why `releases/latest/download/…` never has to be edited when a version ships.
 name: release
 
 on:
@@ -55,6 +59,16 @@ jobs:
       # nothing else occupies — and uses it: version, price table, config check, the
       # dashboard shell and a client-side route. Nothing is uploaded before this passes.
       - run: node scripts/verify-tarball.mjs release/agent-usages-*.tgz
+      - name: 准备固定名字的安装资产
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          # The docs point at `releases/latest/download/install.sh` (and friends), so
+          # every release has to carry the *same* asset names. `agent-usages.tgz` is a
+          # byte copy of the versioned tarball, not a second build: `cmp` proves it.
+          cp "release/agent-usages-$version.tgz" release/agent-usages.tgz
+          cmp "release/agent-usages-$version.tgz" release/agent-usages.tgz
+          ls -l release
       - name: 建 release 并上传 tarball
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,4 +85,12 @@ jobs:
           else
             gh release create "$TAG" --title "$TAG" --verify-tag --generate-notes
           fi
-          gh release upload "$TAG" release/agent-usages-*.tgz --clobber
+          # 版本名 + 固定名。固定名（agent-usages.tgz 与三个安装脚本）让文档里的
+          # `/releases/latest/download/install.sh` 永远有效，发版不必改文档。
+          # 老 tag 的检出里可能还没有这三个脚本（它们随这次改动才进来），所以只挂存在的。
+          assets=()
+          for asset in release/agent-usages-*.tgz release/agent-usages.tgz \
+            scripts/install.sh scripts/install.ps1 scripts/install.mjs; do
+            if [ -e "$asset" ]; then assets+=("$asset"); fi
+          done
+          gh release upload "$TAG" "${assets[@]}" --clobber

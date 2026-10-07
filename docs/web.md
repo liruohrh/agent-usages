@@ -102,24 +102,38 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 
 ## 1. 启动
 
-**推荐用发布资产**：每个 tag 都会构建一份 tarball，里面已经带了编译好的 CLI（`dist/`）与前端
-（`web/dist/`）；npm 对 tarball **不跑任何构建脚本**，所以用户机上不编译、不构建，实测 12 秒装完。
+**一行装好**（脚本自己找 Node、自己下载发布包）：每个 tag 都会构建一份 tarball，里面已经带了
+编译好的 CLI（`dist/`）与前端（`web/dist/`）；npm 对 tarball **不跑任何构建脚本**，所以用户机上
+不编译、不构建，实测 12 秒装完。这两条 URL **不带版本号**，发版只换资产、不改文档：
 
 ```sh
-npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.3/agent-usages-0.0.3.tgz
+curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh
+```
+
+```powershell
+irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps1 | iex
+```
+
+装好之后：
+
+```sh
 agent-usages ui                                # = serve --open，起平台并打开浏览器
 agent-usages usage --range month --open        # 不起服务：生成 HTML 报告并用浏览器打开
 
-# 不装也可以
-npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.3/agent-usages-0.0.3.tgz agent-usages ui
+# 不装也可以：同一个固定名资产，直接 npx
+npx --yes --package https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz agent-usages ui
 ```
+
+安装器的选项（`--version` / `--tarball` / `--prefix` / `--dry-run`）与环境变量
+（`AGENT_USAGES_NODE` / `AGENT_USAGES_BASE_URL`）见 [README 的安装与发布](../README.md#安装与发布)。
 
 **从 GitHub 直装**（想跟 `master`、或该版本没有资产）则会在**你的机器上**构建：npm 跑
 `prepare`（`scripts/prepare.mjs`）编译 CLI 到 `dist/`（`node_modules` 里 Node 拒绝擦 TypeScript
 类型，那份必须是 JS）+ 构建前端到 `web/dist`，冷缓存实测 808 秒。失败只打印一行、不让安装失败——
-CLI 不依赖前端，`serve` 会提示怎么构建。两条路径各有 CI 守着：`release.yml`（推 tag）构建资产，
+CLI 不依赖前端，`serve` 会提示怎么构建。三条路径各有 CI 守着：`release.yml`（推 tag）构建资产，
 并用 `scripts/verify-tarball.mjs` 像用户那样装一份再验证；`install-check.yml`（每次 push）把
-git 直装完整跑一遍（装进 `node_modules` → `--version`/`price`/`check-config` → `serve` 返回页面）。
+git 直装完整跑一遍（装进 `node_modules` → `--version`/`price`/`check-config` → `serve` 返回页面）；
+`test.yml` 的 `install` job 拿本地 HTTP 基址当发布页，把两条 wrapper 各装一次、离线装两遍。
 
 仓库里跑则要先装依赖、构建前端（约 930 KB）：
 

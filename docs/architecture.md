@@ -142,10 +142,23 @@ pnpm web:e2e              # 浏览器端到端（Playwright：切项目/切会�
 | `web/scripts/smoke.mjs` | 服务端端到端：起真实 HTTP 服务打每个接口，断言加性恒等式与 404/409 语义 |
 | `web/e2e/dashboard.spec.ts` | 浏览器端到端（Playwright）：切项目/切会话后明细表与页面自己取到的 API 数据逐项一致、明细表纵向排列、任意宽度页面不横滚 |
 | `test/architecture.test.ts` | 结构：层间依赖方向单向、内层零第三方依赖、`web/` 不 import 服务端、相对 import 不落空、公开 API 快照 |
+| `test/install-scripts.test.ts` | 安装路径：`install.mjs` 的参数、校验与退出码（含"只用 `node:` 内置"），两个 wrapper 的参数透传与报错，以及**文档里不再出现带版本号的安装 URL** |
 
 `test/support/` 提供合成数据集与**合成价格表**（`stub-pricing.ts`），因此机制类测试不依赖任何真实厂商或 agent 的文件格式。
 
 代码不引入构建步骤：`bin/agent-usages.js` 直接用 Node 的类型擦除执行 `src/cli/index.ts`，因此源码即产物，不存在构建产物与源码不一致的问题。
+
+### 发布资产
+
+`release.yml` 在 tag 上跑完测试与 `scripts/verify-tarball.mjs`（像用户那样装一份再用一遍）之后，
+把**同一份 tarball** 上传两次：固定名 `agent-usages.tgz` 与版本名 `agent-usages-<版本>.tgz`
+（`cmp` 断言是字节副本），外加三个安装脚本 `install.sh` / `install.ps1` / `install.mjs`。
+固定名让文档里的 `releases/latest/download/install.sh` 永远有效——**发版不必改文档**；版本名供
+钉住某一版。两个 wrapper 只做两件事：找 Node（≥ 22.18，只检查不代装）与下载 `install.mjs`；
+下载、校验（gzip + tarball 里的 `package.json`）、`npm install -g`、装完用 `--version` 对账都在
+`install.mjs` 里，只用 Node 内置模块（`fetch`、`node:zlib`、自己写的 tar 读取器，没有依赖）。
+`test.yml` 的 `install` job 拿本地 HTTP 基址当发布页，把「一行安装」整条路径（sh 与 pwsh 两条
+wrapper、离线 `--tarball`、覆盖安装）跑一遍。
 
 ## 目录
 
