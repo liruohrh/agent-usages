@@ -29,14 +29,14 @@
 **装发布包**（推荐；用户机上不构建任何东西——tarball 里已经带了编译好的 CLI 与构建好的前端）：
 
 ```bash
-# 装好（实测 12 秒；换个版本就改 URL 里的 v0.0.2）
-npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.2/agent-usages-0.0.2.tgz
+# 装好（实测 12 秒；换个版本就改 URL 里的 v0.0.3）
+npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.3/agent-usages-0.0.3.tgz
 
 # 想要常驻的分析平台（项目树 + 榜单 + 图表），一条命令起来
 agent-usages ui
 
 # 不装也能跑：让 npx 直接从这个 tarball 起
-npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.2/agent-usages-0.0.2.tgz agent-usages usage --range month --open
+npx --yes --package https://github.com/liruohrh/agent-usages/releases/download/v0.0.3/agent-usages-0.0.3.tgz agent-usages usage --range month --open
 ```
 
 `ui` 就是 `serve --open`。报告也可以存成文件或进管道：
@@ -388,14 +388,14 @@ pnpm link --global                # 装到 PATH 后用 agent-usages …
 
 ```bash
 pnpm pack:check                            # 只列 tarball 内容（测试也用它守着：config/、web/dist 不能漏）
-git tag -a v0.0.2 -m "…" && git push origin v0.0.2   # → release.yml 构建并挂上 tarball
+git tag -a v0.0.3 -m "…" && git push origin v0.0.3   # → release.yml 构建并挂上 tarball
 ```
 
 `release.yml` 跑在 tag 上：`pnpm build` → `pnpm test` → web typecheck → `pnpm web:smoke` →
 `pnpm release:pack`（= `npm pack --ignore-scripts`，产物进 `release/`）→
 `node scripts/verify-tarball.mjs`（像用户那样装一份、真的用一遍，11 项检查）→ 建 release 并上传资产。
 **校验不过就不会有资产**，所以 Release 上的每个 tarball 都是"装得上、跑得起来"的那一份。
-本地想先看一眼：`pnpm release:pack && pnpm release:verify release/agent-usages-0.0.2.tgz`。
+本地想先看一眼：`pnpm release:pack && pnpm release:verify release/agent-usages-0.0.3.tgz`。
 
 `publish.yml` 是**手动**的（Actions → publish → Run workflow）：`@agent/usages` 这个包名在 npm 上
 还没注册，tag 触发只会白跑一次注定失败的 `npm publish`。等能注册时，先定下 `package.json` 的
