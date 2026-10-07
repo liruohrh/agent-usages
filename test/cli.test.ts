@@ -1518,3 +1518,208 @@ describe('language', () => {
     expect(stdout).toContain('Agent usage');
   });
 });
+
+/**
+ * The `tools` command.
+ *
+ * The shared fixture above records no tool call, which is itself one of the
+ * cases under test ("no tool calls at all" → exit 2). Everything else runs
+ * against a second DSH home whose session log carries tool calls, so the counts
+ * below are this fixture's own and cannot drift with the usage fixture.
+ */
+describe('tools', () => {
+  const TOOLS_SESSION = 'session-ffffffff-0000-4000-8000-0000000000f1';
+  const TOOLS_CWD = '/home/user/ws/tools-demo';
+  /** 2026-09-11 20:00 CST — off-peak, and the same instant the usage fixture uses. */
+  const TOOLS_AT = Date.parse('2026-09-11T12:00:00Z');
+  /** A `write` argument long enough to be an excerpt candidate. */
+  const LONG_ARGS = `{"command": "${'x'.repeat(2_000)}"}`;
+  const SHORT_BASH = '{"command": "ls -la"}';
+  const SHORT_READ = '{"file_path": "/tmp/a.ts"}';
+
+  let toolsHome: string;
+
+  /** One `assistant/message` event, with the content blocks of one step. */
+  function step(seq: number, content: unknown[]): string {
+    return JSON.stringify({
+      type: 'assistant/message',
+      seq,
+      time: TOOLS_AT + seq,
+      data: {
+        turn: 1,
+        step: seq,
+        message: {
+          role: 'assistant',
+          content,
+          source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+        },
+        usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+      },
+    });
+  }
+
+  /** The harness' closing event for one call; `error` is how it records failure. */
+  function result(seq: number, stepNumber: number, callId: string, error?: unknown): string {
+    return JSON.stringify({
+      type: 'tool/result',
+      seq,
+      time: TOOLS_AT + seq,
+      data: {
+        turn: 1,
+        step: stepNumber,
+        message: { source: { kind: 'tool', callId }, content: [] },
+        ...(error === undefined ? {} : { error }),
+      },
+    });
+  }
+
+  beforeAll(async () => {
+    toolsHome = await mkdtemp(join(tmpdir(), 'agent-usages-cli-tools-'));
+    const projectKey = `--${TOOLS_CWD.replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+/, '')}--`;
+    const dir = join(toolsHome, 'sessions', projectKey, TOOLS_SESSION);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'session.jsonl'),
+      `${[
+        JSON.stringify({
+          type: 'session',
+          version: 0,
+          id: TOOLS_SESSION,
+          createdAt: TOOLS_AT,
+          cwd: TOOLS_CWD,
+          delegationDepth: 0,
+        }),
+        JSON.stringify({ type: 'session/title', seq: 2, time: TOOLS_AT, data: { title: '工具演示会话' } }),
+        // Step 1: two calls — one succeeds, one fails.
+        step(10, [
+          { type: 'text', text: 'looking around' },
+          { type: 'tool-call', id: 'call_1', name: 'bash', arguments: SHORT_BASH },
+          { type: 'tool-call', id: 'call_2', name: 'read', arguments: SHORT_READ },
+        ]),
+        result(11, 10, 'call_1'),
+        result(12, 10, 'call_2', { name: 'FsError', code: 'FS_NOT_OBSERVED' }),
+        // Step 2: a request that called nothing — coverage's denominator.
+        step(20, [{ type: 'text', text: 'thinking' }]),
+        // Step 3: one call with no result, so its outcome stays unstated.
+        step(30, [{ type: 'tool-call', id: 'call_3', name: 'write', arguments: LONG_ARGS }]),
+      ].join('\n')}\n`,
+    );
+  });
+
+  afterAll(async () => {
+    await rm(toolsHome, { recursive: true, force: true });
+  });
+
+  /** Run `tools` against the tool fixture rather than the usage one. */
+  async function tools(args: string[], env: Record<string, string> = {}): Promise<CliResult> {
+    return cli(args, { DSH_HOME: toolsHome, ...env });
+  }
+
+  it('prints per-agent totals and the tool table', async () => {
+    const { code, stdout, stderr } = await tools(['tools']);
+    expect(stderr).toBe('');
+    expect(code).toBe(0);
+    expect(stdout).toContain('工具调用');
+    expect(stdout).toContain('3 次调用');
+    expect(stdout).toContain('2/3 条记录有调用（66.7%）');
+    // The verdict the log never wrote is a column of its own, not "success".
+    expect(stdout).toContain('成功 1 / 失败 1 / 未表态 1');
+    expect(stdout).toContain('bash');
+    expect(stdout).toContain('read');
+    expect(stdout).toContain('write');
+  });
+
+  it('emits the JSON shape with the three outcomes kept apart', async () => {
+    const { code, stdout } = await tools(['tools', '--json']);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout) as {
+      agents: {
+        agent: string;
+        calls: number;
+        records: number;
+        recordsWithCalls: number;
+        ok: { true: number; false: number; unknown: number };
+        bytes: number;
+        tools: { name: string; calls: number; share: number; ok: { true: number; false: number; unknown: number } }[];
+        sessions: unknown[];
+      }[];
+      totals: { calls: number };
+    };
+    const [agent] = parsed.agents;
+    expect(agent?.agent).toBe('dsh');
+    expect(agent?.calls).toBe(3);
+    expect(agent?.records).toBe(3);
+    expect(agent?.recordsWithCalls).toBe(2);
+    expect(agent?.ok).toEqual({ true: 1, false: 1, unknown: 1 });
+    expect(agent?.bytes).toBe(
+      Buffer.byteLength(SHORT_BASH, 'utf8') + Buffer.byteLength(SHORT_READ, 'utf8') + Buffer.byteLength(LONG_ARGS, 'utf8'),
+    );
+    // One call each, so the tie breaks on the name, and each share is 1/3.
+    expect(agent?.tools.map((tool) => tool.name)).toEqual(['bash', 'read', 'write']);
+    expect(agent?.tools.map((tool) => tool.share)).toEqual([33.3, 33.3, 33.3]);
+    expect(agent?.tools[0]?.ok).toEqual({ true: 1, false: 0, unknown: 0 });
+    expect(agent?.tools[1]?.ok).toEqual({ true: 0, false: 1, unknown: 0 });
+    expect(agent?.tools[2]?.ok).toEqual({ true: 0, false: 0, unknown: 1 });
+    // Without `--by session` the list stays empty, so the shape is one shape.
+    expect(agent?.sessions).toEqual([]);
+    expect(parsed.totals.calls).toBe(3);
+  });
+
+  it('lists sessions with --by session', async () => {
+    const text = await tools(['tools', '--by', 'session']);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain('按会话');
+    expect(text.stdout).toContain('工具演示会话');
+    expect(text.stdout).toContain('bash×1');
+
+    const parsed = JSON.parse((await tools(['tools', '--by', 'session', '--json'])).stdout) as {
+      agents: {
+        sessions: {
+          id: string;
+          title: string;
+          calls: number;
+          ok: { true: number; false: number; unknown: number };
+          tools: { name: string; calls: number }[];
+        }[];
+      }[];
+    };
+    const [session] = parsed.agents[0]?.sessions ?? [];
+    expect(session?.id).toBe(TOOLS_SESSION);
+    expect(session?.title).toBe('工具演示会话');
+    expect(session?.calls).toBe(3);
+    expect(session?.ok).toEqual({ true: 1, false: 1, unknown: 1 });
+    expect(session?.tools.map((tool) => tool.name)).toEqual(['bash', 'read', 'write']);
+  });
+
+  it('says there are no tool calls and exits 2 when the data has none', async () => {
+    // The usage fixture's session has usage but no tool-call content.
+    const text = await cli(['tools']);
+    expect(text.code).toBe(2);
+    expect(text.stdout).toContain('没有工具调用记录。');
+
+    const json = await cli(['tools', '--json']);
+    expect(json.code).toBe(2);
+    const parsed = JSON.parse(json.stdout) as { agents: { calls: number }[]; totals: { calls: number } };
+    expect(parsed.totals.calls).toBe(0);
+    // The sentence goes to stderr so stdout stays one parseable document.
+    expect(json.stderr).toContain('没有工具调用记录。');
+  });
+
+  it('refuses an unknown --by and a negative --top', async () => {
+    const by = await tools(['tools', '--by', 'project']);
+    expect(by.code).toBe(1);
+    expect(by.stderr).toContain('未知的汇总维度');
+
+    const top = await tools(['tools', '--top', '-1']);
+    expect(top.code).toBe(1);
+    expect(top.stderr).toContain('--top');
+  });
+
+  it('speaks English when the locale asks for it', async () => {
+    const { stdout } = await tools(['tools', '--top', '1'], { LANG: 'en_US.UTF-8' });
+    expect(stdout).toContain('Tool calls');
+    expect(stdout).toContain('unstated');
+    expect(stdout).toContain('Share');
+    expect(stdout).not.toContain('未表态');
+  });
+});

@@ -2,8 +2,9 @@
 /**
  * `agent-usages` — usage and cost reporting for coding agents.
  *
- * Five commands:
+ * Six commands:
  *   - `usage`        — token consumption and cost, by all / project / session
+ *   - `tools`        — which tools the agents called, and how those calls went
  *   - `session list` — the project-and-session inventory, newest first
  *   - `price`        — the price list the cost calculation uses
  *   - `agents`       — which agents and pricing sources this build supports
@@ -30,10 +31,12 @@ import {
   type RateComponent,
 } from '../pricing/index.ts';
 import {
+  collectTools,
   listSessions,
   runQuery,
   type OriginalPricing,
   type SessionListFilters,
+  type ToolsReport,
   type UsageDimension,
   type UsageQuery,
 } from '../report/index.ts';
@@ -80,6 +83,7 @@ import {
   type ReportSection,
 } from '../render/format.ts';
 import { renderHtmlReport } from '../render/html.ts';
+import { formatToolsReport, toolsToJson } from '../render/tools.ts';
 import type { UsageDataset } from '../core/types.ts';
 
 const EXIT_OK = 0;
@@ -127,6 +131,20 @@ interface UsageOptions extends GlobalOptions {
   html?: string | boolean;
   /** `--open`: write the report somewhere the browser can read it, and show it. */
   open?: boolean;
+}
+
+/** Options accepted by `tools`. */
+interface ToolsOptions extends GlobalOptions {
+  /** `today` / `week` / `month` / `all`, or an explicit `from..to`. */
+  range?: string;
+  /** `tool` (default) or `session`: what the rows are grouped by. */
+  by?: string;
+  /** Tool rows per agent (`0` keeps every tool). */
+  top?: number;
+  /** Session rows per agent, for `--by session` (`0` keeps every session). */
+  limit?: number;
+  /** Print the tables only: no title, range or data-dir header. */
+  quiet?: boolean;
 }
 
 /** Options accepted by `serve`. */
@@ -195,6 +213,29 @@ function parseRefreshOption(value: string): number {
     throw new InvalidArgumentError(renderDiagnostic('serveRefreshNotSeconds', { value: JSON.stringify(value) }));
   }
   return seconds;
+}
+
+/**
+ * Build a parser for a counting option (`--top`, `--limit`).
+ *
+ * The option name travels with the parser so the diagnostic can name the flag
+ * the user actually typed rather than a generic "value".
+ *
+ * @param option - the flag as written, e.g. `--top`.
+ * @returns a commander parser.
+ */
+function parseCountOption(option: string): (value: string) => number {
+  return (value: string): number => {
+    const parsed = Number(value.trim());
+    // 0 is legal and means "do not truncate": a count of zero rows is a
+    // different request from "show me nothing", which nobody asks a table for.
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw new InvalidArgumentError(
+        renderDiagnostic('toolsCountNotPositive', { option, value: JSON.stringify(value) }),
+      );
+    }
+    return parsed;
+  };
 }
 
 /**
@@ -456,7 +497,11 @@ interface ReportHeadings {
 }
 
 /** Render the HTML document both the file and the stdout paths emit. */
-function htmlReport(sections: readonly ReportSection[], headings: ReportHeadings): string {
+function htmlReport(
+  sections: readonly ReportSection[],
+  headings: ReportHeadings,
+  tools?: ToolsReport | undefined,
+): string {
   return renderHtmlReport(sections, {
     agentLabel: headings.agentLabel,
     // The HTML header prints one string; the text report keeps the list so it can
@@ -464,6 +509,7 @@ function htmlReport(sections: readonly ReportSection[], headings: ReportHeadings
     pricingLabel: pricingLabelText(headings.pricingLabel) ?? '',
     symbol: headings.symbol,
     scope: headings.scope,
+    ...(tools === undefined ? {} : { tools }),
   });
 }
 
@@ -480,8 +526,9 @@ async function writeHtmlReport(
   headings: ReportHeadings,
   json: boolean,
   requests: number,
+  tools?: ToolsReport | undefined,
 ): Promise<void> {
-  const document = htmlReport(sections, headings);
+  const document = htmlReport(sections, headings, tools);
   try {
     await writeFile(path, document, 'utf8');
   } catch (error) {
@@ -570,6 +617,11 @@ async function runUsage(options: UsageOptions): Promise<void> {
       pricingLabel: pricingLabelOf(engine),
       scope: subagentMode !== 'total',
     };
+    // The tool-call section is built from the same records the report above just
+    // read, for the same window, so the two cannot describe different periods.
+    // `collectTools` answers with zero calls when the data has no `events` at
+    // all, and the renderer then leaves the section out entirely.
+    const tools = collectTools(loaded.dataset, { range: sections[0]?.range });
     // `--open` is "show me the report now": it writes the same document
     // somewhere the browser can read — the path `--html` named, or a file of
     // its own under the system's temporary directory, overwritten per day so
@@ -579,7 +631,7 @@ async function runUsage(options: UsageOptions): Promise<void> {
       `agent-usages-usage-${new Date().toISOString().slice(0, 10)}.html`,
     );
     if (options.open === true && (options.html === undefined || options.html === true || options.html === '-')) {
-      await writeHtmlReport(tempPath, sections, headings, options.json === true, requests);
+      await writeHtmlReport(tempPath, sections, headings, options.json === true, requests, tools);
       if (process.exitCode !== EXIT_ERROR) await openInBrowser(tempPath);
       return;
     }
@@ -587,7 +639,7 @@ async function runUsage(options: UsageOptions): Promise<void> {
     // document goes to stdout so it can be piped or redirected.
     const toStdout = options.html === true || options.html === '-';
     if (toStdout && options.json !== true) {
-      process.stdout.write(htmlReport(sections, headings));
+      process.stdout.write(htmlReport(sections, headings, tools));
       process.exitCode = requests === 0 ? EXIT_NO_DATA : EXIT_OK;
       return;
     }
@@ -596,7 +648,7 @@ async function runUsage(options: UsageOptions): Promise<void> {
       // receiving JSON: the rendering is skipped and the user is told why.
       process.stderr.write(`agent-usages: ${t().html.stdoutTakenByJson}\n`);
     } else {
-      await writeHtmlReport(String(options.html), sections, headings, options.json === true, requests);
+      await writeHtmlReport(String(options.html), sections, headings, options.json === true, requests, tools);
       if (options.open === true && process.exitCode !== EXIT_ERROR) await openInBrowser(String(options.html));
       return;
     }
@@ -615,6 +667,61 @@ async function runUsage(options: UsageOptions): Promise<void> {
     options.json === true,
     requests,
   );
+}
+
+/**
+ * The `tools` command implementation.
+ *
+ * Deliberately separate from `usage`: the two answer different questions about
+ * the same dataset, and folding tool calls into the usage report would change an
+ * output scripts already parse. Only `--html` crosses over — and only additively,
+ * as a section that is absent when the data has no tool calls at all.
+ *
+ * @param options - the command line, already merged with the global options.
+ */
+async function runTools(options: ToolsOptions): Promise<void> {
+  const by = options.by ?? 'tool';
+  if (by !== 'tool' && by !== 'session') {
+    process.stderr.write(
+      `agent-usages: ${renderDiagnostic('toolsUnknownBy', { value: JSON.stringify(options.by), known: 'tool, session' })}\n`,
+    );
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+  const config = await resolveConfig(options.update === false ? { noUpdate: true } : {});
+  const loaded = await loadOrExit(options, config);
+  if (loaded === undefined) return;
+
+  let range: ReturnType<typeof resolveRange>;
+  try {
+    range = resolveRange(options.range === undefined ? {} : { spec: options.range });
+  } catch (error) {
+    process.stderr.write(`agent-usages: ${(error as Error).message}\n`);
+    process.exitCode = EXIT_ERROR;
+    return;
+  }
+
+  const sessions = by === 'session';
+  const report = collectTools(loaded.dataset, {
+    range,
+    ...(options.top === undefined ? {} : { top: options.top }),
+    sessions,
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
+  });
+  const labels = new Map(loaded.adapters.map((adapter) => [adapter.id, adapter.label]));
+  const text = formatToolsReport(report, {
+    // The range's own label, like the usage report's header: it says `全部时间`
+    // for the default rather than the tree's `总`.
+    rangeLabel: range.label,
+    source: loaded.dataset.source,
+    quiet: options.quiet === true,
+    sessions,
+    agentLabel: (id) => labels.get(id),
+  });
+  // With `--json` the sentence goes to stderr: stdout stays one parseable
+  // document, and the exit code already says the answer was "nothing".
+  if (report.totals.calls === 0 && options.json === true) process.stderr.write(`${t().tools.none}\n`);
+  emit(toolsToJson(report), text, options.json === true, report.totals.calls);
 }
 
 /** Options accepted by `session list`. */
@@ -1075,6 +1182,21 @@ export function buildProgram(): Command {
     .allowExcessArguments(false)
     .action(async (options: UsageOptions, command: Command) => {
       await runUsage(withGlobals(command, options));
+    });
+
+  commonOptions(
+    program
+      .command('tools')
+      .description(t().help.tools)
+      .option('--range <spec>', t().help.range)
+      .option('--by <what>', t().help.toolsBy)
+      .option('--top <n>', t().help.toolsTop, parseCountOption('--top'))
+      .option('--limit <n>', t().help.toolsLimit, parseCountOption('--limit'))
+      .option('-q, --quiet', t().help.toolsQuiet),
+  )
+    .allowExcessArguments(false)
+    .action(async (options: ToolsOptions, command: Command) => {
+      await runTools(withGlobals(command, options));
     });
 
   program

@@ -269,6 +269,11 @@ export const zh = {
     serveDevTarget: '--dev 代理的目标地址（给出即隐含 --dev）',
     serveQuiet: '不打印启动信息（脚本里起服务用）',
     serveWriteSnapshot: '扫一次并把整份仪表盘写成快照 JSON，然后退出',
+    tools: '汇总工具调用：哪个工具用得多、成败如何（只统计日志里记下了工具调用的记录）',
+    toolsTop: '每个 agent 列出前 N 个工具（默认 10；0 表示不截断）',
+    toolsBy: '汇总维度：tool（默认，按工具名）或 session（按会话）',
+    toolsLimit: '--by session 时每个 agent 最多列几个会话（默认 20；0 表示不截断）',
+    toolsQuiet: '不打印头部（范围/数据），只打印表格',
   },
   /** The session inventory. */
   list: {
@@ -288,6 +293,38 @@ export const zh = {
     span: (latest: string, earliest: string) => `最近 ${latest}　最早 ${earliest}`,
     /** `3 个子代理` under a session row. */
     subagentCount: (count: string) => count,
+  },
+
+  /** The tool-call report (`tools`). */
+  tools: {
+    title: '工具调用',
+    /** The answer when the data holds no tool call at all (exit 2). */
+    none: '没有工具调用记录。',
+    /** Prefix of the all-agents line, printed only when several agents have calls. */
+    total: '合计',
+    calls: (count: string) => `${count} 次调用`,
+    /** Coverage: requests that called a tool, out of every request in range. */
+    coverage: (p: { withCalls: string; records: string; percent: string }) =>
+      `${p.withCalls}/${p.records} 条记录有调用（${p.percent}%）`,
+    /** The three outcomes; `unknown` is never folded into either side. */
+    outcomes: (p: { ok: string; failed: string; unknown: string }) =>
+      `成功 ${p.ok} / 失败 ${p.failed} / 未表态 ${p.unknown}`,
+    bytes: (value: string) => `参数体量 ${value}`,
+    summary: (p: { calls: string; coverage: string; outcomes: string; bytes: string }) =>
+      `${p.calls} · ${p.coverage} · ${p.outcomes} · ${p.bytes}`,
+    /** Printed in place of a table when the agent recorded no tool call. */
+    noTools: '（没有工具调用）',
+    bySession: '按会话',
+    colTool: '工具',
+    colCalls: '调用',
+    colShare: '占比',
+    colOk: '成功',
+    colFailed: '失败',
+    colUnknown: '未表态',
+    colBytes: '参数体量',
+    colSession: '会话',
+    colAgent: 'Agent',
+    colTopTools: '常用工具',
   },
 
   /** The HTML report. */
@@ -489,6 +526,8 @@ export const zh = {
     /* ---- serve ---- */
     servePortNotInteger: (p: { value: string }) => `--port 需要 0…65535 的整数，收到 ${p.value}`,
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh 需要非负秒数，收到 ${p.value}`,
+    toolsCountNotPositive: (p: { option: string; value: string }) => `${p.option} 需要非负整数，收到 ${p.value}`,
+    toolsUnknownBy: (p: { value: string; known: string }) => `未知的汇总维度 ${p.value}（可用：${p.known}）`,
     serveOptionUnsupported: (p: { option: string }) =>
       `serve 不接受 ${p.option}：仪表盘的计价来源按记录里的模型自动选择，输出固定是网页与 JSON API；去掉这个参数再试`,
     /* ---- dashboard warnings: they travel to the page, so they carry a code ---- */

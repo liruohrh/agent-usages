@@ -220,6 +220,11 @@ export const en: Messages = {
     serveDevTarget: 'what --dev proxies to (giving it implies --dev)',
     serveQuiet: 'do not print the startup lines (for scripts that start the server)',
     serveWriteSnapshot: 'scan once, write the whole dashboard as a snapshot JSON, and exit',
+    tools: 'Summarise tool calls: which tools an agent reaches for, and how they turn out',
+    toolsTop: 'List the top N tools per agent (default 10; 0 keeps every tool)',
+    toolsBy: 'Aggregation: tool (default, by tool name) or session (per session)',
+    toolsLimit: 'With --by session, how many sessions per agent (default 20; 0 keeps all)',
+    toolsQuiet: 'Print the tables only, without the range and data-dir header',
   },
   list: {
     projects: 'Projects',
@@ -235,6 +240,38 @@ export const en: Messages = {
       folded ? `${total} sessions (${shown} rows shown, subagents folded in)` : `${shown} sessions`,
     span: (latest: string, earliest: string) => `last ${latest}  first ${earliest}`,
     subagentCount: (count: string) => count,
+  },
+
+  /** The tool-call report (`tools`). */
+  tools: {
+    title: 'Tool calls',
+    /** The answer when the data holds no tool call at all (exit 2). */
+    none: 'No tool-call records.',
+    /** Prefix of the all-agents line, printed only when several agents have calls. */
+    total: 'Total',
+    calls: (count: string) => `${count} calls`,
+    /** Coverage: requests that called a tool, out of every request in range. */
+    coverage: (p: { withCalls: string; records: string; percent: string }) =>
+      `${p.withCalls}/${p.records} records called a tool (${p.percent}%)`,
+    /** The three outcomes; `unknown` is never folded into either side. */
+    outcomes: (p: { ok: string; failed: string; unknown: string }) =>
+      `ok ${p.ok} / failed ${p.failed} / unstated ${p.unknown}`,
+    bytes: (value: string) => `arguments ${value}`,
+    summary: (p: { calls: string; coverage: string; outcomes: string; bytes: string }) =>
+      `${p.calls} · ${p.coverage} · ${p.outcomes} · ${p.bytes}`,
+    /** Printed in place of a table when the agent recorded no tool call. */
+    noTools: '(no tool calls)',
+    bySession: 'By session',
+    colTool: 'Tool',
+    colCalls: 'Calls',
+    colShare: 'Share',
+    colOk: 'ok',
+    colFailed: 'failed',
+    colUnknown: 'unstated',
+    colBytes: 'Arguments',
+    colSession: 'Session',
+    colAgent: 'Agent',
+    colTopTools: 'Top tools',
   },
 
   html: {
@@ -424,6 +461,8 @@ export const en: Messages = {
       `the usage store could not be written (${p.path}: ${p.reason}); this run's numbers are unaffected, the next one just parses everything again.`,
     servePortNotInteger: (p: { value: string }) => `--port wants an integer 0…65535, got ${p.value}`,
     serveRefreshNotSeconds: (p: { value: string }) => `--refresh wants a non-negative number of seconds, got ${p.value}`,
+    toolsCountNotPositive: (p: { option: string; value: string }) => `${p.option} wants a non-negative integer, got ${p.value}`,
+    toolsUnknownBy: (p: { value: string; known: string }) => `unknown aggregation ${p.value} (known: ${p.known})`,
     serveOptionUnsupported: (p: { option: string }) =>
       `serve does not take ${p.option}: the dashboard picks its pricing table per model and always answers as a web page plus a JSON API; drop the flag and try again`,
     /* ---- dashboard warnings: they travel to the page, so they carry a code ---- */

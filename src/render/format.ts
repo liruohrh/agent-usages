@@ -59,8 +59,14 @@ function pad(text: string, width: number, align: 'left' | 'right' = 'left'): str
   return align === 'left' ? text + ' '.repeat(fill) : ' '.repeat(fill) + text;
 }
 
-/** Truncate to a display width, appending an ellipsis when cut. */
-function clip(text: string, width: number): string {
+/**
+ * Truncate to a display width, appending an ellipsis when cut.
+ *
+ * Exported because the tool-call renderer clips free-form session titles into a
+ * fixed column, and doing it with the same rule is what keeps that table from
+ * shearing on a string-width edge case.
+ */
+export function clip(text: string, width: number): string {
   if (displayWidth(text) <= width) return text;
   // Reserve one cell for the ellipsis, and cut on a grapheme boundary so an
   // emoji or a combining mark is never left half-written.
@@ -121,8 +127,15 @@ function headerLine(text: string, value: string): string {
   return `${pad(text, HEADER_LABEL_WIDTH)}${value}`;
 }
 
-/** Render a column-aligned table. */
-function table(
+/**
+ * Render a column-aligned table.
+ *
+ * Exported for the tool-call report: it prints its own columns (tool, calls,
+ * share, the three outcomes, bytes) but must line up exactly like the reports
+ * beside it, which means sharing this padding and clipping rule rather than
+ * writing a second one that drifts.
+ */
+export function table(
   headers: readonly string[],
   rows: readonly (readonly string[])[],
   aligns: readonly ('left' | 'right')[],

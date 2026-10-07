@@ -15,6 +15,7 @@ import { renderHtmlReport, type HtmlOptions } from '../../src/render/html.ts';
 import { UserError } from '../../src/i18n/errors.ts';
 import { DEFAULT_LANGUAGE, setLanguage } from '../../src/i18n/index.ts';
 import type { ProjectReport, RateInfo, ScopeTotals, SessionReport, UsageResult } from '../../src/report/index.ts';
+import type { ToolsReport } from '../../src/report/tools.ts';
 import type { ReportSection } from '../../src/render/format.ts';
 
 afterEach(() => {
@@ -168,6 +169,50 @@ function pricedProject(id: string, total: string, tokens: TokenTotals = SMALL): 
     lastUsage: Date.parse('2026-07-09T00:00:00Z'),
     sessionReports: [sessionRow({ id: `${id}-s`, title: `${id} session`, requests: 3, tokens, cost: cost(total) })],
   });
+}
+
+/**
+ * A tool-call report: one agent, two tools, every outcome present, and a tool
+ * name that must be escaped.
+ */
+function toolReport(): ToolsReport {
+  return {
+    agents: [
+      {
+        agent: 'claudecode',
+        calls: 1000,
+        records: 1200,
+        recordsWithCalls: 900,
+        ok: { true: 800, false: 100, unknown: 100 },
+        bytes: 2048,
+        tools: [
+          { name: 'Bash', calls: 892, ok: { true: 800, false: 60, unknown: 32 }, bytes: 1024, share: 89.2 },
+          { name: 'a<b', calls: 108, ok: { true: 0, false: 40, unknown: 68 }, bytes: 1024, share: 10.8 },
+        ],
+        sessions: [],
+      },
+    ],
+    totals: { calls: 1000, records: 1200, recordsWithCalls: 900, ok: { true: 800, false: 100, unknown: 100 }, bytes: 2048 },
+  };
+}
+
+/** The same shape with nothing recorded: what a store without tool calls holds. */
+function noTools(): ToolsReport {
+  return {
+    agents: [
+      {
+        agent: 'dsh',
+        calls: 0,
+        records: 3,
+        recordsWithCalls: 0,
+        ok: { true: 0, false: 0, unknown: 0 },
+        bytes: 0,
+        tools: [],
+        sessions: [],
+      },
+    ],
+    totals: { calls: 0, records: 3, recordsWithCalls: 0, ok: { true: 0, false: 0, unknown: 0 }, bytes: 0 },
+  };
 }
 
 describe('renderHtmlReport', () => {
@@ -510,5 +555,37 @@ describe('renderHtmlReport', () => {
     expect(html).toContain('<html lang="en">');
     expect(html).toContain('Agent usage');
     expect(html).toContain('Data dir');
+  });
+
+  it('appends the tool-call section only when the data recorded calls', () => {
+    // No `tools` at all: an older store, or a run whose agents log no calls.
+    expect(render(report())).not.toContain('工具调用');
+    // A report whose calls are all zero is the same case, not an empty table.
+    expect(render(report(), { tools: noTools() })).not.toContain('工具调用');
+  });
+
+  it('renders the tool table with its share bar and every outcome column', () => {
+    const html = render(report(), { tools: toolReport() });
+    expect(html).toContain('<h3>工具调用</h3>');
+    expect(html).toContain('<table class="tools">');
+    expect(html).toContain('claudecode');
+    expect(html).toContain('Bash');
+    // A tool name is data like any other: escaped, never echoed.
+    expect(html).toContain('a&lt;b');
+    expect(html).not.toContain('a<b');
+    // The share is the aggregate's own rounded figure, drawn as a bar and printed.
+    expect(html).toContain('89.2%');
+    expect(html).toContain('width="89.20"');
+    // Success, failure and the unstated verdict each get a column.
+    expect(html).toContain('未表态');
+    expect(html).toContain('2.0 KB');
+  });
+
+  it('speaks the report language in the tool section too', () => {
+    setLanguage('en');
+    const html = render(report(), { tools: toolReport() });
+    expect(html).toContain('Tool calls');
+    expect(html).toContain('unstated');
+    expect(html).not.toContain('未表态');
   });
 });

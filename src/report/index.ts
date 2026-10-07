@@ -36,6 +36,23 @@ import { t } from '../i18n/index.ts';
 import type { DualMoney, OriginalAmounts, PricingEngine, DisplayReason } from '../pricing/index.ts';
 import { inRange, type TimeRange } from './timerange.ts';
 export type { OriginalPricing } from './accounting.ts';
+// The tool-call aggregation lives in its own module — it prices nothing and
+// reads `events` rather than tokens — but it is part of this layer's surface, so
+// callers reach it through the same barrel as every other query.
+export {
+  collectTools,
+  sharePercent,
+  DEFAULT_TOOL_TOP,
+  DEFAULT_SESSION_LIMIT,
+  type AgentToolUsage,
+  type SessionToolUsage,
+  type ToolCount,
+  type ToolOutcomes,
+  type ToolRow,
+  type ToolsOptions,
+  type ToolsReport,
+  type ToolTotals,
+} from './tools.ts';
 
 /** How money was converted for one report, for the provenance line. */
 export interface RateInfo {

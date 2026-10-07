@@ -28,6 +28,8 @@ import { language, t } from '../i18n/index.ts';
 import type { Warning } from '../i18n/errors.ts';
 import { displayRate } from '../pricing/index.ts';
 import type { BandSummary, ModelBreakdown, ProjectReport, ScopeTotals, SessionReport, UsageResult } from '../report/index.ts';
+import { sharePercent, type ToolsReport } from '../report/tools.ts';
+import { byteSize, shareText } from './tools.ts';
 
 /** What the HTML renderer prints beyond the default report. */
 export interface HtmlOptions {
@@ -39,6 +41,15 @@ export interface HtmlOptions {
   symbol?: string | undefined;
   /** Print each node's 总 / 自身 / 子代理 split. */
   scope?: boolean | undefined;
+  /**
+   * The tool-call report to append, when the data has any.
+   *
+   * A report whose data holds no tool call at all renders without the section —
+   * an empty table would be a claim about the data ("it recorded no tool calls")
+   * dressed up as a rendering choice, and an older store is a complete report
+   * without it.
+   */
+  tools?: ToolsReport | undefined;
 }
 
 /**
@@ -57,7 +68,19 @@ const BUCKETS: readonly string[] = ['I/M', 'I/C', 'I/W', 'O', 'R'];
  * fixed` sizes columns it is not told about by sharing what is left equally,
  * which would move the figures every time a title changed.
  */
-type Column = 'name' | 'num' | 'count' | 'money' | 'date' | 'window' | 'rates';
+type Column =
+  | 'name'
+  | 'num'
+  | 'count'
+  | 'money'
+  | 'date'
+  | 'window'
+  | 'rates'
+  // The tool-call table's own widths: it has seven columns rather than eleven,
+  // so it declares different percentages and a smaller minimum width.
+  | 'toolnum'
+  | 'toolshare'
+  | 'toolbytes';
 
 /** The columns every figure table shares: title, five buckets, their total, requests, money. */
 const FIGURE_COLUMNS: readonly Column[] = ['name', ...BUCKETS.map((): Column => 'num'), 'num', 'count', 'money'];
@@ -390,6 +413,76 @@ function warningList(warnings: readonly Warning[]): string {
 }
 
 /**
+ * The tool-call section: one block per agent, its headline figures and its tools.
+ *
+ * A report with no tool call anywhere renders nothing here: the section is an
+ * answer to "what is the agent doing", and an empty table would answer it with a
+ * layout rather than a fact.
+ *
+ * @param report - the aggregated tool rows.
+ * @returns the section, or an empty string when no call was recorded.
+ */
+function toolsSection(report: ToolsReport): string {
+  if (report.totals.calls === 0) return '';
+  const labels = t().tools;
+  const blocks = report.agents.map((usage) => {
+    const percent = sharePercent(usage.recordsWithCalls, usage.records);
+    const summary = labels.summary({
+      calls: labels.calls(count(usage.calls)),
+      coverage: labels.coverage({
+        withCalls: count(usage.recordsWithCalls),
+        records: count(usage.records),
+        percent: percent.toFixed(1),
+      }),
+      outcomes: labels.outcomes({
+        ok: count(usage.ok.true),
+        failed: count(usage.ok.false),
+        unknown: count(usage.ok.unknown),
+      }),
+      bytes: labels.bytes(byteSize(usage.bytes)),
+    });
+    const body =
+      usage.tools.length === 0
+        ? `<p class="meta">${escapeHtml(labels.noTools)}</p>`
+        : `<div class="scroll"><table class="tools">${colGroup([
+            'name',
+            'toolnum',
+            'toolshare',
+            'toolnum',
+            'toolnum',
+            'toolnum',
+            'toolbytes',
+          ])}<thead><tr>` +
+          [labels.colTool, labels.colCalls, labels.colShare, labels.colOk, labels.colFailed, labels.colUnknown, labels.colBytes]
+            .map((heading, index) => `<th${index === 0 ? '' : ' class="num"'}>${escapeHtml(heading)}</th>`)
+            .join('') +
+          `</tr></thead><tbody>${usage.tools
+            .map((row) => {
+              // A tool that was used keeps a visible bar: a share rounded to zero
+              // would read as "never used", which is a different statement.
+              const width = Math.max(row.calls > 0 ? 1 : 0, row.share);
+              const label = `${row.name}: ${shareText(row.share)}`;
+              return (
+                `<tr><td class="name">${escapeHtml(row.name)}</td>` +
+                `<td class="num">${escapeHtml(count(row.calls))}</td>` +
+                `<td class="num"><span class="tool-share">` +
+                `<svg class="bar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)}">` +
+                '<rect class="track" x="0" y="0" width="100" height="10"/>' +
+                `<rect x="0" y="0" width="${width.toFixed(2)}" height="10"/></svg>` +
+                `<span>${escapeHtml(shareText(row.share))}</span></span></td>` +
+                `<td class="num">${escapeHtml(count(row.ok.true))}</td>` +
+                `<td class="num">${escapeHtml(count(row.ok.false))}</td>` +
+                `<td class="num">${escapeHtml(count(row.ok.unknown))}</td>` +
+                `<td class="num">${escapeHtml(byteSize(row.bytes))}</td></tr>`
+              );
+            })
+            .join('')}</tbody></table></div>`;
+    return `<div class="tool-agent"><h4>${escapeHtml(usage.agent)}</h4><p class="meta">${escapeHtml(summary)}</p>${body}</div>`;
+  });
+  return `<section class="card tools"><h3>${escapeHtml(labels.title)}</h3>${blocks.join('\n')}</section>`;
+}
+
+/**
  * Projects worth a card.
  *
  * A project that billed nothing in range has no rows to show. In a report
@@ -491,12 +584,27 @@ h3 { margin: 0 0 6px; font-size: 15px; }
    the min-width; below it the scroll box scrolls instead of shearing the
    numbers, and a 5.5% figure column still holds 901.3M at 84em. */
 table { width: 100%; min-width: 84em; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+/* Seven declared columns need less room than eleven; the scroll box is still
+   there for a narrow window. */
+table.tools { min-width: 44em; }
+/* A share bar sits inside a numeric cell: the figure stays right-aligned and the
+   bar takes the room the fixed layout leaves it. */
+.tool-share { display: grid; grid-template-columns: 1fr 52px; align-items: center; gap: 6px; }
+.tool-agent + .tool-agent { margin-top: 14px; }
+h4 { margin: 0 0 4px; font-size: 13px; }
 col.c-num { width: 5.5%; }
 col.c-count { width: 7%; }
 col.c-money { width: 9%; }
 col.c-date { width: 8%; }
 col.c-window { width: 11%; }
 col.c-rates { width: 15%; }
+/* The tool-call table carries seven columns rather than eleven, so it asks for
+   less room and gives the tool name the width the percentage columns do not
+   need. Without this it would inherit the token table's 84em minimum and stretch
+   seven columns across the whole page. */
+col.c-toolnum { width: 10%; }
+col.c-toolshare { width: 16%; }
+col.c-toolbytes { width: 13%; }
 th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 /* A heading wraps rather than spilling out of its column: the unit-price heading
    carries the rate card's own label, which is a sentence in some languages. */
@@ -546,6 +654,7 @@ export function renderHtmlReport(sections: readonly ReportSection[], options: Ht
   const labels = t();
   const [first] = sections;
   const title = first === undefined ? labels.app.usage : `${labels.app.usage} · ${first.result.agent}`;
+  const tools = options.tools === undefined ? '' : toolsSection(options.tools);
   return [
     '<!doctype html>',
     `<html lang="${language()}">`,
@@ -557,7 +666,7 @@ export function renderHtmlReport(sections: readonly ReportSection[], options: Ht
     '</head>',
     '<body>',
     `<header><h1>${escapeHtml(labels.app.usage)}</h1>${headerFacts(sections, options)}</header>`,
-    `<main>${sections.map((section) => windowBlock(section, options)).join('\n')}</main>`,
+    `<main>${sections.map((section) => windowBlock(section, options)).join('\n')}${tools}</main>`,
     '</body>',
     '</html>',
     '',

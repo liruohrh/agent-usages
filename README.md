@@ -91,6 +91,7 @@ node install.mjs --base https://mirror.example.com/usages   # 只给 install.mjs
 agent-usages usage --range month --html ~/usage.html  # 自包含单文件，可直接发给别人
 agent-usages usage --range month --json               # 结构化输出
 agent-usages session list                             # 项目与会话清单
+agent-usages tools                                    # 工具调用：谁在用哪些工具、成败如何
 agent-usages price                                    # 价格表（含峰谷与节假日规则）
 ```
 
@@ -156,6 +157,52 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 | `--agent <id,...>` | 读哪些 agent；默认 `all`（所有已安装的），可逗号分隔或重复；见[目标 agent](#目标-agent-与数据目录) |
 | `--agent-dir` / `--home` / `--provider` / `--json` / `--no-update` | 见上 |
 | `--no-store` / `--db <路径>` | 用量数据库：默认把每个数据根上次读到的结果（连着文件指纹）写进 `$XDG_DATA_HOME/agent-usages/usage.db`，没变的根下次不再解析，数字与首次一致；它是**你可以备份、也能用 sqlite3 直接读的数据**。`--no-store` 绕过它（重新解析全部文件，只看现存来源），`--db` 换位置。详见[架构](docs/architecture.md#用量数据库srcstore) |
+
+### `tools`
+
+看 agent 到底在用什么工具：把各家日志里抽出的**工具调用**（`record.events`）按 agent 汇总——调用总数、有调用的记录数 / 记录总数（覆盖率）、`ok` 三态（成功 / 失败 / **未表态**）、参数体量，以及每个 agent 的 Top N 工具。
+
+```bash
+agent-usages tools                            # 默认：每个 agent 的 Top 10 工具
+agent-usages tools --agent dsh --top 5        # 只看 dsh 的前 5 个
+agent-usages tools --range month              # 只统计本月
+agent-usages tools --by session --limit 20    # 会话级表：哪些会话调用最多
+agent-usages tools --json                     # 结构化输出
+```
+
+```
+工具调用
+  时间范围  全部时间
+  数据目录  /home/user/.dsh
+  合计      16,656 次调用 · 14,339/16,069 条记录有调用（89.2%） · 成功 13,330 / 失败 350 / 未表态 2,976 · 参数体量 17 MB
+
+▸ dsh（DeepSeek Harness (DSH)）
+  3,648 次调用 · 2,802/2,963 条记录有调用（94.6%） · 成功 3,602 / 失败 46 / 未表态 0 · 参数体量 3.7 MB
+工具         调用   占比   成功  失败  未表态  参数体量
+──────────  ─────  ─────  ─────  ────  ──────  ────────
+bash        2,330  63.9%  2,330     0       0    2.0 MB
+web_search    446  12.2%    445     1       0     86 KB
+read          343   9.4%    337     6       0     39 KB
+```
+
+| 选项 | 说明 |
+| --- | --- |
+| `--range <spec>` | 时间范围，与 `usage` 同一套写法 |
+| `--by <tool\|session>` | 汇总维度：`tool`（默认，按工具名）或 `session`（会话级表：会话、调用数、常用工具、失败数） |
+| `--top <n>` | 每个 agent 列出前 N 个工具（默认 10；0 表示不截断） |
+| `--limit <n>` | `--by session` 时每个 agent 最多列几个会话（默认 20；0 表示不截断） |
+| `-q, --quiet` | 不打印头部（范围 / 数据目录），只打印表格 |
+| `--json` | 结构化输出（`agents[]` + `totals`，字段与文本口径一致） |
+| `--agent` / `--agent-dir` / `--home` / `--no-update` / `--no-store` / `--db` | 与 `usage` 相同 |
+
+口径：
+
+- **只统计日志里真的记下了工具调用的记录**；适配器读不到工具调用的数据在这里就是空的，不用"猜"补齐。一条调用都没有时输出 `没有工具调用记录。` 并 **exit 2**（与 `usage` 在没有用量时一致）。
+- `ok` 是**三态**：日志明确成功 / 明确失败 / **未表态**（没写成败）。未表态单列一列，**绝不并进成功**——真实日志里它常常是最大的一档（Claude Code 不给成功的非 Bash 调用写 `is_error`，Codex 的 `function_call` 没有状态字段）。
+- `bytes` 是完整参数 JSON 的 UTF-8 字节数；参数本身不打印、不进 JSON，只留摘录在数据层。
+- 调用按 **agent** 分组：`claudecode` 的 `Bash` 与 `dsh` 的 `bash` 是两行。
+
+`usage --html` 的报告末尾也会追加一节「工具调用」（每 agent 一行汇总 + Top 工具表，带内联占比条）；数据里没有任何工具调用时这一节不出现。字段与样例见 [输出与格式](docs/output.md#工具调用tools)。
 
 ### `session list`
 
