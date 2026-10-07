@@ -30,7 +30,7 @@
  */
 
 import { mkdir, rename } from 'node:fs/promises';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { muteSqliteExperimentalWarning } from '../core/warnings.ts';
@@ -38,6 +38,7 @@ import { muteSqliteExperimentalWarning } from '../core/warnings.ts';
 import type { DatasetStats, ProjectRecord, SessionRecord, UsageDataset, UsageEvent, UsageRecord } from '../core/types.ts';
 import { warningsFromJson, warningsToJson, type WarningJson } from './dataset-json.ts';
 import type { FingerprintStatus, SourceFingerprint } from './fingerprint.ts';
+import { isUnderPrefix } from './prefix.ts';
 
 /** The schema this module writes. Bump it when a migration is needed. */
 export const STORE_SCHEMA_VERSION = 3;
@@ -331,6 +332,160 @@ export interface StoreRootSummary {
   root: string;
   /** When a scan last read it, in milliseconds since the Unix epoch. */
   lastSeen: number;
+}
+
+/**
+ * Everything the store holds for one root, as the store itself sees it.
+ *
+ * For showing a user what is in their database — `store list` — and for spotting
+ * the rows that need attention: a root whose `readerVersion` is not the version
+ * running now was read by an older build, and if its logs are gone it cannot be
+ * read again, so a field that build did not know about (tool calls) will be
+ * empty there for good.
+ */
+export interface StoreRootDetail {
+  /** Agent that read the root. */
+  agent: string;
+  /** Identity of the root: {@link rootIdOf} of its path. */
+  rootId: string;
+  /** Absolute path of the root, as it was when written. */
+  root: string;
+  /** When a scan last read it, in milliseconds since the Unix epoch. */
+  lastSeen: number;
+  /** Version of the tool that wrote these rows, or `null` for rows that predate the column. */
+  readerVersion: string | null;
+  /** Sessions stored for the root. */
+  sessions: number;
+  /** Records stored for the root. */
+  records: number;
+  /** Events stored for the root. */
+  events: number;
+}
+
+/** What a store is and what is in it, for a reader who wants to look. */
+export interface StoreStats {
+  /** Where the database is, as it was asked for at open. */
+  path: string;
+  /** Schema version on disk (`PRAGMA user_version`). */
+  schemaVersion: number;
+  /** Tool version recorded in `meta`, or `null` when the file does not say. */
+  toolVersion: string | null;
+  /**
+   * What the store occupies on disk right now, in bytes: the file and its
+   * write-ahead log and shared-memory sidecars, or `0` for a store that lives in
+   * memory.
+   *
+   * The whole footprint rather than the main file alone, because in WAL mode the
+   * recent rows live in a sidecar, and a size that ignored it would report a
+   * database that has just grown as unchanged.
+   */
+  bytes: number;
+}
+
+/**
+ * One node of what the store holds, from an agent down to a session.
+ *
+ * For a reader deciding what to forget: `store forget` is cache eviction, so it
+ * has to show what the cache is holding and where it came from. The tree is
+ * `agent → root → project → cwd → session`; every level carries the totals of
+ * everything below it, so a caller can render any depth without walking twice.
+ *
+ * `readerVersions` is the point of the view. A row written by a build that did
+ * not know about tool calls still has none, and if the log it came from is gone
+ * that stays true for good — so a node with more than one version (or with
+ * `null` in the set, which is "written before anyone said") is telling the reader
+ * that its numbers are not all from the code they are running.
+ */
+export interface StoreOverviewNode {
+  /** Which level this node is. */
+  kind: 'agent' | 'root' | 'project' | 'cwd' | 'session';
+  /**
+   * Identity at this level: the agent id, the root path, the project id, the
+   * session's working directory, or the session id.
+   *
+   * Empty means "the rows did not say": a session with no `cwd`, a session no
+   * project lists, a session without a title. Rendering that is the caller's
+   * decision — this layer has no language.
+   */
+  id: string;
+  /** What to show for the node: a path, a project name, a session title. */
+  label: string;
+  /** Sessions in this node and below. */
+  sessions: number;
+  /** Records in them. */
+  records: number;
+  /** Events in them. */
+  events: number;
+  /** Latest activity below this node, in milliseconds since the Unix epoch, or `null` when nothing is dated. */
+  lastActivity: number | null;
+  /** Tool versions that wrote rows below this node, ascending; `null` for rows written before the column existed. */
+  readerVersions: (string | null)[];
+  /** The next level down. */
+  children: StoreOverviewNode[];
+}
+
+/**
+ * Which rows {@link UsageStore.forget} targets.
+ *
+ * Every field given is one more condition, and they are combined as an
+ * intersection: `{ agent: 'dsh', cwd: '/ws/app' }` forgets the sessions of that
+ * agent that ran in that directory, not the agent's other roots and not another
+ * agent's use of the same directory.
+ *
+ * The distinction that matters is *what* the intersection covers. Naming whole
+ * roots (`root`, `rootPrefix`, `agent`, `all`) removes them entirely, which is
+ * the obvious meaning. Naming part of a root (`cwd`, `project`, `session`)
+ * cannot: the root's fingerprint would still claim its files are unchanged while
+ * the dataset beside it is missing rows, and the next scan would serve the
+ * remainder as the truth. So a partial forget also drops what the store
+ * remembers about that root, and the next scan reads it again — the sections
+ * are gone from the store, not from the logs.
+ */
+export interface ForgetSelector {
+  /** Roots read by this agent. */
+  agent?: string | undefined;
+  /** This exact root, as stored (an absolute path). */
+  root?: string | undefined;
+  /** Roots at or under this path prefix, by whole path segment. */
+  rootPrefix?: string | undefined;
+  /** Sessions that ran in this directory or under it. */
+  cwd?: string | undefined;
+  /** Sessions the adapter filed under this project id. */
+  project?: string | undefined;
+  /** This one session id. */
+  session?: string | undefined;
+  /** Everything. Cannot be combined with the other fields. */
+  all?: true | undefined;
+}
+
+/** One root a {@link UsageStore.forget} call touched. */
+export interface ForgottenRoot {
+  /** Agent that read it. */
+  agent: string;
+  /** Identity of the root. */
+  rootId: string;
+  /** Absolute path of the root. */
+  root: string;
+  /** Rows deleted under this root. */
+  rows: number;
+  /**
+   * Whether the store's memory of the root was cleared as well.
+   *
+   * `true` means its file fingerprints and reader version are gone, so the next
+   * scan of that root reads everything again instead of trusting a record of
+   * files that no longer matches what is stored.
+   */
+  reset: boolean;
+}
+
+/** What {@link UsageStore.forget} did. */
+export interface ForgetResult {
+  /** Rows deleted, per table. */
+  deleted: { roots: number; files: number; sessions: number; records: number; events: number };
+  /** Rows deleted in total. */
+  total: number;
+  /** Every root the call touched, with what happened to it. */
+  roots: readonly ForgottenRoot[];
 }
 
 /** What {@link UsageStore.writeRoot} stores. */
@@ -770,6 +925,53 @@ function recordToolVersion(db: DatabaseSync, toolVersion: string): void {
 }
 
 /**
+ * The tables a root is made of, children first, and what each one's rows are
+ * called in a {@link ForgetResult}.
+ *
+ * Deleting in this order means every row is removed by a statement that names it
+ * rather than by a cascade firing: the count a caller gets back is the number of
+ * rows that actually went, and no orphan can survive a connection with foreign
+ * keys switched off.
+ */
+const ROOT_TABLES: readonly string[] = ['events', 'records', 'sessions', 'files', 'roots'];
+
+/** Which result field each table's row count belongs in. */
+const TABLE_FIELDS: Readonly<Record<string, string>> = {
+  events: 'events',
+  records: 'records',
+  sessions: 'sessions',
+  files: 'files',
+  roots: 'roots',
+};
+
+/** A node with nothing in it yet. */
+function emptyOverviewNode(kind: StoreOverviewNode['kind'], id: string, label: string): StoreOverviewNode {
+  return { kind, id, label, sessions: 0, records: 0, events: 0, lastActivity: null, readerVersions: [], children: [] };
+}
+
+/** Add a child's totals to its parent, versions and last activity included. */
+function accumulate(parent: StoreOverviewNode, child: StoreOverviewNode): void {
+  parent.sessions += child.sessions;
+  parent.records += child.records;
+  parent.events += child.events;
+  if (child.lastActivity !== null) {
+    parent.lastActivity = parent.lastActivity === null ? child.lastActivity : Math.max(parent.lastActivity, child.lastActivity);
+  }
+  for (const version of child.readerVersions) {
+    if (!parent.readerVersions.includes(version)) parent.readerVersions.push(version);
+  }
+  parent.readerVersions.sort(compareVersions);
+}
+
+/** `null` (written before anyone said) first, then versions as text. */
+function compareVersions(left: string | null, right: string | null): number {
+  if (left === right) return 0;
+  if (left === null) return -1;
+  if (right === null) return 1;
+  return left.localeCompare(right);
+}
+
+/**
  * A root's usage, in a database the user owns.
  *
  * Instances come from {@link UsageStore.open}; the constructor is private
@@ -804,10 +1006,14 @@ export class UsageStore {
    */
   #toolVersion: string;
 
-  private constructor(path: string, db: DatabaseSync, toolVersion: string) {
+  /** Set when the rows live in memory rather than in the file at {@link path}. */
+  #inMemory: boolean;
+
+  private constructor(path: string, db: DatabaseSync, toolVersion: string, inMemory: boolean) {
     this.path = path;
     this.#db = db;
     this.#toolVersion = toolVersion;
+    this.#inMemory = inMemory;
   }
 
   /**
@@ -845,7 +1051,7 @@ export class UsageStore {
     });
 
     try {
-      return { store: new UsageStore(path, connect(path, toolVersion, driver), toolVersion), reset: null };
+      return { store: new UsageStore(path, connect(path, toolVersion, driver), toolVersion, false), reset: null };
     } catch (error) {
       if (error instanceof NewerSchemaError) {
         return {
@@ -865,7 +1071,7 @@ export class UsageStore {
         const backup = await backupAside(path, new Date());
         try {
           return {
-            store: new UsageStore(path, connect(path, toolVersion, driver), toolVersion),
+            store: new UsageStore(path, connect(path, toolVersion, driver), toolVersion, false),
             reset: { reason: 'corrupt', path, backup, detail: detailOf(error) },
           };
         } catch (later) {
@@ -888,7 +1094,7 @@ export class UsageStore {
    * @returns the store.
    */
   static #ephemeral(path: string, toolVersion: string, driver: SqliteModule): UsageStore {
-    return new UsageStore(path, connect(':memory:', toolVersion, driver), toolVersion);
+    return new UsageStore(path, connect(':memory:', toolVersion, driver), toolVersion, true);
   }
 
   /**
@@ -1150,6 +1356,383 @@ export class UsageStore {
       agent,
     );
     return rows.map((row) => ({ rootId: row.root_id, root: row.root, lastSeen: Number(row.last_seen) }));
+  }
+
+  /**
+   * Every root the store holds rows for, with what it holds.
+   *
+   * The counterpart of {@link rootsOf} for a reader looking at the database
+   * rather than at one agent's cache: it says who wrote each root, when it was
+   * last read and how many rows are there, so `store list` can show the lot and
+   * `store forget` can name what it is about to delete.
+   * @returns one entry per root, by agent and then most recently seen first.
+   */
+  rootSummaries(): readonly StoreRootDetail[] {
+    this.#assertOpen();
+    const rows = this.#all<{
+      agent: string;
+      root_id: string;
+      root: string;
+      last_seen: number;
+      reader_version: string | null;
+      sessions: number;
+      records: number;
+      events: number;
+    }>(
+      `SELECT r.agent, r.root_id, r.root, r.last_seen, r.reader_version,
+         (SELECT count(*) FROM sessions s WHERE s.agent = r.agent AND s.root_id = r.root_id) AS sessions,
+         (SELECT count(*) FROM records c WHERE c.agent = r.agent AND c.root_id = r.root_id) AS records,
+         (SELECT count(*) FROM events e WHERE e.agent = r.agent AND e.root_id = r.root_id) AS events
+       FROM roots r
+       ORDER BY r.agent ASC, r.last_seen DESC, r.root_id ASC`,
+    );
+    return rows.map((row) => ({
+      agent: row.agent,
+      rootId: row.root_id,
+      root: row.root,
+      lastSeen: Number(row.last_seen),
+      readerVersion: row.reader_version,
+      sessions: Number(row.sessions),
+      records: Number(row.records),
+      events: Number(row.events),
+    }));
+  }
+
+  /**
+   * What this store is: which file, which schema, which tool wrote it last.
+   * @returns the store's own facts.
+   */
+  stats(): StoreStats {
+    this.#assertOpen();
+    const version = this.#get<{ user_version: number }>('PRAGMA user_version');
+    const tool = this.#get<{ value: string }>('SELECT value FROM meta WHERE key = ?', 'tool_version');
+    let bytes = 0;
+    if (!this.#inMemory) {
+      for (const suffix of ['', '-wal', '-shm']) {
+        try {
+          bytes += statSync(`${this.path}${suffix}`).size;
+        } catch {
+          // A sidecar that is not there contributes nothing.
+        }
+      }
+    }
+    return {
+      path: this.path,
+      schemaVersion: version === undefined ? 0 : Number(version.user_version),
+      toolVersion: tool?.value ?? null,
+      bytes,
+    };
+  }
+
+  /**
+   * Delete what a selector names, and clear the memory of the roots left partial.
+   *
+   * One transaction: either the rows are gone and the affected roots are marked
+   * as needing a fresh read, or nothing happened. The counts come from the
+   * statements themselves, so they say what left the database rather than what
+   * the selector was meant to match.
+   *
+   * Forgetting is **cache eviction**, not deletion of the user's history: a log
+   * that is still there and not excluded is read again on the next scan, and the
+   * sections come back. Keeping data out for good is the exclusion rule's job
+   * (`--store-exclude`, or `--no-store` for a whole run), which is a rule rather
+   * than a cleanup.
+   *
+   * @param selector - what to forget; see {@link ForgetSelector}.
+   * @returns the rows deleted per table and the roots affected.
+   * @throws when the selector names nothing, or mixes `all` with a condition.
+   */
+  forget(selector: ForgetSelector): ForgetResult {
+    this.#assertOpen();
+    const conditions = Object.entries(selector).filter(([, value]) => value !== undefined);
+    if (conditions.length === 0) {
+      throw new Error('forget needs a selector: name an agent, a root, a session, or pass all');
+    }
+    if (selector.all === true && conditions.length > 1) {
+      throw new Error('forget cannot combine all with a narrower selector');
+    }
+    const deleted = { roots: 0, files: 0, sessions: 0, records: 0, events: 0 };
+    const affected: ForgottenRoot[] = [];
+    this.#db.exec('BEGIN IMMEDIATE');
+    try {
+      if (selector.all === true) {
+        for (const table of ROOT_TABLES) {
+          deleted[TABLE_FIELDS[table] as keyof typeof deleted] += this.#delete(`DELETE FROM ${table}`);
+        }
+        affected.push(...this.#rootRefs());
+      } else if (selector.cwd !== undefined || selector.project !== undefined || selector.session !== undefined) {
+        this.#forgetSessions(selector, deleted, affected);
+      } else {
+        this.#forgetRoots(selector, deleted, affected);
+      }
+      this.#db.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.#db.exec('ROLLBACK');
+      } catch {
+        // Already unwound; the original error is the one to report.
+      }
+      throw error;
+    }
+    return {
+      deleted,
+      total: deleted.roots + deleted.files + deleted.sessions + deleted.records + deleted.events,
+      roots: affected,
+    };
+  }
+
+  /**
+   * Hand the pages of a database that has been emptied back to the system.
+   *
+   * `VACUUM` rewrites the whole file, so it needs room for a second copy of it
+   * and takes time proportional to its size — which is why it is a call of its
+   * own rather than something every `forget` does. After a forget it is the step
+   * that actually shrinks the file; without it the rows are gone but the space is
+   * still held.
+   *
+   * The write-ahead log is folded back into the file afterwards: the vacuum
+   * writes the new, smaller database *through* the log, and until that log is
+   * checkpointed the file on disk still looks exactly as big as before.
+   */
+  vacuum(): void {
+    this.#assertOpen();
+    if (this.#inMemory) return;
+    this.#db.exec('VACUUM');
+    this.#db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  }
+
+  /**
+   * What is in the store, as a tree of agents, roots, projects, cwds and sessions.
+   *
+   * Built from the rows themselves — the project skeletons in `roots`, the
+   * `cwd` on each session, and per-session counts — so it describes what is
+   * actually stored rather than what a scan once intended to store.
+   * @returns one node per agent, each with everything below it.
+   */
+  storeOverview(): readonly StoreOverviewNode[] {
+    this.#assertOpen();
+    const roots = this.#all<{
+      agent: string;
+      root_id: string;
+      root: string;
+      reader_version: string | null;
+      projects_json: string;
+    }>('SELECT agent, root_id, root, reader_version, projects_json FROM roots ORDER BY agent ASC, root_id ASC');
+    const sessions = this.#all<{
+      agent: string;
+      root_id: string;
+      session_id: string;
+      title: string | null;
+      cwd: string | null;
+      created_at: number | null;
+      records: number;
+      events: number;
+      last_record: number | null;
+    }>(
+      `SELECT s.agent, s.root_id, s.session_id, s.title, s.cwd, s.created_at,
+         (SELECT count(*) FROM records c WHERE c.agent = s.agent AND c.root_id = s.root_id AND c.session_id = s.session_id) AS records,
+         (SELECT count(*) FROM events e WHERE e.agent = s.agent AND e.root_id = s.root_id AND e.session_id = s.session_id) AS events,
+         (SELECT max(c.time) FROM records c WHERE c.agent = s.agent AND c.root_id = s.root_id AND c.session_id = s.session_id) AS last_record
+       FROM sessions s
+       ORDER BY s.agent ASC, s.root_id ASC, s.rowid ASC`,
+    );
+
+    const byRoot = new Map<string, typeof sessions>();
+    for (const row of sessions) {
+      const key = `${row.agent}\u0000${row.root_id}`;
+      const list = byRoot.get(key) ?? [];
+      list.push(row);
+      byRoot.set(key, list);
+    }
+
+    const agents = new Map<string, StoreOverviewNode>();
+    for (const root of roots) {
+      const key = `${root.agent}\u0000${root.root_id}`;
+      const rows = byRoot.get(key) ?? [];
+      const rootNode = emptyOverviewNode('root', root.root, root.root);
+      rootNode.readerVersions = root.reader_version === null ? [null] : [root.reader_version];
+      const projects = new Map<string, StoreOverviewNode>();
+      const filed = this.#projectIndex(root.projects_json);
+      for (const row of rows) {
+        const project = filed.get(row.session_id);
+        const projectId = project?.id ?? '';
+        let projectNode = projects.get(projectId);
+        if (projectNode === undefined) {
+          projectNode = emptyOverviewNode('project', projectId, project?.name ?? '');
+          projects.set(projectId, projectNode);
+        }
+        const cwdId = row.cwd ?? '';
+        let cwdNode = projectNode.children.find((node) => node.id === cwdId);
+        if (cwdNode === undefined) {
+          cwdNode = emptyOverviewNode('cwd', cwdId, cwdId);
+          projectNode.children.push(cwdNode);
+        }
+        const sessionNode = emptyOverviewNode('session', row.session_id, row.title ?? '');
+        const lastActivity = row.last_record === null
+          ? row.created_at === null ? null : Number(row.created_at)
+          : Math.max(Number(row.last_record), row.created_at === null ? Number.NEGATIVE_INFINITY : Number(row.created_at));
+        sessionNode.sessions = 1;
+        sessionNode.records = Number(row.records);
+        sessionNode.events = Number(row.events);
+        sessionNode.lastActivity = lastActivity;
+        sessionNode.readerVersions = rootNode.readerVersions;
+        cwdNode.children.push(sessionNode);
+        accumulate(cwdNode, sessionNode);
+        accumulate(projectNode, sessionNode);
+        accumulate(rootNode, sessionNode);
+      }
+      rootNode.children = [...projects.values()];
+      let agentNode = agents.get(root.agent);
+      if (agentNode === undefined) {
+        agentNode = emptyOverviewNode('agent', root.agent, root.agent);
+        agents.set(root.agent, agentNode);
+      }
+      agentNode.children.push(rootNode);
+      accumulate(agentNode, rootNode);
+    }
+    return [...agents.values()];
+  }
+
+  /**
+   * Which project each session of a root is filed under.
+   *
+   * One parse per root, not one per session: a root can hold thousands of
+   * sessions and they all share the same skeletons.
+   * @param projectsJson - the root's stored project skeletons.
+   * @returns session id → the project that lists it.
+   */
+  #projectIndex(projectsJson: string): Map<string, { id: string; name: string }> {
+    const index = new Map<string, { id: string; name: string }>();
+    for (const skeleton of JSON.parse(projectsJson) as ProjectSkeleton[]) {
+      for (const sessionId of skeleton.sessionIds) index.set(sessionId, { id: skeleton.id, name: skeleton.name });
+    }
+    return index;
+  }
+
+  /** Every root, as a reference without counts. */
+  #rootRefs(): ForgottenRoot[] {
+    const rows = this.#all<{ agent: string; root_id: string; root: string }>(
+      'SELECT agent, root_id, root FROM roots ORDER BY agent ASC, root_id ASC',
+    );
+    return rows.map((row) => ({ agent: row.agent, rootId: row.root_id, root: row.root, rows: 0, reset: false }));
+  }
+
+  /** The roots a selector names, ignoring any session-level conditions. */
+  #selectedRoots(selector: ForgetSelector): ForgottenRoot[] {
+    return this.#rootRefs()
+      .filter((entry) => selector.agent === undefined || entry.agent === selector.agent)
+      .filter((entry) => selector.root === undefined || entry.root === selector.root)
+      .filter(
+        (entry) => selector.rootPrefix === undefined || isUnderPrefix(entry.root, [selector.rootPrefix]),
+      );
+  }
+
+  /**
+   * Forget whole roots: every row of them goes, the root row included.
+   *
+   * The children are deleted before the root rather than by the cascade: the
+   * counts then come from statements that name the rows, and a connection with
+   * foreign keys switched off cannot leave orphans behind.
+   */
+  #forgetRoots(selector: ForgetSelector, deleted: ForgetResult['deleted'], affected: ForgottenRoot[]): void {
+    for (const entry of this.#selectedRoots(selector)) {
+      const { agent, rootId } = entry;
+      const events = this.#delete('DELETE FROM events WHERE agent = ? AND root_id = ?', agent, rootId);
+      const records = this.#delete('DELETE FROM records WHERE agent = ? AND root_id = ?', agent, rootId);
+      const sessions = this.#delete('DELETE FROM sessions WHERE agent = ? AND root_id = ?', agent, rootId);
+      const files = this.#delete('DELETE FROM files WHERE agent = ? AND root_id = ?', agent, rootId);
+      const roots = this.#delete('DELETE FROM roots WHERE agent = ? AND root_id = ?', agent, rootId);
+      deleted.events += events;
+      deleted.records += records;
+      deleted.sessions += sessions;
+      deleted.files += files;
+      deleted.roots += roots;
+      affected.push({ ...entry, rows: events + records + sessions + files + roots, reset: false });
+    }
+  }
+
+  /**
+   * Forget part of a root: the named sessions go, and the rest of the root stops
+   * being reusable.
+   *
+   * A root with rows missing is a root whose fingerprint lies — it would still
+   * say "the files have not changed" while the dataset beside it is short a
+   * session — so its fingerprint and reader version are dropped too, and the next
+   * scan reads the whole root again. What comes back is what the logs say, which
+   * is the point: the sections are forgotten, not deleted from history.
+   */
+  #forgetSessions(selector: ForgetSelector, deleted: ForgetResult['deleted'], affected: ForgottenRoot[]): void {
+    const scope = new Map(
+      this.#selectedRoots(selector).map((entry) => [`${entry.agent}\u0000${entry.rootId}`, entry]),
+    );
+    const rows = this.#all<{
+      agent: string;
+      root_id: string;
+      session_id: string;
+      cwd: string | null;
+      projects_json: string;
+    }>(
+      `SELECT s.agent, s.root_id, s.session_id, s.cwd, r.projects_json
+       FROM sessions s JOIN roots r ON r.agent = s.agent AND r.root_id = s.root_id
+       ORDER BY s.agent ASC, s.root_id ASC, s.rowid ASC`,
+    );
+    // The same skeletons for every session of a root: parsed once, keyed by the
+    // JSON text they came from.
+    const indexes = new Map<string, Map<string, { id: string; name: string }>>();
+    for (const row of rows) {
+      if (!indexes.has(row.projects_json)) indexes.set(row.projects_json, this.#projectIndex(row.projects_json));
+    }
+    const matched = rows.filter((row) => {
+      if (!scope.has(`${row.agent}\u0000${row.root_id}`)) return false;
+      if (selector.session !== undefined && row.session_id !== selector.session) return false;
+      if (selector.cwd !== undefined && !isUnderPrefix(row.cwd ?? '', [selector.cwd])) return false;
+      if (selector.project !== undefined && indexes.get(row.projects_json)?.get(row.session_id)?.id !== selector.project) {
+        return false;
+      }
+      return true;
+    });
+
+    // Per root, so the result can say where the rows were and which roots are now
+    // going to be read again.
+    const touched = new Map<string, { entry: ForgottenRoot; rows: number }>();
+    for (const row of matched) {
+      const key = `${row.agent}\u0000${row.root_id}`;
+      const entry = scope.get(key) as ForgottenRoot;
+      const tally = touched.get(key) ?? { entry, rows: 0 };
+      const events = this.#delete(
+        'DELETE FROM events WHERE agent = ? AND root_id = ? AND session_id = ?',
+        row.agent, row.root_id, row.session_id,
+      );
+      const records = this.#delete(
+        'DELETE FROM records WHERE agent = ? AND root_id = ? AND session_id = ?',
+        row.agent, row.root_id, row.session_id,
+      );
+      const sessions = this.#delete(
+        'DELETE FROM sessions WHERE agent = ? AND root_id = ? AND session_id = ?',
+        row.agent, row.root_id, row.session_id,
+      );
+      deleted.events += events;
+      deleted.records += records;
+      deleted.sessions += sessions;
+      tally.rows += events + records + sessions;
+      touched.set(key, tally);
+    }
+    for (const { entry, rows: removed } of touched.values()) {
+      const files = this.#delete('DELETE FROM files WHERE agent = ? AND root_id = ?', entry.agent, entry.rootId);
+      deleted.files += files;
+      this.#run('UPDATE roots SET reader_version = NULL WHERE agent = ? AND root_id = ?', entry.agent, entry.rootId);
+      affected.push({ ...entry, rows: removed + files, reset: true });
+    }
+  }
+
+  /**
+   * Run a statement for its effect, and how many rows it changed.
+   * @param sql - the statement.
+   * @param params - its parameters.
+   * @returns rows changed.
+   */
+  #delete(sql: string, ...params: (string | number | null)[]): number {
+    return Number(this.#statement(sql).run(...params).changes);
   }
 
   /**

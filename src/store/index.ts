@@ -16,6 +16,7 @@
  */
 
 export { STORE_DIR_NAME, STORE_FILE_NAME, defaultStorePath } from './location.ts';
+export { isUnderPrefix, stripTrailingSeparators } from './prefix.ts';
 export {
   HEAD_HASH_BYTES,
   fingerprintOf,
@@ -37,8 +38,14 @@ export {
   STORE_MIGRATION_BACKUP_SUFFIX,
   STORE_SCHEMA_VERSION,
   UsageStore,
+  type ForgetResult,
+  type ForgetSelector,
+  type ForgottenRoot,
   type ReadRootResult,
+  type StoreOverviewNode,
+  type StoreRootDetail,
   type StoreRootSummary,
+  type StoreStats,
   type UsageStoreOpenOptions,
   type UsageStoreOpenResult,
   type UsageStoreReset,

@@ -25,6 +25,7 @@ import { UserError, type Warning } from '../i18n/errors.ts';
 import { t } from '../i18n/index.ts';
 import {
   fingerprintOf,
+  isUnderPrefix,
   fingerprintsEqual,
   rootIdOf,
   type UsageStore,
@@ -217,6 +218,16 @@ export async function planAgentSources(options: {
    * planned like any other and comes back marked stale.
    */
   store?: UsageStore | undefined;
+  /**
+   * Roots that must never be written to the store, as absolute path prefixes.
+   *
+   * The store is still opened — other roots read in the same run are cached as
+   * usual — but an excluded root is not looked up in it either: it has no rows,
+   * and a root that must leave nothing behind must not be resurrected by rows an
+   * earlier run left there. The caller passes whatever rule it was given
+   * (`--store-exclude`); this layer only applies it.
+   */
+  excludedRoots?: readonly string[] | undefined;
 }): Promise<AgentSourcePlan> {
   const env = options.env ?? process.env;
   const wanted = requestedAgents(options.agent);
@@ -270,7 +281,9 @@ export async function planAgentSources(options: {
             (adapter) =>
               !detected.includes(adapter) &&
               rootsFor(adapter, dirs, env).some(
-                (root) => options.store?.knowsRoot(adapter.id, rootIdOf(root)) === true,
+                (root) =>
+                  !isUnderPrefix(root, options.excludedRoots) &&
+                  options.store?.knowsRoot(adapter.id, rootIdOf(root)) === true,
               ),
           );
     const planned: PlannedAgent[] = [...detected, ...remembered].map((adapter) => ({
@@ -338,6 +351,15 @@ export interface AgentLoadOptions {
    * dropped when a directory or a log is removed.
    */
   store?: UsageStore | undefined;
+  /**
+   * Roots that must never be written to the store, as absolute path prefixes.
+   *
+   * Read like any other root — same numbers, same report — and kept like none:
+   * no lookup, no fingerprint, no rows. This is the per-root switch for data that
+   * is not the user's own, and the caller decides it; `--no-store` (no store at
+   * all) is the whole-run switch, and the two do not override each other.
+   */
+  excludedRoots?: readonly string[] | undefined;
   /** Clock for `lastSeen`; injectable so a test can pin it. */
   now?: (() => number) | undefined;
 }
@@ -371,6 +393,7 @@ export async function loadPlannedAgents(
   const env = options.env ?? process.env;
   const enrich = options.enrich ?? true;
   const store = options.store;
+  const excludedRoots = options.excludedRoots;
   const now = options.now ?? Date.now;
   const datasets: UsageDataset[] = [];
   const warnings: Warning[] = [];
@@ -383,14 +406,18 @@ export async function loadPlannedAgents(
     let loaded = 0;
     for (const root of roots) {
       const rootId = rootIdOf(root);
+      // An excluded root is read as if this run had no store at all: nothing is
+      // looked up and nothing is written. `active` is that decision, made once,
+      // so no branch below can quietly reach a store it was told to leave alone.
+      const active = store !== undefined && !isUnderPrefix(root, excludedRoots) ? store : undefined;
       try {
-        const files = store === undefined ? undefined : await adapter.listSources(root);
+        const files = active === undefined ? undefined : await adapter.listSources(root);
         const fingerprint = files === undefined ? undefined : await fingerprintOf(files);
-        const stored = store?.fingerprintOf(adapter.id, rootId);
+        const stored = active?.fingerprintOf(adapter.id, rootId);
         if (stored !== undefined && fingerprint !== undefined && fingerprintsEqual(stored, fingerprint)) {
           // The files still hold what they held: the numbers are the stored ones,
           // and nothing is parsed again.
-          const read = store?.readRoot(adapter.id, rootId);
+          const read = active?.readRoot(adapter.id, rootId);
           if (read !== undefined) {
             datasets.push(markStaleSessions(read.dataset, read.staleSessionIds));
             if (read.staleSessionIds.length > 0) {
@@ -407,7 +434,7 @@ export async function loadPlannedAgents(
           }
         }
         if (!(await adapter.hasData(root))) {
-          const read = store?.readRoot(adapter.id, rootId);
+          const read = active?.readRoot(adapter.id, rootId);
           if (read !== undefined) {
             // Still named, but holding nothing now: the directory may be gone, or
             // every log in it. Either way the store has the history, so it comes
@@ -422,16 +449,16 @@ export async function loadPlannedAgents(
         }
         const dataset = await adapter.load({ home: root, env, enrich });
         loaded += 1;
-        if (store === undefined || fingerprint === undefined) {
+        if (active === undefined || fingerprint === undefined) {
           datasets.push(dataset);
           continue;
         }
         try {
-          store.writeRoot({ agent: adapter.id, rootId, root, now: now(), dataset, fingerprint });
+          active.writeRoot({ agent: adapter.id, rootId, root, now: now(), dataset, fingerprint });
         } catch (error) {
           // A store that cannot be written costs the next run its speed, not
           // this run its numbers.
-          warnings.push(new UserError('storeWriteFailed', { path: store.path, reason: (error as Error).message }));
+          warnings.push(new UserError('storeWriteFailed', { path: active.path, reason: (error as Error).message }));
           datasets.push(dataset);
           continue;
         }
@@ -439,7 +466,7 @@ export async function loadPlannedAgents(
         // stayed keeps its sessions in the store, and this run has to report them
         // too — otherwise the history would only come back on the *next* run, and
         // the first one would look like usage vanished.
-        const after = store.readRoot(adapter.id, rootId);
+        const after = active.readRoot(adapter.id, rootId);
         if (after === undefined) {
           datasets.push(dataset);
           continue;

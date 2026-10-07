@@ -1467,3 +1467,329 @@ describe('events', () => {
     expect(column(dbPath, 'SELECT name FROM events ORDER BY name')).toEqual(['Bash', 'Read']);
   });
 });
+
+describe('what the store holds', () => {
+  /** A root with two projects, two working directories, and a session in none of them. */
+  function layeredRoot(root: string): UsageDataset {
+    const inApp = session({
+      id: 's-app',
+      agent: 'dsh',
+      title: 'app work',
+      cwd: join(root, 'app'),
+      createdAt: 1_700_000_000_000,
+      sourceFile: join(root, 'logs', 'a.jsonl'),
+      records: [record({ id: 'r-app', time: 1_700_000_100_000, events: [{ kind: 'tool_call', ordinal: 0, name: 'Read' }] })],
+    });
+    const inAppToo = session({
+      id: 's-app-2',
+      agent: 'dsh',
+      title: 'more app work',
+      cwd: join(root, 'app'),
+      createdAt: 1_700_000_200_000,
+      records: [record({ id: 'r-app-2', time: 1_700_000_300_000 })],
+    });
+    const inDocs = session({
+      id: 's-docs',
+      agent: 'dsh',
+      title: 'docs',
+      cwd: join(root, 'docs'),
+      createdAt: 1_700_000_400_000,
+      records: [record({ id: 'r-docs', time: 1_700_000_500_000, events: [
+        { kind: 'tool_call', ordinal: 0, name: 'Bash' },
+        { kind: 'tool_call', ordinal: 1, name: 'Bash' },
+      ] })],
+    });
+    const homeless = session({ id: 's-none', agent: 'dsh', title: 'no cwd', cwd: null, records: [record({ id: 'r-none', time: 1_700_000_600_000 })] });
+    return dataset(
+      [
+        project({ id: 'p-app', name: 'The App', sessions: [inApp, inAppToo] }),
+        project({ id: 'p-docs', name: 'The Docs', sessions: [inDocs] }),
+      ],
+      {
+        agent: 'dsh',
+        agents: ['dsh'],
+        source: root,
+        // `s-none` is in the flat list and in no project: the overview still has to
+        // account for its rows.
+        sessions: [inApp, inAppToo, inDocs, homeless],
+        stats: { filesRead: [], sessions: 4, records: 4 },
+      },
+    );
+  }
+
+  it('describes agents, roots, projects, cwds and sessions with their totals', async () => {
+    const store = await emptyStore();
+    const root = join(dir, 'home');
+    store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 1, dataset: layeredRoot(root), fingerprint: [] });
+    store.writeRoot({
+      agent: 'codex',
+      rootId: 'r-2',
+      root: join(dir, 'codex'),
+      now: 2,
+      dataset: eventlessDataset(join(dir, 'codex'), 's-codex'),
+      fingerprint: [],
+    });
+
+    const [codex, dsh] = store.storeOverview();
+    expect(codex?.kind).toBe('agent');
+    expect(codex?.id).toBe('codex');
+    expect(codex?.sessions).toBe(1);
+    expect(dsh?.id).toBe('dsh');
+    expect(dsh?.sessions).toBe(4);
+    expect(dsh?.records).toBe(4);
+    expect(dsh?.events).toBe(3);
+    expect(dsh?.lastActivity).toBe(1_700_000_600_000);
+
+    const [rootNode] = dsh?.children ?? [];
+    expect(rootNode?.kind).toBe('root');
+    expect(rootNode?.id).toBe(root);
+    expect(rootNode?.label).toBe(root);
+    const byProject = new Map((rootNode?.children ?? []).map((node) => [node.id, node]));
+    expect([...byProject.keys()].sort()).toEqual(['', 'p-app', 'p-docs']);
+    expect(byProject.get('p-app')?.label).toBe('The App');
+    expect(byProject.get('p-app')?.sessions).toBe(2);
+    expect(byProject.get('p-app')?.events).toBe(1);
+    // The session no project lists is still accounted for, under the empty id.
+    expect(byProject.get('')?.sessions).toBe(1);
+
+    const app = byProject.get('p-app');
+    const byCwd = new Map((app?.children ?? []).map((node) => [node.id, node]));
+    expect([...byCwd.keys()]).toEqual([join(root, 'app')]);
+    const [appSession] = (byCwd.get(join(root, 'app'))?.children ?? []).sort((left, right) => left.id.localeCompare(right.id));
+    expect(appSession?.kind).toBe('session');
+    expect(appSession?.id).toBe('s-app');
+    expect(appSession?.label).toBe('app work');
+    expect(appSession?.sessions).toBe(1);
+    expect(appSession?.records).toBe(1);
+    expect(appSession?.events).toBe(1);
+    expect(appSession?.lastActivity).toBe(1_700_000_100_000);
+    expect(appSession?.children).toEqual([]);
+
+    const docs = byProject.get('p-docs');
+    expect(docs?.children[0]?.id).toBe(join(root, 'docs'));
+    expect(docs?.children[0]?.children[0]?.events).toBe(2);
+    // A session without a working directory is grouped under the empty id too.
+    expect(byProject.get('')?.children[0]?.id).toBe('');
+  });
+
+  it('shows every reader version a node holds, including "nobody said"', async () => {
+    const root = join(dir, 'home');
+    const old = await openStore(dbPath, '0.1.0');
+    old.store.writeRoot({ agent: 'dsh', rootId: 'r-old', root, now: 1, dataset: eventlessDataset(root, 's-old'), fingerprint: [] });
+    old.store.close();
+
+    const store = (await openStore(dbPath, '0.2.0')).store;
+    store.writeRoot({ agent: 'dsh', rootId: 'r-new', root: join(dir, 'new'), now: 2, dataset: eventlessDataset(join(dir, 'new'), 's-new'), fingerprint: [] });
+    store.writeRoot({ agent: 'dsh', rootId: 'r-silent', root: join(dir, 'silent'), now: 3, dataset: eventlessDataset(join(dir, 'silent'), 's-silent'), fingerprint: [] });
+    store.close();
+    // A root from before the column existed: nothing says who wrote it.
+    const raw = new DatabaseSync(dbPath);
+    raw.prepare('UPDATE roots SET reader_version = NULL WHERE root_id = ?').run('r-silent');
+    raw.close();
+
+    const reading = (await openStore(dbPath, '0.2.0')).store;
+    const [agent] = reading.storeOverview();
+    // One node, three answers: rows written by another build, by this one, and by
+    // a build that never said.
+    expect(agent?.readerVersions).toEqual([null, '0.1.0', '0.2.0']);
+    const roots = new Map((agent?.children ?? []).map((node) => [node.id, node]));
+    expect(roots.get(root)?.readerVersions).toEqual(['0.1.0']);
+    expect(roots.get(join(dir, 'new'))?.readerVersions).toEqual(['0.2.0']);
+    expect(roots.get(join(dir, 'silent'))?.readerVersions).toEqual([null]);
+    // And it is visible at every level below, because that is where a reader looks.
+    expect(roots.get(join(dir, 'new'))?.children[0]?.readerVersions).toEqual(['0.2.0']);
+  });
+
+  it('reports the file, the schema and the tool that wrote it', async () => {
+    const store = (await openStore(dbPath, '1.2.3')).store;
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root: join(dir, 'home'),
+      now: 1,
+      dataset: eventlessDataset(join(dir, 'home'), 's-1'),
+      fingerprint: [],
+    });
+    const stats = store.stats();
+    expect(stats.path).toBe(dbPath);
+    expect(stats.schemaVersion).toBe(STORE_SCHEMA_VERSION);
+    expect(stats.toolVersion).toBe('1.2.3');
+    expect(stats.bytes).toBeGreaterThan(0);
+  });
+
+  it('says a store that lives in memory has no bytes on disk', async () => {
+    const { store } = await openStore(dir);
+    expect(store.stats().bytes).toBe(0);
+    expect(store.stats().path).toBe(dir);
+  });
+});
+
+describe('forgetting', () => {
+  /** Three roots: two for one agent, one for another, each with sessions and events. */
+  async function stocked(): Promise<UsageStore> {
+    const store = await emptyStore();
+    const parent = join(dir, 'datas');
+    for (const [agent, rootId, name, cwd] of [
+      ['dsh', 'r-a1', 'mine', join(parent, 'mine')],
+      ['dsh', 'r-a2', 'borrowed', join(parent, 'borrowed')],
+      ['codex', 'r-b1', 'theirs', join(parent, 'theirs')],
+    ] as const) {
+      const root = join(parent, name);
+      const worker = session({
+        id: `s-${name}`,
+        agent,
+        cwd,
+        sourceFile: join(root, 'log.jsonl'),
+        records: [record({ id: `r-${name}`, time: 10, events: [{ kind: 'tool_call', ordinal: 0, name: 'Read' }] })],
+      });
+      store.writeRoot({
+        agent,
+        rootId,
+        root,
+        now: 1,
+        dataset: dataset([project({ id: `p-${name}`, name, sessions: [worker] })], { agent, agents: [agent], source: root }),
+        fingerprint: [fingerprintFor(root, 'log.jsonl')],
+      });
+    }
+    return store;
+  }
+
+  it('forgets one root by exact path, leaving its neighbours alone', async () => {
+    const store = await stocked();
+    const parent = join(dir, 'datas');
+    const result = store.forget({ root: join(parent, 'borrowed') });
+    expect(result.deleted).toEqual({ roots: 1, files: 1, sessions: 1, records: 1, events: 1 });
+    expect(result.total).toBe(5);
+    expect(result.roots).toEqual([
+      { agent: 'dsh', rootId: 'r-a2', root: join(parent, 'borrowed'), rows: 5, reset: false },
+    ]);
+    expect(store.rootSummaries().map((entry) => entry.rootId).sort()).toEqual(['r-a1', 'r-b1']);
+    // The other agent's root with the same kind of name is untouched.
+    expect(store.readRoot('codex', 'r-b1')?.dataset.sessions).toHaveLength(1);
+  });
+
+  it('forgets every root under a path prefix, by whole path segment', async () => {
+    const store = await stocked();
+    const parent = join(dir, 'datas');
+    // Nothing matches: `datas-other` is not inside `datas`.
+    expect(store.forget({ rootPrefix: `${parent}-other` }).total).toBe(0);
+    const result = store.forget({ rootPrefix: parent });
+    expect(result.deleted.roots).toBe(3);
+    // By agent, then by root: the order the store lists roots in.
+    expect(result.roots.map((entry) => entry.rootId)).toEqual(['r-b1', 'r-a1', 'r-a2']);
+    expect(store.rootSummaries()).toEqual([]);
+    expect(store.knowsRoot('dsh', 'r-a1')).toBe(false);
+  });
+
+  it('forgets one agent, leaving the other agent and its roots', async () => {
+    const store = await stocked();
+    const result = store.forget({ agent: 'dsh' });
+    expect(result.deleted.roots).toBe(2);
+    expect(result.roots.map((entry) => entry.agent)).toEqual(['dsh', 'dsh']);
+    expect(store.rootSummaries().map((entry) => entry.rootId)).toEqual(['r-b1']);
+  });
+
+  it('forgets everything, and gives the space back when asked', async () => {
+    const store = await stocked();
+    const before = store.stats().bytes;
+    expect(store.forget({ all: true }).total).toBe(15);
+    expect(store.rootSummaries()).toEqual([]);
+    expect(column(dbPath, 'SELECT count(*) AS n FROM events')).toEqual([0]);
+    store.vacuum();
+    // The rows are gone either way; the vacuum is what returns the pages.
+    expect(store.stats().bytes).toBeLessThanOrEqual(before);
+    expect(store.stats().schemaVersion).toBe(STORE_SCHEMA_VERSION);
+  });
+
+  it('forgets one session and clears what the store remembered about its root', async () => {
+    const store = await stocked();
+    const parent = join(dir, 'datas');
+    // The root is reusable before the partial forget...
+    expect(store.fingerprintOf('dsh', 'r-a1')).toHaveLength(1);
+
+    const result = store.forget({ session: 's-mine' });
+    expect(result.deleted).toEqual({ roots: 0, files: 1, sessions: 1, records: 1, events: 1 });
+    expect(result.roots).toEqual([
+      { agent: 'dsh', rootId: 'r-a1', root: join(parent, 'mine'), rows: 4, reset: true },
+    ]);
+    // ...and not after it: the fingerprint said the files had not changed while
+    // the dataset beside it was missing a session, so both were dropped. The next
+    // scan reads the whole root again.
+    expect(store.fingerprintOf('dsh', 'r-a1')).toBeUndefined();
+    expect(column(dbPath, 'SELECT count(*) AS n FROM files WHERE root_id = ?', 'r-a1')).toEqual([0]);
+    expect(column(dbPath, 'SELECT reader_version FROM roots WHERE root_id = ?', 'r-a1')).toEqual([null]);
+    expect(store.knowsRoot('dsh', 'r-a1')).toBe(true);
+    // The root is still there — a partial forget is not a deletion of the root —
+    // and so are its other sessions.
+    expect(store.readRoot('dsh', 'r-a1')?.dataset.sessions).toEqual([]);
+    expect(store.readRoot('dsh', 'r-a2')?.dataset.sessions).toHaveLength(1);
+
+    // And re-reading it is what puts it back together.
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-a1',
+      root: join(parent, 'mine'),
+      now: 9,
+      dataset: eventlessDataset(join(parent, 'mine'), 's-mine'),
+      fingerprint: [fingerprintFor(join(parent, 'mine'), 'log.jsonl')],
+    });
+    expect(store.fingerprintOf('dsh', 'r-a1')).toHaveLength(1);
+  });
+
+  it('forgets a project and a working directory, as intersections', async () => {
+    const store = await emptyStore();
+    const root = join(dir, 'home');
+    const app = session({ id: 's-app', agent: 'dsh', cwd: join(root, 'app'), records: [record({ id: 'r-1', time: 1 })] });
+    const docs = session({ id: 's-docs', agent: 'dsh', cwd: join(root, 'docs'), records: [record({ id: 'r-2', time: 2 })] });
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 1,
+      dataset: dataset([project({ id: 'p-app', sessions: [app] }), project({ id: 'p-docs', sessions: [docs] })], {
+        agent: 'dsh',
+        agents: ['dsh'],
+        source: root,
+      }),
+      fingerprint: [fingerprintFor(root, 'log.jsonl')],
+    });
+
+    const byProject = store.forget({ project: 'p-app' });
+    expect(byProject.deleted.sessions).toBe(1);
+    expect(byProject.roots[0]?.reset).toBe(true);
+    expect(store.readRoot('dsh', 'r-1')?.dataset.sessions.map((entry) => entry.id)).toEqual(['s-docs']);
+
+    // A directory and everything under it: the cwd of a session in a subdirectory.
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root,
+      now: 2,
+      dataset: dataset([
+        project({ id: 'p-app', sessions: [session({ id: 's-deep', agent: 'dsh', cwd: join(root, 'app', 'inner'), records: [record({ id: 'r-3', time: 3 })] })] }),
+        project({ id: 'p-docs', sessions: [docs] }),
+      ], { agent: 'dsh', agents: ['dsh'], source: root }),
+      fingerprint: [fingerprintFor(root, 'log.jsonl')],
+    });
+    const byCwd = store.forget({ cwd: join(root, 'app') });
+    expect(byCwd.deleted.sessions).toBe(1);
+    expect(store.readRoot('dsh', 'r-1')?.dataset.sessions.map((entry) => entry.id)).toEqual(['s-docs']);
+
+    // A selector that matches nothing changes nothing — not even a root's memory,
+    // which the deletions above had already dropped.
+    const memory = store.fingerprintOf('dsh', 'r-1');
+    expect(memory).toBeUndefined();
+    const nothing = store.forget({ cwd: join(root, 'nowhere') });
+    expect(nothing.total).toBe(0);
+    expect(nothing.roots).toEqual([]);
+    expect(store.fingerprintOf('dsh', 'r-1')).toBe(memory);
+  });
+
+  it('refuses a selector that names nothing, or one that contradicts itself', async () => {
+    const store = await stocked();
+    expect(() => store.forget({})).toThrow(/needs a selector/);
+    expect(() => store.forget({ all: true, agent: 'dsh' })).toThrow(/cannot combine/);
+    // Neither attempt deleted anything.
+    expect(store.rootSummaries()).toHaveLength(3);
+  });
+});

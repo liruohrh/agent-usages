@@ -13,13 +13,14 @@
  * synthetic, so nothing on this machine is read.
  */
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { planAgentSources } from '../../src/agents/sources.ts';
+import { claudecodeAgent } from '../../src/agents/claudecode/loader.ts';
+import { loadPlannedAgents, planAgentSources } from '../../src/agents/sources.ts';
 import { rootIdOf, UsageStore } from '../../src/store/index.ts';
 
 let home: string;
@@ -142,5 +143,73 @@ describe('planning with the usage store', () => {
     const planned = await planAgentSources({ env, store });
     expect(planned.planned.map((entry) => entry.adapter.id)).toEqual(['claudecode']);
     expect(planned.planned[0]?.roots).toEqual([configDir]);
+  });
+});
+
+describe('roots that never enter the store', () => {
+  /** A store in the temporary home, and the cleanup it needs. */
+  async function storeInHome(): Promise<UsageStore> {
+    return openStore(join(home, 'usage.db'), '0.2.0');
+  }
+
+  it('reads an excluded root and writes nothing about it', async () => {
+    await populate();
+    const env = environment();
+    const store = await storeInHome();
+    const planned = [{ adapter: claudecodeAgent, roots: [configDir] }];
+
+    const excluded = await loadPlannedAgents(planned, { env, store, excludedRoots: [configDir] });
+    // Read as usual: the numbers are the same as they would be without a store.
+    expect(excluded.datasets).toHaveLength(1);
+    expect(excluded.datasets[0]?.sessions).toHaveLength(1);
+    expect(store.rootSummaries()).toEqual([]);
+    expect(store.knowsRoot('claudecode', rootIdOf(configDir))).toBe(false);
+
+    // And it is not remembered either: a second run writes nothing again, where a
+    // stored root would have been remembered and named in a warning by now.
+    const again = await loadPlannedAgents(planned, { env, store, excludedRoots: [configDir] });
+    expect(again.datasets).toHaveLength(1);
+    expect(store.rootSummaries()).toEqual([]);
+  });
+
+  it('writes a root that is not excluded in the same run', async () => {
+    await populate();
+    const other = join(home, 'claude-other');
+    await mkdir(join(other, 'projects', '-tmp-demo'), { recursive: true });
+    await writeFile(
+      join(other, 'projects', '-tmp-demo', 'bbb.jsonl'),
+      await readFile(join(configDir, 'projects', '-tmp-demo', 'aaa.jsonl'), 'utf8'),
+    );
+    const env = environment();
+    const store = await storeInHome();
+    const planned = [{ adapter: claudecodeAgent, roots: [configDir, other] }];
+
+    const result = await loadPlannedAgents(planned, { env, store, excludedRoots: [configDir] });
+    expect(result.datasets).toHaveLength(2);
+    expect(store.rootSummaries().map((entry) => entry.root)).toEqual([other]);
+  });
+
+  it('does not remember an excluded root even when rows for it exist', async () => {
+    await populate();
+    const env = environment();
+    const store = await storeInHome();
+    const rootId = rootIdOf(configDir);
+    // Rows from before the directory was excluded — exactly what must not
+    // resurrect a root that is not supposed to be kept.
+    store.writeRoot({
+      agent: 'claudecode',
+      rootId,
+      root: configDir,
+      now: 1,
+      dataset: { agent: 'claudecode', agents: ['claudecode'], source: configDir, projects: [], sessions: [], stats: { filesRead: [], sessions: 0, records: 0 }, warnings: [] },
+      fingerprint: [],
+    });
+    await rm(configDir, { recursive: true, force: true });
+
+    const included = await planAgentSources({ env, store });
+    expect(included.planned.map((entry) => entry.adapter.id)).toContain('claudecode');
+
+    const excluded = await planAgentSources({ env, store, excludedRoots: [configDir] });
+    expect(excluded.planned.map((entry) => entry.adapter.id)).not.toContain('claudecode');
   });
 });

@@ -279,6 +279,35 @@ src/
   `detail` / `bytes` / `ok`）以 `records` 为父键，一个请求做了什么与它花了多少 token 存在一起，
   以后按工具、按项目、按时间聚合都是 SQL。
 
+#### 维护与调试：谁能进库，怎么把东西拿出来
+
+这一小节讲的是**排查与自用**时才会碰的三层开关，日常使用不需要它们。默认行为就是现状：什么都存。
+
+| 层 | 是什么 | 影响的是一次运行，还是永远 |
+| --- | --- | --- |
+| `--no-store` | 这次运行**不读也不写**库：只看机器现在的样子 | 这一次运行 |
+| `--store-exclude <路径>`（可重复） | 命中的根**照常读、照常算钱**，但**永不写库、也永不"被记住"**——库里不留行，以后也不会有它的墓碑冒出来。给"这些不是我的数据"用（借来的目录、别人的语料） | 每一条被它覆盖的路径 |
+| `store forget` | 把已经进库的行删掉（**缓存驱逐**，见下） | 已存在的行 |
+
+- `--store-exclude` 的匹配按**整段路径**：`/a/b` 覆盖 `/a/b` 与 `/a/b/c`，不覆盖 `/a/bc`——同一个匹配函数
+  （`src/store/prefix.ts` 的 `isUnderPrefix`）也是 `store forget --root-prefix` 用的，两处不能各写一套。
+  被排除的根连 `knowsRoot` 都不查：一个"必须什么痕迹都不留"的根，不能被上一次运行留下的行复活。
+- `store forget` 是**缓存驱逐，不是删除历史**：只要日志还在、也没被排除，下一次扫描就会**重新读进来**。
+  想让它永远不再进来，用 `--store-exclude`（或整次运行 `--no-store`）——那是规则，不是清理。
+- 选择器组合起来取交集：`{ agent, root, rootPrefix, cwd, project, session, all }`。两类语义不同，行为也不同：
+  - **命中整个根**（`root` / `rootPrefix` / `agent` / `all`）⇒ 删 `roots` 行，`files`/`sessions`/`records`/`events`
+    跟着走（删除按子表到父表的顺序显式执行，返回的行数是真正删掉的行数，也不依赖 `foreign_keys` 是否打开）。
+  - **只命中子集**（`cwd` / `project` / `session`）⇒ 删那些 session/record/event 行，**并且把所属根的缓存记忆一并作废**
+    （`files` 行删掉、`reader_version` 清空）。理由：只删一半而留着指纹，等于让库说"文件没变"而数据集已经缺了一块，
+    下一次扫描会把残缺内容当真相；作废之后下一次扫描必须重读整个根，回来的才是日志说的样子。
+- `store list` 看库里的东西：`rootSummaries()`（每个根：agent / 路径 / 最后扫描 / 谁读的 / sessions / records /
+  events）以及 `storeOverview()` 的五层树 `agent → root → project → cwd → session`，每层带计数、最后活动时间与
+  **readerVersions 集合**——一个节点里混了多个版本（或 `null`，即"写它的时候还没人报版本"）就是在说：它的数字
+  不全来自你现在跑的这份代码，尤其是 `events` 可能是 0。`stats()` 给出库路径、schema 版本、`meta.tool_version`
+  与文件字节数。
+- 删除全程在一个事务里；`vacuum()` 单独一步（`VACUUM` 要重写整个文件、需要第二份文件大小的空间，所以不塞进
+  `forget`），它才是把空间还给系统的那一步：不 vacuum 行也没了，只是页还占着。
+
 `web/` 是唯一的工作区包（Vite + React + Tailwind + ECharts），只依赖 `src/serve/types.ts`
 的 HTTP 契约，不 import 服务端代码；构建产物 `web/dist` 由 `serve` 静态托管。设计、API 与
 快照格式见 [本地 Web 分析平台](web.md)。
