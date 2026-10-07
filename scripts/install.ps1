@@ -1,7 +1,7 @@
 <#
 One-line install for Windows / PowerShell 5.1+:
 
-  irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps1 | iex
+  irm https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.ps1 | iex
 
 Three steps and nothing else, mirroring install.sh one for one: find a Node (>= 22.18;
 it says how to get one, it never installs one), download install.mjs, and run it with
@@ -10,12 +10,14 @@ it says how to get one, it never installs one), download install.mjs, and run it
 `--help` all reach install.mjs exactly as written, and PowerShell cannot mistake
 `-version` for one of its own parameters. Which also means this file is optional:
 
-  irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.mjs -OutFile install.mjs
+  irm https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.mjs -OutFile install.mjs
   node install.mjs --help
 
-`$env:AGENT_USAGES_BASE_URL` is the only configuration read here, and it is also
-install.mjs's own default for the release it fetches, so one variable moves both halves
-to a mirror (or to a local test server).
+Two different defaults, deliberately: **this script comes from `master`** (an installer
+fix ships as soon as it is pushed, no release needed), while the package it installs
+comes from the **latest release** (built, tested, carrying `dist/` and `web/dist/`).
+That second default lives in install.mjs. `$env:AGENT_USAGES_BASE_URL` overrides both
+halves at once, which is what a mirror or a local test server sets.
 
 Why every message here is ASCII: Windows PowerShell 5.1 decodes a .ps1 file with the
 machine's ANSI code page unless the file starts with a UTF-8 BOM, and a BOM in the text
@@ -29,7 +31,7 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
   throw 'install.ps1: PowerShell 5.1 or newer is required.'
 }
 
-$DefaultBase = 'https://github.com/liruohrh/agent-usages/releases/latest/download'
+$DefaultBase = 'https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts'
 $MinNode = 22018
 
 function Fail([string]$Message) {

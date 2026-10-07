@@ -23,7 +23,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -36,6 +36,13 @@ const installer = join(repo, 'scripts', 'install.mjs');
 const shellWrapper = join(repo, 'scripts', 'install.sh');
 const powerShellWrapper = join(repo, 'scripts', 'install.ps1');
 const releaseWorkflow = join(repo, '.github', 'workflows', 'release.yml');
+
+/** 两个故意不同的默认来源：脚本来自 master，包来自 latest release。 */
+const RAW_SCRIPTS = 'https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts';
+const LATEST_ASSETS = 'https://github.com/liruohrh/agent-usages/releases/latest/download';
+
+/** 文档里唯一允许出现带版本号 release URL 的标记：那一行/那一段必须写明是"固定版本"。 */
+const FIXED_VERSION_LABEL = '固定版本';
 
 const scratch = mkdtempSync(join(tmpdir(), 'usages-install-test-'));
 
@@ -101,6 +108,72 @@ async function serveMirror(files: Record<string, string>) {
   };
 }
 
+/**
+ * A fake `curl` that records the URL it was asked for and writes a stub installer.
+ *
+ * This is how the wrapper's *default* source gets checked without a network: replacing
+ * `curl` on PATH is enough to see which URL the wrapper chose.
+ */
+const FAKE_CURL = `#!/bin/sh
+out=
+url=
+while [ $# -gt 0 ]; do
+  case $1 in
+    -o) shift; out=$1 ;;
+    -*) : ;;
+    *) url=$1 ;;
+  esac
+  shift
+done
+printf '%s\\n' "$url" > "$FAKE_CURL_URL"
+cp "$FAKE_CURL_BODY" "$out"
+`;
+
+/** Fake-curl + stub-installer env: PATH first, then the files the stub reads. */
+function fakeCurlEnv(): { env: NodeJS.ProcessEnv; requestedUrl: () => string } {
+  const bin = join(scratch, 'fake-bin');
+  const urlFile = join(scratch, 'curl-url.txt');
+  const body = join(scratch, 'curl-body.mjs');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'curl'), FAKE_CURL, { mode: 0o755 });
+  writeFileSync(urlFile, '');
+  writeFileSync(body, PASSTHROUGH_STUB);
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: `${bin}:${process.env['PATH'] ?? ''}`,
+    FAKE_CURL_URL: urlFile,
+    FAKE_CURL_BODY: body,
+  };
+  delete env['AGENT_USAGES_BASE_URL'];
+  return { env, requestedUrl: () => readFileSync(urlFile, 'utf8').trim() };
+}
+
+/**
+ * 文档里带版本号的 release URL，只有两种位置是允许的：那一行自己写了"固定版本"，
+ * 或者它在同一个代码块里、块内前面出现过"固定版本"。返回不合规的行。
+ *
+ * 规则的含义：**默认安装路径不许带版本号**（raw master 的脚本 + latest 的固定名资产），
+ * 否则发一次版就得改文档；带版本号的写法只作为"钉住某一版"的手动备选存在。
+ */
+function unlabeledVersionedUrls(text: string): string[] {
+  const violations: string[] = [];
+  let inFence = false;
+  let labeled = false;
+  for (const line of text.split('\n')) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      labeled = false;
+      continue;
+    }
+    if (!/releases\/download\/v/.test(line)) {
+      if (inFence && line.includes(FIXED_VERSION_LABEL)) labeled = true;
+      continue;
+    }
+    if (!line.includes(FIXED_VERSION_LABEL) && !(inFence && labeled)) violations.push(line.trim());
+  }
+  return violations;
+}
+
 /** A ustar header is enough for the installer's reader, which is all this feeds. */
 function tarHeader(name: string, size: number): Buffer {
   const header = Buffer.alloc(512);
@@ -155,6 +228,13 @@ describe('install.mjs', () => {
   it('takes its default base from AGENT_USAGES_BASE_URL', () => {
     const result = install(['--dry-run'], { AGENT_USAGES_BASE_URL: 'https://mirror.example.com/usages' });
     expect(result.stdout).toContain('https://mirror.example.com/usages/agent-usages.tgz');
+  });
+
+  it('defaults the package to the latest release', () => {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    delete env['AGENT_USAGES_BASE_URL'];
+    const result = install(['--dry-run'], env);
+    expect(result.stdout).toContain(`${LATEST_ASSETS}/agent-usages.tgz`);
   });
 
   it('rejects an unknown option with a usage exit code', () => {
@@ -260,6 +340,12 @@ describe('install.sh', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('asks raw master for install.mjs by default', async () => {
+    const { env, requestedUrl } = fakeCurlEnv();
+    await runAsync('sh', [shellWrapper], env);
+    expect(requestedUrl()).toBe(`${RAW_SCRIPTS}/install.mjs`);
+  });
+
   it.skipIf(process.platform === 'win32')('reports a Node that is too old', () => {
     const old = join(scratch, 'old-node');
     writeFileSync(old, '#!/bin/sh\nif [ "$1" = "-p" ]; then echo 22.17.0; exit 0; fi\nexit 0\n', { mode: 0o755 });
@@ -293,40 +379,58 @@ describe('install.ps1', () => {
     expect(source).toContain('22.18');
     expect(source).toContain('install.mjs');
   });
+
+  it('defaults to the same raw master copy of install.mjs', () => {
+    expect(readFileSync(powerShellWrapper, 'utf8')).toContain(RAW_SCRIPTS);
+  });
 });
 
-describe('the install docs carry no version', () => {
-  it('points at releases/latest/download instead of a versioned URL', () => {
+describe('the install docs keep the default path version-free', () => {
+  it('points the one-liners at raw master, where the scripts live', () => {
+    const readme = readFileSync(join(repo, 'README.md'), 'utf8');
+    expect(readme).toContain(`${RAW_SCRIPTS}/install.sh`);
+    expect(readme).toContain(`${RAW_SCRIPTS}/install.ps1`);
+    expect(readFileSync(join(repo, 'docs', 'web.md'), 'utf8')).toContain(`${RAW_SCRIPTS}/install.sh`);
+    // 脚本不再是 release 资产：文档里不该再有指向 release 的 install.sh/install.ps1。
     for (const file of markdownFiles()) {
-      expect(readFileSync(join(repo, file), 'utf8'), file).not.toMatch(/releases\/download\/v/);
+      expect(readFileSync(join(repo, file), 'utf8'), file).not.toMatch(
+        /releases\/(latest\/download|download\/v[^\s`)]*)\/install\.(sh|ps1|mjs)/,
+      );
     }
   });
 
-  it('shows the two one-liners', () => {
-    const readme = readFileSync(join(repo, 'README.md'), 'utf8');
-    expect(readme).toContain('releases/latest/download/install.sh');
-    expect(readme).toContain('releases/latest/download/install.ps1');
-    expect(readFileSync(join(repo, 'docs', 'web.md'), 'utf8')).toContain('releases/latest/download/install.sh');
+  it('never puts a version into a default-path URL', () => {
+    // raw master 与 latest/download 是两种默认路径，两者都必须与版本无关。
+    for (const file of markdownFiles()) {
+      const text = readFileSync(join(repo, file), 'utf8');
+      for (const url of text.matchAll(/https?:\/\/[^\s`)>|]+/g)) {
+        if (!/(raw\.githubusercontent\.com|releases\/latest\/download)/.test(url[0])) continue;
+        expect(url[0], file).not.toMatch(/v\d+\.\d+\.\d+/);
+      }
+    }
+  });
+
+  it('allows a versioned release URL only where the text says it is a pinned version', () => {
+    for (const file of markdownFiles()) {
+      expect(unlabeledVersionedUrls(readFileSync(join(repo, file), 'utf8')), file).toEqual([]);
+    }
+    // 规则不是靠"文档里正好没有"成立的：固定版本那段仍在，且带版本号。
+    expect(readFileSync(join(repo, 'README.md'), 'utf8')).toMatch(/releases\/download\/v\d/);
   });
 
   it('documents running install.mjs without a shell wrapper', () => {
     const readme = readFileSync(join(repo, 'README.md'), 'utf8');
+    expect(readme).toContain(`${RAW_SCRIPTS}/install.mjs`);
     expect(readme).toContain('node install.mjs --help');
     expect(readme).toContain('AGENT_USAGES_BASE_URL');
   });
 
-  it('uploads the fixed names the docs point at', () => {
-    // 资产清单（含固定名）在上传前拼出来，最后一次性 `gh release upload`。
+  it('releases the tarballs only, never the scripts', () => {
     const workflow = readFileSync(releaseWorkflow, 'utf8');
-    for (const asset of [
-      'release/agent-usages.tgz',
-      'scripts/install.sh',
-      'scripts/install.ps1',
-      'scripts/install.mjs',
-    ]) {
-      expect(workflow, asset).toContain(asset);
-    }
-    expect(workflow).toContain('gh release upload "$TAG"');
+    const upload = workflow.slice(workflow.indexOf('gh release upload'));
+    expect(upload).toContain('release/agent-usages-*.tgz');
+    expect(upload).toContain('release/agent-usages.tgz');
+    expect(upload).not.toMatch(/scripts\/install\.(sh|ps1|mjs)/);
     // 固定名那份必须是版本名那份的字节副本，不是第二次构建。
     expect(workflow).toContain('cmp ');
   });

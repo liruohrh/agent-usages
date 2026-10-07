@@ -1,14 +1,13 @@
 #!/bin/sh
 # One-line install: find a Node, fetch `install.mjs`, run it with your arguments.
 #
+#   curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.sh | sh
+#
 # This is the part that has to work *before* anything is installed, so it stays POSIX
 # sh with no dependency beyond curl (wget as a fallback) and no bashisms: the
-# documented form pipes this file into a shell
-#
-#   curl -fsSL …/releases/latest/download/install.sh | sh
-#
-# where `$0` is just "sh" and stdin is the script itself — nothing may be read from
-# stdin, and the file cannot be located on disk.
+# documented form pipes this file into a shell, where `$0` is just "sh" and stdin is
+# the script itself — nothing may be read from stdin, and the file cannot be located
+# on disk.
 #
 # Exactly three steps, and no argument handling at all: find Node (≥ 22.18, and say how
 # to get one instead of installing it), download install.mjs, and run it with **your
@@ -16,15 +15,17 @@
 # every option belongs to install.mjs and `"$@"` is enough to hand them over. Which
 # also means this file is optional:
 #
-#   curl -fsSL …/releases/latest/download/install.mjs -o install.mjs
+#   curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.mjs -o install.mjs
 #   node install.mjs --help
 #
-# `AGENT_USAGES_BASE_URL` is the only configuration read here, and it is also
-# install.mjs's own default for the release it fetches — so one variable moves both
-# halves to a mirror (or to a local test server).
+# Two different defaults, deliberately: **this script comes from `master`** (an
+# installer fix ships as soon as it is pushed, no release needed), while the package it
+# installs comes from the **latest release** (built, tested, carrying `dist/` and
+# `web/dist/`). That second default lives in install.mjs. `AGENT_USAGES_BASE_URL`
+# overrides both halves at once, which is what a mirror or a local test server sets.
 set -eu
 
-BASE=${AGENT_USAGES_BASE_URL:-https://github.com/liruohrh/agent-usages/releases/latest/download}
+BASE=${AGENT_USAGES_BASE_URL:-https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts}
 MIN_NODE=22.18
 
 node_error() {

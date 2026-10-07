@@ -9,9 +9,11 @@
 # The asset is the same `npm pack` output the npm registry path would publish, so
 # when the package name finally exists, `publish.yml` ships the identical bytes.
 #
-# Besides the versioned tarball, every release re-uploads the *fixed* asset names the
-# docs point at (`install.sh`, `install.ps1`, `install.mjs`, `agent-usages.tgz`), which
-# is why `releases/latest/download/…` never has to be edited when a version ships.
+# Besides the versioned tarball, every release also uploads the *fixed* name
+# `agent-usages.tgz` (a byte copy), which is why the package URLs in the docs never have
+# to be edited when a version ships. The install *scripts* are not release assets: the
+# wrappers are served from raw `master` and `install.mjs` from the same place, so an
+# installer fix ships with a push instead of a tag.
 name: release
 
 on:
@@ -59,13 +61,14 @@ jobs:
       # nothing else occupies — and uses it: version, price table, config check, the
       # dashboard shell and a client-side route. Nothing is uploaded before this passes.
       - run: node scripts/verify-tarball.mjs release/agent-usages-*.tgz
-      - name: 准备固定名字的安装资产
+      - name: 准备固定名字的 tarball
         run: |
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
-          # The docs point at `releases/latest/download/install.sh` (and friends), so
-          # every release has to carry the *same* asset names. `agent-usages.tgz` is a
-          # byte copy of the versioned tarball, not a second build: `cmp` proves it.
+          # The package URLs in the docs point at `releases/latest/download/agent-usages.tgz`,
+          # so every release has to carry that *same* asset name. It is a byte copy of the
+          # versioned tarball, not a second build: `cmp` proves it. (The install scripts are
+          # deliberately not here — they are served from raw `master`, see the header.)
           cp "release/agent-usages-$version.tgz" release/agent-usages.tgz
           cmp "release/agent-usages-$version.tgz" release/agent-usages.tgz
           ls -l release
@@ -85,12 +88,7 @@ jobs:
           else
             gh release create "$TAG" --title "$TAG" --verify-tag --generate-notes
           fi
-          # 版本名 + 固定名。固定名（agent-usages.tgz 与三个安装脚本）让文档里的
-          # `/releases/latest/download/install.sh` 永远有效，发版不必改文档。
-          # 老 tag 的检出里可能还没有这三个脚本（它们随这次改动才进来），所以只挂存在的。
-          assets=()
-          for asset in release/agent-usages-*.tgz release/agent-usages.tgz \
-            scripts/install.sh scripts/install.ps1 scripts/install.mjs; do
-            if [ -e "$asset" ]; then assets+=("$asset"); fi
-          done
-          gh release upload "$TAG" "${assets[@]}" --clobber
+          # 两个资产：版本名（钉住某一版）与固定名（让文档里的
+          # `/releases/latest/download/agent-usages.tgz` 永远有效，发版不必改文档）。
+          # 安装脚本不在这里——它们由 raw `master` 直接提供。
+          gh release upload "$TAG" release/agent-usages-*.tgz release/agent-usages.tgz --clobber

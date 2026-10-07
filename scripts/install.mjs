@@ -16,11 +16,14 @@
  * gzip, the tarball really is `@agent/usages` at the requested version, and the
  * binary that landed on PATH reports that same version.
  *
- * `--base` defaults to `releases/latest/download`, whose fixed asset names
- * (`agent-usages.tgz`, `install.mjs`) are what let the docs stay version-free:
- * every release re-uploads the same names, so publishing never edits a URL.
- * `--tarball` exists for offline installs and for CI, which already has the file
- * and cannot (and should not) reach the release.
+ * `--base` defaults to `releases/latest/download`, whose fixed asset name
+ * (`agent-usages.tgz`) is what lets the docs stay version-free: every release re-uploads
+ * the same name, so publishing never edits a URL. Note the two different defaults — the
+ * wrappers fetch *this file* from raw `master` while the package comes from the latest
+ * release: an installer fix ships with a push, a package ships with a tag, and this
+ * script therefore depends on neither. `AGENT_USAGES_BASE_URL` moves both halves at once.
+ * `--tarball` exists for offline installs and for CI, which already has the file and
+ * cannot (and should not) reach the release.
  */
 
 import { spawnSync } from 'node:child_process';

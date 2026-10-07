@@ -30,7 +30,7 @@
 里已经带了编译好的 CLI 与构建好的前端）：
 
 ```bash
-curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.sh | sh
 
 # 想要常驻的分析平台（项目树 + 榜单 + 图表），一条命令起来
 agent-usages ui
@@ -39,18 +39,19 @@ agent-usages ui
 Windows（PowerShell 5.1+）：
 
 ```powershell
-irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps1 | iex
+irm https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.ps1 | iex
 agent-usages ui
 ```
 
-这两条 URL **不带版本号**，永远指向最新一版：发版只换资产内容，不用改文档。要装某一版就给安装器
-加 `--version`（管道里要给 `sh` 传参，所以用 `sh -s --`）：
+这两条 URL **不带版本号**，而且**脚本来自 `master`、包来自 latest release**：改安装器推一下
+master 就生效，不用发版，所以文档里的地址永远不用改。要装某一版就给安装器加 `--version`
+（管道里要给 `sh` 传参，所以用 `sh -s --`）：
 
 ```bash
-curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh -s -- --version 0.0.3
+curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.sh | sh -s -- --version 0.0.3
 ```
 
-不装也能跑（同一个固定名资产）：
+不装也能跑（包用固定名资产，同样不带版本号）：
 
 ```bash
 npx --yes --package https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz agent-usages usage --range month --open
@@ -59,14 +60,14 @@ npx --yes --package https://github.com/liruohrh/agent-usages/releases/latest/dow
 **手动方式**（不用脚本时）：
 
 ```bash
-# 不用 shell 脚本也行：install.mjs 就是完整的安装器，下载下来交给 node 跑
-curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.mjs -o install.mjs
+# 不用 shell 脚本也行：install.mjs 就是完整的安装器，直接从 raw 下载交给 node 跑
+curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.mjs -o install.mjs
 node install.mjs --help     # 全部选项都在这里：--base / --version / --tarball / --prefix / --dry-run
 node install.mjs            # 装最新一版
 node install.mjs --tarball ./release/agent-usages-0.0.3.tgz --prefix /tmp/prefix
 
-# 固定版本：把 <tag> 换成 v0.0.3 这样的 tag（资产名里的版本不带 v）
-npm i -g https://github.com/liruohrh/agent-usages/releases/download/<tag>/agent-usages-<版本>.tgz
+# 固定版本安装：release 资产带版本号（tag 形如 v0.0.3，资产名里的版本不带 v）
+npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.3/agent-usages-0.0.3.tgz
 
 # 从 GitHub 直装（跟 master 或某个 commit）：会在你的机器上装前端依赖并构建，
 # 冷缓存实测 808 秒（13 分半）、热缓存 24 秒（2026-09-26，本机）
@@ -75,10 +76,12 @@ npx github:liruohrh/agent-usages ui
 ```
 
 **镜像 / 内网**：设 `AGENT_USAGES_BASE_URL` 就行——两个 wrapper 用它下载 `install.mjs`，
-`install.mjs` 又拿同一个值当 `--base` 的默认值，所以一个变量同时换掉两半：
+`install.mjs` 又拿同一个值当 `--base` 的默认值，所以一个变量同时换掉两半（默认值不同：脚本来自
+raw master，包来自 latest release）：
 
 ```bash
-curl -fsSL https://mirror.example.com/usages/install.sh | AGENT_USAGES_BASE_URL=https://mirror.example.com/usages sh
+curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.sh \
+  | AGENT_USAGES_BASE_URL=https://mirror.example.com/usages sh
 node install.mjs --base https://mirror.example.com/usages   # 只给 install.mjs 也可以
 ```
 
@@ -394,33 +397,40 @@ feature-x (~/ws/apps/demo-app/feature-x)  ← ~/ws/apps/demo-app 的 worktree
 一行脚本是推荐给使用者的路：
 
 ```bash
-curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh   # Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.sh | sh   # Linux / macOS
 ```
 ```powershell
-irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps1 | iex        # Windows
+irm https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.ps1 | iex        # Windows
 ```
 
 它只做三件事：找 Node（≥ 22.18，没有就告诉你怎么装，**不代装**）→ 下载 `install.mjs` → 用它执行
 并把 argv 原样转发、退出码照传。选项全在 `install.mjs` 里，所以帮助也只有一份：
 `node install.mjs --help`。整条路径不构建：tarball 自带 `dist/` 与 `web/dist`，实测 12 秒。
 
+**脚本来自 `master`，包来自 latest release**——两个默认来源不同，这是故意的：安装脚本走
+`raw.githubusercontent.com/…/master/scripts/`，所以改安装器推一下 master 就生效、不用发版、也
+不必作为 release 资产；装的那个 tarball 仍是 `releases/latest/download/agent-usages.tgz`
+（构建好、测过、自带 `dist/` 与 `web/dist/`）。
+
 几种装法，按"想省多少事"排序：
 
 | 方式 | 命令 | 需要什么 |
 | --- | --- | --- |
-| **一行脚本（推荐）** | `curl … install.sh \| sh`；Windows `irm … install.ps1 \| iex` | Node ≥ 22.18；用户机上**不构建**，实测 12 秒 |
+| **一行脚本（推荐）** | `curl … raw…/scripts/install.sh \| sh`；Windows `irm … raw…/scripts/install.ps1 \| iex` | Node ≥ 22.18；用户机上**不构建**，实测 12 秒 |
 | 固定名资产直装 | `npm i -g https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz` | 同上；URL 不带版本号 |
-| 固定版本 | `npm i -g https://github.com/liruohrh/agent-usages/releases/download/<tag>/agent-usages-<版本>.tgz` | 想钉住某一版 |
+| 固定版本 | `npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.0.3/agent-usages-0.0.3.tgz` | 想钉住某一版（换成别的 tag 即可） |
 | GitHub 直装（想跟 `master`，或该版本没有资产） | `npx github:liruohrh/agent-usages ui` | 会在本机装前端依赖并构建：冷缓存实测 808 秒、热缓存 24 秒 |
 | 全局安装（同为直装） | `npm i -g github:liruohrh/agent-usages` | 同上 |
 | npm registry（待能注册） | `npx @agent/usages ui` | 与 release 资产是同一份 `npm pack` 产物 |
 | 从源码（开发） | 见下 | Node ≥ 22.18 + pnpm；web 要先 `pnpm web:build` |
 
 **两个 wrapper 不解析任何参数**：`install.sh` / `install.ps1` 只找 Node、从
-`AGENT_USAGES_BASE_URL`（默认 latest 发布页）下载 `install.mjs`，然后用它执行 `"$@"` / `$args`，
-退出码原样返回。选项全在 `install.mjs`：`--base`、`--version <v|latest>`、
-`--tarball <路径|URL>`（离线/测试）、`--prefix <dir>`、`--dry-run`、`--help`（`-h` 同义）。
-环境变量 `AGENT_USAGES_NODE`（用哪个 node）与 `AGENT_USAGES_BASE_URL`（镜像/内网）。
+`AGENT_USAGES_BASE_URL`（默认 raw master 的 `scripts/`）下载 `install.mjs`，然后用它执行
+`"$@"` / `$args`，退出码原样返回。选项全在 `install.mjs`：`--base`（默认
+`releases/latest/download`）、`--version <v|latest>`、`--tarball <路径|URL>`（离线/测试）、
+`--prefix <dir>`、`--dry-run`、`--help`（`-h` 同义）。
+环境变量 `AGENT_USAGES_NODE`（用哪个 node）与 `AGENT_USAGES_BASE_URL`（镜像/内网；
+wrapper 与 install.mjs 都读它，一个值同时换掉"脚本"和"包"两半）。
 **一份源码，两种运行形态**：checkout 里 `src/*.ts` 就是程序（Node 原生类型擦除，无构建步骤）；
 装进 `node_modules` 的那份必须是编译好的 JS——Node 明确拒绝在 `node_modules` 里擦类型，
 实测会抛 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`。`bin/agent-usages.js` 先找
@@ -454,10 +464,10 @@ git tag -a v0.0.3 -m "…" && git push origin v0.0.3   # → release.yml 构建�
 **校验不过就不会有资产**，所以 Release 上的每个 tarball 都是"装得上、跑得起来"的那一份。
 本地想先看一眼：`pnpm release:pack && pnpm release:verify release/agent-usages-0.0.3.tgz`。
 
-每个 release 挂 **5 个资产**：固定名的 `agent-usages.tgz`（与版本名那份**字节相同**的副本，`cmp`
-守着）、三个安装脚本 `install.sh` / `install.ps1` / `install.mjs`，加上版本名的
-`agent-usages-<版本>.tgz`。文档只引用 `releases/latest/download/` 下的固定名，所以**发版不用改
-文档**——新增资产在 `verify-tarball` 通过之后才上传。
+每个 release 挂 **2 个资产**：版本名 `agent-usages-<版本>.tgz`，和固定名 `agent-usages.tgz`
+（与版本名那份**字节相同**的副本，`cmp` 守着）。文档只引用 `releases/latest/download/` 下的固定名，
+所以**发版不用改文档**——固定名那份在 `verify-tarball` 通过之后才上传。安装脚本**不是** release
+资产：wrapper 与 `install.mjs` 都由 raw `master` 提供，改它们不用发版。
 
 `publish.yml` 是**手动**的（Actions → publish → Run workflow）：`@agent/usages` 这个包名在 npm 上
 还没注册，tag 触发只会白跑一次注定失败的 `npm publish`。等能注册时，先定下 `package.json` 的

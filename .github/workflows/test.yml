@@ -36,11 +36,12 @@ jobs:
         env:
           TZ: Asia/Shanghai
 
-  # The install path a user takes: fixed-name release assets (`install.sh` / `install.ps1`
-  # / `install.mjs` / `agent-usages.tgz`), wrappers that do nothing but find Node, download
-  # and forward argv untouched, and `install.mjs` doing the install. This runs those files
-  # against a local HTTP mirror (`AGENT_USAGES_BASE_URL`), so a broken one-liner or a
-  # wrapper that reshapes an argument fails here instead of in the README.
+  # The install path a user takes: the wrappers come from raw `master` (as they do in the
+  # docs), `install.mjs` from the same place, wrappers do nothing but find Node, download
+  # and forward argv untouched, and the package is the fixed-name release asset
+  # (`agent-usages.tgz`). This runs those files against a local HTTP mirror that plays
+  # both roles (`AGENT_USAGES_BASE_URL`), so a broken one-liner or a wrapper that reshapes
+  # an argument fails here instead of in the README.
   install:
     runs-on: ubuntu-latest
     steps:
@@ -87,15 +88,19 @@ jobs:
           fi
       - name: 一行脚本端到端（AGENT_USAGES_BASE_URL 指向本地镜像，sh 与 pwsh 两条 wrapper）
         env:
-          # 一个环境变量同时管两半：wrapper 用它下载 install.mjs，install.mjs 用它下载发布包。
+          # 一个环境变量同时管两半：wrapper 用它下载 install.mjs（默认是 raw master 的
+          # scripts/ 目录），install.mjs 用它下载发布包（默认是 latest release）。
           AGENT_USAGES_BASE_URL: http://127.0.0.1:8931
         run: |
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
-          # 发布资产长这样：三个固定名字的脚本 + 固定名与版本名的 tarball。
-          cp "release/agent-usages-$version.tgz" release/agent-usages.tgz
-          cp scripts/install.sh scripts/install.ps1 scripts/install.mjs release/
-          python3 -m http.server 8931 --bind 127.0.0.1 --directory release > /dev/null 2>&1 &
+          # 本地镜像同时扮演两个角色：raw 的 scripts/ 目录（三个脚本）+ 发布页（固定名与
+          # 版本名的 tarball）。真实世界里这两半来自 master 与 latest release。
+          mirror=$RUNNER_TEMP/mirror
+          mkdir -p "$mirror"
+          cp scripts/install.sh scripts/install.ps1 scripts/install.mjs "$mirror/"
+          cp "release/agent-usages-$version.tgz" "$mirror/agent-usages.tgz"
+          python3 -m http.server 8931 --bind 127.0.0.1 --directory "$mirror" > /dev/null 2>&1 &
           server=$!
           trap 'kill $server 2>/dev/null || true' EXIT
           for _ in $(seq 30); do
@@ -118,7 +123,7 @@ jobs:
           fi
           # 不用 wrapper 也行：直接下载 install.mjs 交给 node（文档里的手动方式）
           curl -fsSL "$AGENT_USAGES_BASE_URL/install.mjs" -o "$RUNNER_TEMP/install.mjs"
-          node "$RUNNER_TEMP/install.mjs" --tarball release/agent-usages.tgz --prefix "$RUNNER_TEMP/direct-prefix"
+          node "$RUNNER_TEMP/install.mjs" --tarball "$mirror/agent-usages.tgz" --prefix "$RUNNER_TEMP/direct-prefix"
           test "$("$RUNNER_TEMP/direct-prefix/bin/agent-usages" --version)" = "$version"
           # 参数确实透传到了 install.mjs：--dry-run 应该是成功且不装
-          sh scripts/install.sh --dry-run --tarball release/agent-usages.tgz
+          sh scripts/install.sh --dry-run --tarball "$mirror/agent-usages.tgz"

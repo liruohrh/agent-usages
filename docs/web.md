@@ -104,14 +104,15 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 
 **一行装好**（脚本自己找 Node、自己下载发布包）：每个 tag 都会构建一份 tarball，里面已经带了
 编译好的 CLI（`dist/`）与前端（`web/dist/`）；npm 对 tarball **不跑任何构建脚本**，所以用户机上
-不编译、不构建，实测 12 秒装完。这两条 URL **不带版本号**，发版只换资产、不改文档：
+不编译、不构建，实测 12 秒装完。两条 URL **不带版本号**，而且**脚本来自 `master`、包来自 latest
+release**，所以改安装器或发版都不用改文档：
 
 ```sh
-curl -fsSL https://github.com/liruohrh/agent-usages/releases/latest/download/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.sh | sh
 ```
 
 ```powershell
-irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps1 | iex
+irm https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.ps1 | iex
 ```
 
 装好之后：
@@ -120,14 +121,15 @@ irm https://github.com/liruohrh/agent-usages/releases/latest/download/install.ps
 agent-usages ui                                # = serve --open，起平台并打开浏览器
 agent-usages usage --range month --open        # 不起服务：生成 HTML 报告并用浏览器打开
 
-# 不装也可以：同一个固定名资产，直接 npx
+# 不装也可以：包用固定名资产，直接 npx
 npx --yes --package https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz agent-usages ui
 ```
 
-两个 wrapper 不解析任何参数：只找 Node、从 `AGENT_USAGES_BASE_URL`（默认 latest 发布页）下载
-`install.mjs`，再原样转发 argv 并返回它的退出码；选项（`--base` / `--version` / `--tarball` /
-`--prefix` / `--dry-run` / `--help`）与环境变量（`AGENT_USAGES_NODE` / `AGENT_USAGES_BASE_URL`）
-都在安装器里，也可以直接下 `install.mjs` 用 `node` 跑（`node install.mjs --help`）。见
+两个 wrapper 不解析任何参数：只找 Node、从 `AGENT_USAGES_BASE_URL`（默认 raw master 的
+`scripts/`）下载 `install.mjs`，再原样转发 argv 并返回它的退出码；选项（`--base` / `--version` /
+`--tarball` / `--prefix` / `--dry-run` / `--help`）与环境变量（`AGENT_USAGES_NODE` /
+`AGENT_USAGES_BASE_URL`）都在安装器里（`--base` 默认 latest release），也可以直接下
+`install.mjs` 用 `node` 跑（`node install.mjs --help`）。见
 [README 的安装与发布](../README.md#安装与发布)。
 
 **从 GitHub 直装**（想跟 `master`、或该版本没有资产）则会在**你的机器上**构建：npm 跑
