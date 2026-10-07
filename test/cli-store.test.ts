@@ -131,6 +131,25 @@ async function plantSentinel(): Promise<void> {
   }
 }
 
+/**
+ * Make the stored roots look like another version of the tool wrote them.
+ *
+ * This is the state a run killed between opening the database and writing its
+ * first root leaves behind: `meta.tool_version` already names the build that was
+ * running, while the rows — and now the roots' own `reader_version` — are the
+ * previous build's work.
+ * @param version - the version to blame the rows on.
+ */
+async function ageStore(version: string): Promise<void> {
+  const { DatabaseSync } = await import('node:sqlite');
+  const database = new DatabaseSync(storePath());
+  try {
+    database.exec(`UPDATE roots SET reader_version = '${version}'`);
+  } finally {
+    database.close();
+  }
+}
+
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'agent-usages-store-root-'));
   storeDir = await mkdtemp(join(tmpdir(), 'agent-usages-store-db-'));
@@ -225,6 +244,56 @@ describe('the usage store', () => {
     const now = await report(['--no-store']);
     expect(now.totals.requests).toBe(2);
     expect(warningCodes(now)).not.toContain('storeFilesVanished');
+  });
+
+  it('re-reads a root whose rows were written by another version of the tool', async () => {
+    const cold = await report();
+    expect(cold.totals.requests).toBe(3);
+    await plantSentinel();
+
+    // The file as a killed run leaves it: it recorded the version that was
+    // opening it, and never got as far as re-reading the root, so the rows are
+    // still the old build's work. Nothing in `meta` can tell, which is why the
+    // root carries the version that wrote it.
+    await ageStore('0.0.3');
+    const aged = await readFile(storePath());
+
+    const after = await report();
+    // The sentinel is gone: the run parsed the logs again rather than answering
+    // from rows another build wrote.
+    expect(titles(after)).not.toContain('SENTINEL');
+    expect(titles(after).length).toBe(2);
+    expect(after.totals.requests).toBe(cold.totals.requests);
+    expect(await readFile(storePath())).not.toEqual(aged);
+
+    // And the re-read stamped the root: the run after it answers from the store
+    // again, sentinel and all.
+    await plantSentinel();
+    const warm = await report();
+    expect(titles(warm)).toEqual(['SENTINEL', 'SENTINEL']);
+  });
+
+  it('keeps a vanished agent in an "everything" plan while another version wrote its rows', async () => {
+    const others = { CODEX_HOME: join(configHome, 'codex'), DSH_HOME: join(configHome, 'dsh'), PI_CODING_AGENT_DIR: join(configHome, 'pi') };
+    const all = async (): Promise<Report> => {
+      const result = await runCli(['--agent', 'all', '--db', storePath(), '--no-update', '--json'], others);
+      expect(result.code, result.stderr).toBe(0);
+      return JSON.parse(result.stdout) as Report;
+    };
+
+    const cold = await all();
+    expect(cold.totals.requests).toBe(3);
+    await rm(root, { recursive: true, force: true });
+    // An upgrade: a newer build opens the file, and this root is not reusable.
+    await ageStore('0.0.3');
+
+    // The directory is gone, so nothing detects the agent — but the store
+    // remembers its root, and a root that cannot be reused is still a root whose
+    // history has to be reported. Asking "may I reuse this?" here would drop the
+    // agent from the plan on the one run where the tombstone is all that is left.
+    const after = await all();
+    expect(after.totals.requests).toBe(cold.totals.requests);
+    expect(warningCodes(after)).toContain('storeSourceVanished');
   });
 
   it('moves a database that cannot be trusted aside, and reports it', async () => {

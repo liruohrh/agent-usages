@@ -256,6 +256,13 @@ export async function planAgentSources(options: {
     // warning, instead of usage vanishing from a total that used to include it.
     // An agent remembered only under directories this run does not name is simply
     // not selected — a narrower plan is a choice, not a disappearance.
+    //
+    // "Remembers" is the question this asks, not "may I reuse its rows": a root
+    // whose rows were written by another version of the tool is still a root with
+    // history in it, and that history has to survive an upgrade. Asking
+    // `fingerprintOf` here would make every remembered agent vanish from the plan
+    // on the first run of a new version — the one run where the tombstone is the
+    // only place its usage still exists.
     const remembered =
       options.store === undefined
         ? []
@@ -263,7 +270,7 @@ export async function planAgentSources(options: {
             (adapter) =>
               !detected.includes(adapter) &&
               rootsFor(adapter, dirs, env).some(
-                (root) => options.store?.fingerprintOf(adapter.id, rootIdOf(root)) !== undefined,
+                (root) => options.store?.knowsRoot(adapter.id, rootIdOf(root)) === true,
               ),
           );
     const planned: PlannedAgent[] = [...detected, ...remembered].map((adapter) => ({

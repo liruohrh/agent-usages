@@ -399,27 +399,54 @@ describe('opening', () => {
     expect(store.fingerprintOf('dsh', 'r-2')).toBeUndefined();
   });
 
-  it('records its version even when a run re-read nothing, so the cache is not stale forever', async () => {
+  it('still re-reads a root after a run that recorded its version but wrote nothing', async () => {
     const root = join(dir, 'home');
     const old = await openStore(dbPath, '0.0.3');
     old.store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 1, dataset: eventlessDataset(root, 's-1'), fingerprint: [] });
     old.store.close();
 
-    // A run that opens the newer version but reads nothing at all — every root is
-    // a tombstone, or the user asked for something the run did not need to scan.
-    const idle = await openStore(dbPath, '0.1.0');
-    expect(idle.store.fingerprintOf('dsh', 'r-1')).toBeUndefined();
-    idle.store.close();
+    // A run of the newer version that was killed between opening the file and
+    // writing its first root. All that is left of it is the version it recorded
+    // on open — the rows are still the old build's work.
+    const killed = await openStore(dbPath, '0.1.0');
+    expect(killed.store.fingerprintOf('dsh', 'r-1')).toBeUndefined();
+    killed.store.close();
     expect(cell(dbPath, 'SELECT value FROM meta WHERE key = ?', 'tool_version')).toBe('0.1.0');
 
-    // The next run of that version has the roots back: a store that stays "not
-    // mine" would lose every tombstone — a root whose directory is gone is only
-    // reported because the store still answers for it. The cost of this, stated
-    // plainly: after a run that re-read nothing, rows the old version wrote are
-    // trusted again, which is the price of one version stamp for the whole file.
+    // So the next run must not take that version for an answer: the root's own
+    // record of who wrote it is what decides, and it still says 0.0.3. (This is
+    // the file as it is on disk after such a run: version row updated, rows not.)
+    expect(cell(dbPath, 'SELECT reader_version FROM roots WHERE root_id = ?', 'r-1')).toBe('0.0.3');
     const next = await openStore(dbPath, '0.1.0');
-    expect(next.store.fingerprintOf('dsh', 'r-1')).toHaveLength(0);
+    expect(next.store.fingerprintOf('dsh', 'r-1')).toBeUndefined();
+    // Remembered all the same: it is this root's history, not its freshness.
+    expect(next.store.knowsRoot('dsh', 'r-1')).toBe(true);
     expect(next.store.readRoot('dsh', 'r-1')?.dataset.sessions).toHaveLength(1);
+
+    // Once the re-read happens, the root carries the version that did it, and the
+    // run after that is a hit again — one upgrade, one re-read.
+    next.store.writeRoot({ agent: 'dsh', rootId: 'r-1', root, now: 2, dataset: toolsDataset(root, 's-1'), fingerprint: [] });
+    next.store.close();
+    expect(cell(dbPath, 'SELECT reader_version FROM roots WHERE root_id = ?', 'r-1')).toBe('0.1.0');
+    const after = await openStore(dbPath, '0.1.0');
+    expect(after.store.fingerprintOf('dsh', 'r-1')).toHaveLength(0);
+  });
+
+  it('answers "do you know this root?" independently of who wrote it', async () => {
+    const store = await emptyStore();
+    expect(store.knowsRoot('dsh', 'r-1')).toBe(false);
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-1',
+      root: join(dir, 'home'),
+      now: 1,
+      dataset: eventlessDataset(join(dir, 'home'), 's-1'),
+      fingerprint: [],
+    });
+    expect(store.knowsRoot('dsh', 'r-1')).toBe(true);
+    // A different agent, or a different root: not known.
+    expect(store.knowsRoot('codex', 'r-1')).toBe(false);
+    expect(store.knowsRoot('dsh', 'r-2')).toBe(false);
   });
 
   it('keeps a tombstone session and its events across a version change', async () => {
@@ -579,6 +606,58 @@ describe('opening', () => {
     expect(Number(cell(v1Path, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
     expect(await readFile(backup)).toEqual(copy);
     expect(again.store.readRoot('dsh', 'r-v1')?.dataset.sessions[0]?.records[0]?.tokens.input).toBe(42);
+  });
+
+  it('upgrades a version 2 database, trusting none of the roots it finds', async () => {
+    // What every database written by the released versions looks like: the v1
+    // schema plus the events table, and no record of which reader wrote a root.
+    const v2Path = join(dir, 'v2.db');
+    seedVersion1(v2Path);
+    const older = new DatabaseSync(v2Path);
+    older.exec(`
+CREATE TABLE events (
+  agent TEXT NOT NULL, root_id TEXT NOT NULL, session_id TEXT NOT NULL, record_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL,
+  detail TEXT, bytes INTEGER, ok INTEGER,
+  PRIMARY KEY (agent, root_id, session_id, record_id, ordinal),
+  FOREIGN KEY (agent, root_id, session_id, record_id)
+    REFERENCES records(agent, root_id, session_id, record_id) ON DELETE CASCADE
+);
+CREATE INDEX events_name ON events(name);
+CREATE INDEX events_session_id ON events(session_id);
+PRAGMA user_version = 2;
+`);
+    older.close();
+
+    const { store, reset } = await openStore(v2Path, '0.2.0');
+    expect(reset).toBeNull();
+    expect(Number(cell(v2Path, 'PRAGMA user_version'))).toBe(STORE_SCHEMA_VERSION);
+    expect(column(v2Path, "SELECT name FROM pragma_table_info('roots')")).toContain('reader_version');
+    // Nothing is lost: same rows, still readable, and a session's events are
+    // simply absent because that file never had any.
+    expect(store.readRoot('dsh', 'r-v1')?.dataset.sessions[0]?.records[0]?.tokens.input).toBe(42);
+    expect(store.readRoot('dsh', 'r-v1')?.dataset.sessions[0]?.records[0]?.events).toBeUndefined();
+    // Remembered, but written before anyone said who wrote it: re-read once.
+    expect(store.knowsRoot('dsh', 'r-v1')).toBe(true);
+    expect(store.fingerprintOf('dsh', 'r-v1')).toBeUndefined();
+    // The copy taken before the migration is the v2 file, column and all.
+    const backup = `${v2Path}${STORE_MIGRATION_BACKUP_SUFFIX}2`;
+    expect(Number(cell(backup, 'PRAGMA user_version'))).toBe(2);
+    expect(column(backup, "SELECT name FROM pragma_table_info('roots')")).not.toContain('reader_version');
+    expect(cell(backup, 'SELECT record_id FROM records')).toBe('rec-v1');
+
+    // Reading the root again stamps it, and the run after that is a hit.
+    const only = fingerprintFor('/home/old', 'logs/a.jsonl');
+    store.writeRoot({
+      agent: 'dsh',
+      rootId: 'r-v1',
+      root: '/home/old',
+      now: 1_600_000_100_000,
+      dataset: richDataset('/home/old'),
+      fingerprint: [only],
+    });
+    expect(cell(v2Path, 'SELECT reader_version FROM roots WHERE root_id = ?', 'r-v1')).toBe('0.2.0');
+    expect(store.fingerprintOf('dsh', 'r-v1')).toEqual([only]);
   });
 
   it('refuses to migrate at all when the copy before it cannot be written', async () => {
