@@ -48,7 +48,7 @@ master 就生效，不用发版，所以文档里的地址永远不用改。要�
 （管道里要给 `sh` 传参，所以用 `sh -s --`）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.sh | sh -s -- --version 0.2.0
+curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.sh | sh -s -- --version 0.3.0
 ```
 
 不装也能跑（包用固定名资产，同样不带版本号）：
@@ -64,10 +64,10 @@ npx --yes --package https://github.com/liruohrh/agent-usages/releases/latest/dow
 curl -fsSL https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/scripts/install.mjs -o install.mjs
 node install.mjs --help     # 全部选项都在这里：--base / --version / --tarball / --prefix / --dry-run
 node install.mjs            # 装最新一版
-node install.mjs --tarball ./release/agent-usages-0.2.0.tgz --prefix /tmp/prefix
+node install.mjs --tarball ./release/agent-usages-0.3.0.tgz --prefix /tmp/prefix
 
-# 固定版本安装：release 资产带版本号（tag 形如 v0.2.0，资产名里的版本不带 v）
-npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.2.0/agent-usages-0.2.0.tgz
+# 固定版本安装：release 资产带版本号（tag 形如 v0.3.0，资产名里的版本不带 v）
+npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.3.0/agent-usages-0.3.0.tgz
 
 # 从 GitHub 直装（跟 master 或某个 commit）：会在你的机器上装前端依赖并构建，
 # 冷缓存实测 808 秒（13 分半）、热缓存 24 秒（2026-09-26，本机）
@@ -483,7 +483,7 @@ irm https://raw.githubusercontent.com/liruohrh/agent-usages/refs/heads/master/sc
 | --- | --- | --- |
 | **一行脚本（推荐）** | `curl … raw…/scripts/install.sh \| sh`；Windows `irm … raw…/scripts/install.ps1 \| iex` | Node ≥ 22.18；用户机上**不构建**，实测 12 秒 |
 | 固定名资产直装 | `npm i -g https://github.com/liruohrh/agent-usages/releases/latest/download/agent-usages.tgz` | 同上；URL 不带版本号 |
-| 固定版本 | `npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.2.0/agent-usages-0.2.0.tgz` | 想钉住某一版（换成别的 tag 即可） |
+| 固定版本 | `npm i -g https://github.com/liruohrh/agent-usages/releases/download/v0.3.0/agent-usages-0.3.0.tgz` | 想钉住某一版（换成别的 tag 即可） |
 | GitHub 直装（想跟 `master`，或该版本没有资产） | `npx github:liruohrh/agent-usages ui` | 会在本机装前端依赖并构建：冷缓存实测 808 秒、热缓存 24 秒 |
 | 全局安装（同为直装） | `npm i -g github:liruohrh/agent-usages` | 同上 |
 | npm registry（待能注册） | `npx @agent/usages ui` | 与 release 资产是同一份 `npm pack` 产物 |
@@ -520,14 +520,14 @@ pnpm link --global                # 装到 PATH 后用 agent-usages …
 
 ```bash
 pnpm pack:check                            # 只列 tarball 内容（测试也用它守着：config/、web/dist 不能漏）
-git tag -a v0.2.0 -m "…" && git push origin v0.2.0   # → release.yml 构建并挂上 tarball
+git tag -a v0.3.0 -m "…" && git push origin v0.3.0   # → release.yml 构建并挂上 tarball
 ```
 
 `release.yml` 跑在 tag 上：`pnpm build` → `pnpm test` → web typecheck → `pnpm web:smoke` →
 `pnpm release:pack`（= `npm pack --ignore-scripts`，产物进 `release/`）→
 `node scripts/verify-tarball.mjs`（像用户那样装一份、真的用一遍，11 项检查）→ 建 release 并上传资产。
 **校验不过就不会有资产**，所以 Release 上的每个 tarball 都是"装得上、跑得起来"的那一份。
-本地想先看一眼：`pnpm release:pack && pnpm release:verify release/agent-usages-0.2.0.tgz`。
+本地想先看一眼：`pnpm release:pack && pnpm release:verify release/agent-usages-0.3.0.tgz`。
 
 每个 release 挂 **2 个资产**：版本名 `agent-usages-<版本>.tgz`，和固定名 `agent-usages.tgz`
 （与版本名那份**字节相同**的副本，`cmp` 守着）。文档只引用 `releases/latest/download/` 下的固定名，
