@@ -23,12 +23,12 @@ import { record } from '../support/dataset.ts';
 /** A temporary config directory with an optional config.json in it. */
 function withConfig(document: unknown | undefined): NodeJS.ProcessEnv {
   const dir = mkdtempSync(join(tmpdir(), 'agent-usages-user-'));
-  const configDir = join(dir, 'agent-usages');
+  const configDir = join(dir, 'config');
   mkdirSync(configDir, { recursive: true });
   if (document !== undefined) {
     writeFileSync(join(configDir, 'config.json'), JSON.stringify(document), 'utf8');
   }
-  return { ...process.env, XDG_CONFIG_HOME: dir };
+  return { ...process.env, AGENT_USAGES_HOME: dir };
 }
 
 /** The shipped provider entry, for merging against. */
@@ -126,9 +126,9 @@ describe('readUserConfig', () => {
 
   it('warns about a file that is not JSON at all', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-usages-user-'));
-    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
-    writeFileSync(join(dir, 'agent-usages', 'config.json'), '{oops', 'utf8');
-    const { warnings } = readUserConfig({ ...process.env, XDG_CONFIG_HOME: dir });
+    mkdirSync(join(dir, 'config'), { recursive: true });
+    writeFileSync(join(dir, 'config', 'config.json'), '{oops', 'utf8');
+    const { warnings } = readUserConfig({ ...process.env, AGENT_USAGES_HOME: dir });
     expect(warnings[0]?.message).toMatch(/不是合法 JSON/);
   });
 
@@ -280,7 +280,7 @@ describe('updateUserConfig', () => {
   it('sets the one key and leaves every other setting alone', () => {
     const env = withConfig({ projects: [{ name: 'demo', paths: ['/tmp/demo'] }], rateMode: 'historical' });
     const written = updateUserConfig({ language: 'en' }, env);
-    expect(written.path.endsWith(join('agent-usages', 'config.json'))).toBe(true);
+    expect(written.path.endsWith(join('config', 'config.json'))).toBe(true);
 
     const after = JSON.parse(readFileSync(written.path, 'utf8')) as Record<string, unknown>;
     expect(after['language']).toBe('en');
@@ -298,11 +298,11 @@ describe('updateUserConfig', () => {
 
   it('refuses to overwrite a file it cannot parse', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-usages-user-'));
-    const configDir = join(dir, 'agent-usages');
+    const configDir = join(dir, 'config');
     mkdirSync(configDir, { recursive: true });
     const path = join(configDir, 'config.json');
     writeFileSync(path, '{ this is not json', 'utf8');
-    expect(() => updateUserConfig({ language: 'en' }, { ...process.env, XDG_CONFIG_HOME: dir })).toThrow(/不是合法 JSON/);
+    expect(() => updateUserConfig({ language: 'en' }, { ...process.env, AGENT_USAGES_HOME: dir })).toThrow(/不是合法 JSON/);
     // The broken file is still there, exactly as the user typed it.
     expect(readFileSync(path, 'utf8')).toBe('{ this is not json');
   });

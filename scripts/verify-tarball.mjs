@@ -57,15 +57,15 @@ const size = (readFileSync(tarball).length / 1024 / 1024).toFixed(1);
 const work = mkdtempSync(join(tmpdir(), '.usages-verify-'));
 const prefix = join(work, 'prefix');
 const configHome = join(work, 'config');
-mkdirSync(join(configHome, 'agent-usages'), { recursive: true });
+mkdirSync(join(configHome, 'config'), { recursive: true });
 // Updates off: this checks the *artifact*, so it must not depend on the network or
 // on whatever configuration the machine running it happens to have.
 writeFileSync(
-  join(configHome, 'agent-usages', 'config.json'),
+  join(configHome, 'config', 'config.json'),
   JSON.stringify({ version: 1, updates: { pricing: false, rates: false } }, null, 2),
 );
 
-const env = { ...process.env, XDG_CONFIG_HOME: configHome, AGENT_USAGES_NO_BROWSER: '1' };
+const env = { ...process.env, AGENT_USAGES_HOME: configHome, AGENT_USAGES_NO_BROWSER: '1' };
 const failed = [];
 function check(label, ok, detail = '') {
   process.stdout.write(`${ok ? '✓' : '✗'} ${label}${detail === '' ? '' : ` — ${detail}`}\n`);

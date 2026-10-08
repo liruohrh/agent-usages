@@ -10,11 +10,13 @@
 （`+08:00` → UTC+08:00），峰谷时段就按这个钟走，所以文件里不再重复写 `timezone`。厂商若按有夏令时的时区
 发布时段，这个模型不够用，届时再加回可选的 IANA 时区；当前收录的价格表都是固定偏移（北京时间为 UTC+8、
 DeepSeek 英文站直接写 UTC）。
-| 拉取缓存 | `~/.config/agent-usages/cache-pricing.json`、`cache-rates.json` | 工具自动写 |
-| 拉取缓存 | `~/.config/agent-usages/cache-holidays.json` | 工具自动写（跟价格表一起） |
-| 用户覆盖 | `~/.config/agent-usages/config.json` | 用户手写或用网页改 |
+| 拉取缓存 | `~/.liruohrh.agent-usages/cache/cache-pricing.json`、`cache-rates.json` | 工具自动写 |
+| 拉取缓存 | `~/.liruohrh.agent-usages/cache/cache-holidays.json` | 工具自动写（跟价格表一起） |
+| 用户覆盖 | `~/.liruohrh.agent-usages/config/config.json` | 用户手写或用网页改 |
 
-路径规则：`XDG_CONFIG_HOME/agent-usages`，Windows 用 `%APPDATA%\agent-usages`，否则 `~/.config/agent-usages`。
+路径规则：一个应用目录 `~/.liruohrh.agent-usages`（`AGENT_USAGES_HOME` 可换），下面 `config/`、`cache/`、
+`data/` 各放一类；**不读 `XDG_*`**——一个应用一个目录，整体备份/搬走就是复制这一个文件夹。0.2 及更早的版本
+按 XDG 存放，升级后第一次运行时工具会自动把旧文件搬进来（只搬、不覆盖、不删，搬过会在 stderr 提一句）。
 
 `src/config/resolve.ts` 把它们合成一次运行实际使用的配置：先按开关做一次懒更新，再取「缓存 > 随包」的那份，最后把用户覆盖合并上去。解析失败就退到下一层，绝不因为配置问题让命令失败——用户配置的问题会作为「提示」出现在报告里。
 
@@ -180,7 +182,7 @@ update [all|prices|rates] [--force] [--write-config]
 时刻取系数（`PricingEngineOptions.convertAt`），所以金额、区间、合计依旧逐层相加。
 
 日序列来自 frankfurter（ECB 参考汇率，只发布交易日）：缓存文件是
-`~/.config/agent-usages/cache-series-<base>-<target>.json`，记下请求区间与来源，覆盖到位就不再请求；
+`~/.liruohrh.agent-usages/cache/cache-series-<base>-<target>.json`，记下请求区间与来源，覆盖到位就不再请求；
 记录落在周末/节假日时用上一个交易日的汇率，早于序列起点则用最早一条。离线或抓不到时**退回单一最新
 汇率**并在头部标注模式，不会让命令失败。`--cost` 的单价在历史模式下标注为「厂商原价，按记录日期汇率折算」。
 

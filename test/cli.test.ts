@@ -688,9 +688,9 @@ describe('price bands', () => {
   /** A config dir with no language opinion and no update checks. */
   function quietHome(language?: string): Record<string, string> {
     const dir = mkdtempSync(join(tmpdir(), 'agent-usages-bands-'));
-    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    mkdirSync(join(dir, 'config'), { recursive: true });
     writeFileSync(
-      join(dir, 'agent-usages', 'config.json'),
+      join(dir, 'config', 'config.json'),
       JSON.stringify({
         version: 1,
         ...(language === undefined ? {} : { language }),
@@ -698,7 +698,7 @@ describe('price bands', () => {
       }),
       'utf8',
     );
-    return { XDG_CONFIG_HOME: dir };
+    return { AGENT_USAGES_HOME: dir };
   }
 
   it('prints each whole-request band with the card it charges', async () => {
@@ -771,10 +771,10 @@ describe('price bands', () => {
     // No shipped list mixes the two, but the schema allows it: the hours must
     // still print (once, on their own line) and every band must show both cards.
     const dir = mkdtempSync(join(tmpdir(), 'agent-usages-bands-'));
-    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    mkdirSync(join(dir, 'config'), { recursive: true });
     const miss = (rate: string) => ({ id: 'input-miss', label: '输入（未命中缓存）', basis: 'input', rate, per: 1_000_000 });
     writeFileSync(
-      join(dir, 'agent-usages', 'config.json'),
+      join(dir, 'config', 'config.json'),
       JSON.stringify({
         version: 1,
         updates: { pricing: false, rates: false },
@@ -814,7 +814,7 @@ describe('price bands', () => {
       }),
       'utf8',
     );
-    const { stdout } = await cli(['price', '--provider', 'demo', '--currency', 'CNY'], { XDG_CONFIG_HOME: dir });
+    const { stdout } = await cli(['price', '--provider', 'demo', '--currency', 'CNY'], { AGENT_USAGES_HOME: dir });
     const lines = stdout.split('\n');
     expect(lines.slice(4, 14)).toEqual([
       '      生效: 2026-01-01 00:00 → 至今 (UTC+08:00)',
@@ -1125,11 +1125,11 @@ describe('serve', () => {
       // The switch in the page writes the same file the CLI reads, so the test
       // keeps that file in a directory of its own — never the developer's own.
       const configHome = mkdtempSync(join(tmpdir(), 'agent-usages-serve-config-'));
-      const env = { XDG_CONFIG_HOME: configHome };
+      const env = { AGENT_USAGES_HOME: configHome };
       const child = startServe(['--snapshot', await fixtureSnapshot(), '--port', '0'], env);
       try {
         const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
-        const configFile = join(configHome, 'agent-usages', 'config.json');
+        const configFile = join(configHome, 'config', 'config.json');
 
         const settings = (await (await fetch(`${url}/api/settings`)).json()) as {
           language: string;
@@ -1193,7 +1193,7 @@ describe('serve', () => {
       // merge layer, so the only honest test is one that rescans.
       const configHome = mkdtempSync(join(tmpdir(), 'agent-usages-serve-config-'));
       const child = startServe(['--port', '0', '--agent', 'dsh', '--home', join(home, '.dsh'), '--no-update'], {
-        XDG_CONFIG_HOME: configHome,
+        AGENT_USAGES_HOME: configHome,
       });
       try {
         const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
@@ -1210,7 +1210,7 @@ describe('serve', () => {
           document: Record<string, unknown>;
         };
         expect(config.exists).toBe(false);
-        expect(config.path).toBe(join(configHome, 'agent-usages', 'config.json'));
+        expect(config.path).toBe(join(configHome, 'config', 'config.json'));
 
         // A declaration that does not pass the readers never reaches the file.
         const invalid = await fetch(`${url}/api/config`, {
@@ -1222,7 +1222,7 @@ describe('serve', () => {
         const failure = (await invalid.json()) as { error: { code: string; field: string } };
         expect(failure.error.code).toBe('configProjectName');
         expect(failure.error.field).toBe('projects[0].name');
-        expect(existsSync(join(configHome, 'agent-usages', 'config.json'))).toBe(false);
+        expect(existsSync(join(configHome, 'config', 'config.json'))).toBe(false);
 
         const saved = await fetch(`${url}/api/config`, {
           method: 'PUT',
@@ -1235,7 +1235,7 @@ describe('serve', () => {
         expect(answer.config.projects).toEqual([{ name: 'renamed-project', paths: [path] }]);
 
         // The declaration is in the file…
-        const written = JSON.parse(await readFile(join(configHome, 'agent-usages', 'config.json'), 'utf8')) as {
+        const written = JSON.parse(await readFile(join(configHome, 'config', 'config.json'), 'utf8')) as {
           projects: unknown[];
         };
         expect(written.projects).toEqual([{ name: 'renamed-project', paths: [path] }]);
@@ -1260,14 +1260,14 @@ describe('serve', () => {
     'keeps the language out of the way of the rest of the configuration file',
     async () => {
       const configHome = mkdtempSync(join(tmpdir(), 'agent-usages-serve-config-'));
-      const configDir = join(configHome, 'agent-usages');
+      const configDir = join(configHome, 'config');
       mkdirSync(configDir, { recursive: true });
       writeFileSync(
         join(configDir, 'config.json'),
         `${JSON.stringify({ language: 'zh', projects: [{ name: 'demo', paths: ['/tmp/demo'] }] }, null, 2)}\n`,
         'utf8',
       );
-      const child = startServe(['--snapshot', await fixtureSnapshot(), '--port', '0'], { XDG_CONFIG_HOME: configHome });
+      const child = startServe(['--snapshot', await fixtureSnapshot(), '--port', '0'], { AGENT_USAGES_HOME: configHome });
       try {
         const url = await firstMatch(child, /http:\/\/127\.0\.0\.1:\d+/);
         // The file's own value is what a request gets when it asks for nothing.
@@ -1370,14 +1370,15 @@ describe('historical rate mode', () => {
    */
   function historicalHome(): Record<string, string> {
     const dir = mkdtempSync(join(tmpdir(), 'agent-usages-cli-hist-'));
-    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    mkdirSync(join(dir, 'config'), { recursive: true });
+    mkdirSync(join(dir, 'cache'), { recursive: true });
     writeFileSync(
-      join(dir, 'agent-usages', 'config.json'),
+      join(dir, 'config', 'config.json'),
       JSON.stringify({ version: 1, currency: 'EUR', rateMode: 'historical', updates: { pricing: false, rates: false } }),
       'utf8',
     );
     writeFileSync(
-      join(dir, 'agent-usages', 'cache-series-CNY-EUR.json'),
+      join(dir, 'cache', 'cache-series-CNY-EUR.json'),
       JSON.stringify({
         base: 'CNY',
         target: 'EUR',
@@ -1391,7 +1392,7 @@ describe('historical rate mode', () => {
       }),
       'utf8',
     );
-    return { XDG_CONFIG_HOME: dir };
+    return { AGENT_USAGES_HOME: dir };
   }
 
   it('converts at the record\'s own date and says so', async () => {
@@ -1423,13 +1424,13 @@ describe('historical rate mode', () => {
   it('falls back to one rate when no series can be had', async () => {
     // Same config, no series cached and no network allowed: the report still runs.
     const dir = mkdtempSync(join(tmpdir(), 'agent-usages-cli-hist-'));
-    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    mkdirSync(join(dir, 'config'), { recursive: true });
     writeFileSync(
-      join(dir, 'agent-usages', 'config.json'),
+      join(dir, 'config', 'config.json'),
       JSON.stringify({ version: 1, currency: 'EUR', rateMode: 'historical', updates: { pricing: false, rates: false } }),
       'utf8',
     );
-    const parsed = JSON.parse((await cli(['usage', '--json', '--no-update'], { XDG_CONFIG_HOME: dir })).stdout) as {
+    const parsed = JSON.parse((await cli(['usage', '--json', '--no-update'], { AGENT_USAGES_HOME: dir })).stdout) as {
       rateInfo: { mode: string };
       totals: { cost: Record<string, string> };
     };
@@ -1442,13 +1443,13 @@ describe('language', () => {
   /** A config directory that pins the output language. */
   function homeWith(language: string): Record<string, string> {
     const dir = mkdtempSync(join(tmpdir(), 'agent-usages-lang-'));
-    mkdirSync(join(dir, 'agent-usages'), { recursive: true });
+    mkdirSync(join(dir, 'config'), { recursive: true });
     writeFileSync(
-      join(dir, 'agent-usages', 'config.json'),
+      join(dir, 'config', 'config.json'),
       JSON.stringify({ version: 1, language, updates: { pricing: false, rates: false } }),
       'utf8',
     );
-    return { XDG_CONFIG_HOME: dir };
+    return { AGENT_USAGES_HOME: dir };
   }
 
   it('speaks the configured language, whatever the machine locale is', async () => {

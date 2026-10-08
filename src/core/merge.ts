@@ -69,7 +69,7 @@ function contentDigestOf(session: SessionRecord): string | null {
 }
 
 /**
- * A project the user declared in `~/.config/agent-usages/config.json`.
+ * A project the user declared in `~/.liruohrh.agent-usages/config/config.json`.
  *
  * The configuration is how a human overrides the grouping the filesystem
  * implies: a project that spans two repositories, or a directory that is not in

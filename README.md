@@ -156,7 +156,7 @@ agent-usages agents                         # 看每个 agent 认哪些环境变
 | `--rate-mode <mode>` | `latest`（默认，全程一个汇率）/ `historical`（按每条记录当天的汇率） |
 | `--agent <id,...>` | 读哪些 agent；默认 `all`（所有已安装的），可逗号分隔或重复；见[目标 agent](#目标-agent-与数据目录) |
 | `--agent-dir` / `--home` / `--provider` / `--json` / `--no-update` | 见上 |
-| `--no-store` / `--db <路径>` / `--store-exclude <路径>` | 用量数据库：默认把每个数据根上次读到的结果（连着文件指纹）写进 `$XDG_DATA_HOME/agent-usages/usage.db`，没变的根下次不再解析，数字与首次一致；它是**你可以备份、也能用 sqlite3 直接读的数据**。`--no-store` 绕过它（重新解析全部文件，只看现存来源），`--db` 换位置，`--store-exclude` 让其中某些根不入库（读与计价照常，见 [`store`](#store维护--调试)）。详见[架构](docs/architecture.md#用量数据库srcstore) |
+| `--no-store` / `--db <路径>` / `--store-exclude <路径>` | 用量数据库：默认把每个数据根上次读到的结果（连着文件指纹）写进 `~/.liruohrh.agent-usages/data/usage.db`，没变的根下次不再解析，数字与首次一致；它是**你可以备份、也能用 sqlite3 直接读的数据**。`--no-store` 绕过它（重新解析全部文件，只看现存来源），`--db` 换位置，`--store-exclude` 让其中某些根不入库（读与计价照常，见 [`store`](#store维护--调试)）。详见[架构](docs/architecture.md#用量数据库srcstore) |
 
 ### `tools`
 
@@ -261,7 +261,7 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json   # 离线快照�
 前端要先构建一次：`pnpm --filter web build`（产物 `web/dist`，未构建时首页会直接告诉你）。
 
 右上角 `⚙` 是**配置页**（`/settings`）：项目的名字与路径（"哪些目录算一个项目"）、语言、币种、
-汇率与自动更新都能就地改，保存后重扫生效；它写的就是 `~/.config/agent-usages/config.json`
+汇率与自动更新都能就地改，保存后重扫生效；它写的就是 `~/.liruohrh.agent-usages/config/config.json`
 （页面原文，`~` 与页面不管的键都原样保留）。价格覆盖只在页面里只读展示，改价格仍走编辑器 +
 `check-config`。装法、API、数据契约与快照格式见 [本地 Web 分析平台](docs/web.md)，配置字段见 [配置与更新](docs/config.md)。
 
@@ -395,7 +395,7 @@ demo-app (~/ws/apps/demo-app) 2026-08-16
 
 ### 在配置里声明项目
 
-`~/.config/agent-usages/config.json`（`XDG_CONFIG_HOME` 优先）可以显式声明项目，用来处理文件系统看不出来的归属：跨两个仓库的项目、不在仓库里的目录、想把几个目录算成一体：
+`~/.liruohrh.agent-usages/config/config.json` 可以显式声明项目，用来处理文件系统看不出来的归属：跨两个仓库的项目、不在仓库里的目录、想把几个目录算成一体：
 
 ```jsonc
 {
@@ -560,7 +560,7 @@ registry 上的包不会有两套内容。
 | `config/pricing.json` | 各厂商价格表（区间、峰谷、单价、来源 URL、说明）；一个区间只写币种代码，符号内置 |
 | `config/rates.json` | 汇率表（基准币种 + 33 个币种）与在线汇率源清单 |
 
-**用户自己的覆盖**放在 `~/.config/agent-usages/config.json`（Windows 用 `%APPDATA%`，也可以由 `XDG_CONFIG_HOME` 指定），全部可省略：
+**用户自己的覆盖**放在 `~/.liruohrh.agent-usages/config/config.json`，全部可省略：
 
 ```jsonc
 {

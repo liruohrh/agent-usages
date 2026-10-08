@@ -17,8 +17,8 @@ import { loadRateSeries, rateOn } from '../../src/config/series.ts';
 /** An isolated config directory. */
 function env(): NodeJS.ProcessEnv {
   const dir = mkdtempSync(join(tmpdir(), 'agent-usages-series-'));
-  mkdirSync(join(dir, 'agent-usages'), { recursive: true });
-  return { ...process.env, XDG_CONFIG_HOME: dir };
+  mkdirSync(join(dir, 'cache'), { recursive: true });
+  return { ...process.env, AGENT_USAGES_HOME: dir };
 }
 
 /** A frankfurter-style response. */

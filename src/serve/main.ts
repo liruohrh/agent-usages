@@ -16,6 +16,8 @@
 import { startServer } from './server.ts';
 import { openStore } from './data.ts';
 import { t } from '../i18n/index.ts';
+import { legacyMigrationWarnings, migrateLegacyLayout } from '../config/legacy.ts';
+import { defaultStorePath } from '../store/index.ts';
 
 /** What the command line asked for. */
 interface Args {
@@ -171,6 +173,13 @@ export function parseArgs(argv: readonly string[]): Args {
  * @returns the process exit code.
  */
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
+  // The same one-time move the CLI does, before anything reads the configuration
+  // or opens the database: the server is often the first thing run after an
+  // upgrade, and it must not serve from the old layout.
+  const migrated = migrateLegacyLayout(process.env, defaultStorePath(process.env));
+  for (const warning of legacyMigrationWarnings(migrated, process.env)) {
+    process.stderr.write(`agent-usages serve: ${warning.message}\n`);
+  }
   let args: Args;
   try {
     args = parseArgs(argv);

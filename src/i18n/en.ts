@@ -176,7 +176,7 @@ export const en: Messages = {
     json: 'print JSON',
     noUpdate: 'do not check for price or rate updates this run; use the local cache',
     noStore: 'ignore the scan database: parse every file again and write nothing (history of vanished directories and files is not shown either)',
-    db: 'where the scan database lives (default $XDG_DATA_HOME/agent-usages/usage.db, else ~/.local/share/agent-usages/usage.db)',
+    db: 'where the scan database lives (default ~/.liruohrh.agent-usages/data/usage.db; AGENT_USAGES_HOME moves the whole application directory)',
     storeExclude: 'data directories whose roots are neither stored nor remembered this run (still read, still costed); path-segment prefix match, repeatable',
     storeCommand: 'inspect and clean the scan database (maintenance: what is in it, how to take it out)',
     storeList: 'list what the database holds: --by agent|root|project|cwd|session, default by data root',
@@ -413,6 +413,11 @@ export const en: Messages = {
     configProjectPaths: (p: { value: string }) => `expected a non-empty array of paths, got ${p.value}`,
     configProjectPath: (p: { value: string }) => `expected a non-empty path string, got ${p.value}`,
     configIgnored: (p: { path: string; reason: string }) => `ignoring user config ${p.path}: ${p.reason}`,
+    appHomeUnset: 'cannot find the application directory: set HOME or AGENT_USAGES_HOME',
+    appHomeMigrated: (p: { count: string; from: string; to: string }) =>
+      `moved ${p.count} file(s) from the old XDG location (${p.from}) into ${p.to}; that application directory is the only one used from now on`,
+    appHomeMigrateFailed: (p: { path: string; reason: string }) =>
+      `could not move ${p.path} (${p.reason}): it stays where it was, and this run continues`,
     cachedPricesUnusable: (p: { reason: string }) => `the cached price list is unusable; falling back to the shipped one: ${p.reason}`,
     cachedHolidaysUnusable: (p: { reason: string }) =>
       `the cached holiday calendar is unusable; falling back to the shipped one: ${p.reason}`,

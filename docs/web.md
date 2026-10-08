@@ -92,7 +92,7 @@ API 返回 JSON，前端是 Vite 构建的单页应用。
 
 - 不写任何 agent 的数据目录：写操作只有三个，都在本工具自己的目录里——显式 `--write-snapshot` 写的快照、
   页面上切换语言时写的 `config.json`（§6），以及用量数据库 `usage.db`（默认
-  `$XDG_DATA_HOME/agent-usages/`，`--no-store` 关闭、`--db` 换位置）。
+  `~/.liruohrh.agent-usages/data/usage.db`，`--no-store` 关闭、`--db` 换位置）。
 - 默认只绑 `127.0.0.1`，不加载任何 CDN 资源。
 - 数据来自 CLI 已经信任的同一批模块（适配器、`src/core/merge.ts` 合并层、`src/report/index.ts`
   的 `runQuery`），所以 Web 上的数字与 `agent-usages usage` 是同一套口径；`自身 + 子代理 = 总`
@@ -485,7 +485,7 @@ CLI 的 `bin` / `files` / `version` 未改动。
 跑起来后 `GET /api/health` 多一行状态，用来一眼确认库在不在写、有没有旧版本读出来的行：
 
 ```json
-"store": { "enabled": true, "path": "/home/me/.local/share/agent-usages/usage.db",
+"store": { "enabled": true, "path": "/home/me/.liruohrh.agent-usages/data/usage.db",
            "roots": 7, "oldReaderRoots": 1 }
 ```
 
@@ -537,14 +537,14 @@ agent-usages serve --snapshot web/mock/dashboard.snapshot.json
 和 CLI 的 `i18n` 是同一个套路。右上角 `中文 / EN` 就是开关。
 
 - **切换会写配置文件**，这是这个功能的一半：`PUT /api/settings` 把 `language` 合并进
-  `~/.config/agent-usages/config.json`（其它键原样保留；文件解析不了就报错、不覆盖），
+  `~/.liruohrh.agent-usages/config/config.json`（其它键原样保留；文件解析不了就报错、不覆盖），
   于是**CLI 下一次运行也说这个语言**——`node src/cli/index.ts --help` 立刻变英文，因为它读的是同一个值。
 - **数字也跟着换**：`Intl` 的 locale 一起切，所以 `9.7亿` 会变成 `970M`、`2026年9月26日` 变成
   `9/26/2026`。指标缩写（`I/M`、`T`、`Q`）和钱（`¥12.34`）两种语言下都一样。
 - **服务端只渲染"散文"**：告警句子与时间范围标签按请求的 `?lang=` 现渲染（`code` + `params`
   重放，没有对应 message 的 code 保留原句）；扫描本身仍然只做一次，价格区间的缓存键带上语言，
   免得英文请求拿到中文构建的那份（`生效窗口` 里那句 `→ 至今` 是计价引擎在构建时写的）。
-- **测试不碰你的配置**：`web/scripts/tmp-config.mjs` 把 `XDG_CONFIG_HOME` 指到
+- **测试不碰你的配置**：`web/scripts/tmp-config.mjs` 把 `AGENT_USAGES_HOME` 指到
   `web/.tmp/config`（gitignore），拷一份价格/汇率缓存进去并写死 `{"language":"zh"}`，
   冒烟与 e2e 都跑在这份副本上——否则一次切换就会改掉开发者自己的配置。
 - **快照模式**（`--snapshot`）里的文案是写文件时录下来的，切语言不会重写它们：

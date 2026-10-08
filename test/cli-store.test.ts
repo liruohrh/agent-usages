@@ -77,7 +77,7 @@ async function runCli(args: string[], extraEnv: Record<string, string> = {}): Pr
         ...process.env,
         LANG: 'zh_CN.UTF-8',
         HOME: configHome,
-        XDG_CONFIG_HOME: configHome,
+        AGENT_USAGES_HOME: configHome,
         CLAUDE_CONFIG_DIR: root,
         ...extraEnv,
       },
@@ -321,10 +321,10 @@ describe('the usage store', () => {
     try {
       const result = await runCli(
         ['--agent', 'claudecode', '--home', root, '--no-update', '--json'],
-        { XDG_DATA_HOME: dataHome },
+        { AGENT_USAGES_HOME: dataHome },
       );
       expect(result.code, result.stderr).toBe(0);
-      const path = join(dataHome, 'agent-usages', 'usage.db');
+      const path = join(dataHome, 'data', 'usage.db');
       const header = await readFile(path);
       // A real SQLite database, readable by any sqlite3 client.
       expect(header.subarray(0, 6).toString('utf8')).toBe('SQLite');
@@ -341,7 +341,7 @@ async function runStore(args: string[], extraEnv: Record<string, string> = {}): 
         ...process.env,
         LANG: 'zh_CN.UTF-8',
         HOME: configHome,
-        XDG_CONFIG_HOME: configHome,
+        AGENT_USAGES_HOME: configHome,
         CLAUDE_CONFIG_DIR: root,
         ...extraEnv,
       },

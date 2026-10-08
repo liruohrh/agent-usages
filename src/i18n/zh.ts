@@ -227,7 +227,7 @@ export const zh = {
     json: '以 JSON 输出',
     noUpdate: '本次不检查价格表/汇率更新，直接用本地缓存',
     noStore: '不读也不写扫描数据库：重新解析所有文件，只看现存的来源（看不到已消失目录 / 文件的历史）',
-    db: '扫描数据库放哪（默认 $XDG_DATA_HOME/agent-usages/usage.db，没有则 ~/.local/share/agent-usages/usage.db）',
+    db: '扫描数据库放哪（默认 ~/.liruohrh.agent-usages/data/usage.db，可用 AGENT_USAGES_HOME 换应用目录）',
     storeExclude: '命中的数据目录本次不写库、也不被记住（照常读、照常算钱）；按路径分段前缀匹配，可重复',
     storeCommand: '查看与清理扫描数据库（维护用：库里有什么、怎么把它拿出来）',
     storeList: '列出库里有什么：--by agent|root|project|cwd|session，默认按数据根',
@@ -493,6 +493,11 @@ export const zh = {
     configProjectPaths: (p: { value: string }) => `应为非空的路径数组，收到 ${p.value}`,
     configProjectPath: (p: { value: string }) => `应为非空的路径字符串，收到 ${p.value}`,
     configIgnored: (p: { path: string; reason: string }) => `忽略用户配置 ${p.path}：${p.reason}`,
+    appHomeUnset: '找不到应用目录：请设置 HOME 或 AGENT_USAGES_HOME',
+    appHomeMigrated: (p: { count: string; from: string; to: string }) =>
+      `已把 ${p.count} 个文件从旧的 XDG 位置（${p.from}）搬到 ${p.to}；以后只用这一个应用目录`,
+    appHomeMigrateFailed: (p: { path: string; reason: string }) =>
+      `没能搬移 ${p.path}（${p.reason}）：文件留在原处，本次运行照常继续`,
     cachedPricesUnusable: (p: { reason: string }) => `已缓存的价目表不可用，改用随包版本：${p.reason}`,
     cachedHolidaysUnusable: (p: { reason: string }) => `已缓存的节假日表不可用，改用随包版本：${p.reason}`,
     configHolidayDate: (p: { value: string }) => `应为 YYYY-MM-DD 且是真实日期，收到 ${p.value}`,

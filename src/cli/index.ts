@@ -56,6 +56,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { resolveConfig, type ResolvedConfig } from '../config/resolve.ts';
+import { legacyMigrationWarnings, migrateLegacyLayout } from '../config/legacy.ts';
 import { loadRateSeries, rateOn, type LoadedRateSeries } from '../config/series.ts';
 import type { RateMode } from '../config/user.ts';
 import { cachedConfigText, runUpdates, type UpdateKind } from '../config/update.ts';
@@ -1634,9 +1635,17 @@ function systemLocaleFromEnv(): string | undefined {
 
 /** Run the CLI. */
 async function main(): Promise<void> {
+  // First, before anything reads a path: an installation made by an older version
+  // still has its configuration and its database in the XDG locations, and this
+  // moves them into the application directory. It runs once and moves only what
+  // is not already here; its notice goes to stderr so `--json` output stays clean.
+  const migrated = migrateLegacyLayout(process.env, defaultStorePath(process.env));
   // The language is settled before the program is built: commander renders help
   // text while parsing, and half a report in one language is worse than none.
   setLanguage(resolveLanguage(readUserConfig().config.language, systemLocaleFromEnv()));
+  for (const warning of legacyMigrationWarnings(migrated, process.env)) {
+    process.stderr.write(`agent-usages: ${warning.message}\n`);
+  }
   const program = buildProgram();
   program.exitOverride();
   try {

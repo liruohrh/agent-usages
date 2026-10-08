@@ -19,15 +19,24 @@ import { createPricingEngine } from '../../src/pricing/index.ts';
 import { buckets, record } from '../support/dataset.ts';
 import { stubProvider } from '../support/stub-pricing.ts';
 
-/** An isolated config directory, optionally pre-populated. */
+/**
+ * An isolated application directory, optionally pre-populated.
+ *
+ * Which sub-directory a file goes into is decided by its name, the same way the
+ * tool decides: `cache-*` and the update bookkeeping are caches, everything else
+ * is configuration.
+ */
 function envWith(files: Record<string, unknown> = {}): NodeJS.ProcessEnv {
   const dir = mkdtempSync(join(tmpdir(), 'agent-usages-resolve-'));
-  const configDir = join(dir, 'agent-usages');
+  const configDir = join(dir, 'config');
+  const cacheDir = join(dir, 'cache');
   mkdirSync(configDir, { recursive: true });
+  mkdirSync(cacheDir, { recursive: true });
   for (const [name, value] of Object.entries(files)) {
-    writeFileSync(join(configDir, name), typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
+    const target = name.startsWith('cache-') || name === 'state.json' ? cacheDir : configDir;
+    writeFileSync(join(target, name), typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
   }
-  return { ...process.env, XDG_CONFIG_HOME: dir };
+  return { ...process.env, AGENT_USAGES_HOME: dir };
 }
 
 /** A user config that reprices one window of the Flash model, in yuan. */

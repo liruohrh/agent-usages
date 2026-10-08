@@ -198,7 +198,9 @@ src/
 │   └── registry.ts        启动时读 config/pricing.json 建出各厂商
 ├── config/                用户自己的设置、节假日数据与更新的缓存
 │   ├── holidays.ts        读/校验 config/holidays.json（形状在 core/calendar.ts）
-│   ├── user.ts            ~/.config/agent-usages/config.json：价格覆盖 + `projects` 项目声明，按时间合并到默认表之上
+│   ├── user.ts            用户配置（<home>/config/config.json）：价格覆盖 + `projects` 项目声明，按时间合并到默认表之上
+│   ├── paths.ts           应用目录：~/.liruohrh.agent-usages/{config,cache,data}（AGENT_USAGES_HOME 可换，不读 XDG_*）
+│   ├── legacy.ts          一次性把 0.2 及更早版本留在 XDG 位置的文件搬进应用目录（幂等、不覆盖、不致命）
 │   ├── series.ts          按日汇率序列（历史汇率模式）
 │   ├── store.ts           缓存文件的读写
 │   ├── paths.ts           配置与缓存路径
@@ -217,7 +219,7 @@ src/
 │   ├── fingerprint.ts     一个根的文件指纹（size + mtime + 前 4 KiB 的 sha256）与根 id
 │   ├── dataset-json.ts    UsageDataset ↔ JSON（warnings 只存 code+params，读回按当时语言渲染）
 │   ├── sqlite.ts          usage.db：schema v1、PRAGMA user_version 迁移、UsageStore
-│   └── location.ts        默认位置：$XDG_DATA_HOME/agent-usages/usage.db（没有则 ~/.local/share/agent-usages/）
+│   └── location.ts        默认位置：<home>/data/usage.db（应用目录见 config/paths.ts）
 ├── serve/                 本地 Web 分析平台的服务端（HTTP + 前端静态托管；唯一的写是语言设置）
 │   ├── data.ts            逐 adapter 读盘 → merge.ts 合并 → runQuery → 仪表盘 JSON
 │   ├── server.ts          Express 应用、startServer()、`--dev` 代理
@@ -236,8 +238,18 @@ src/
 
 ### 用量数据库（`src/store/`）
 
-它是**用户的数据**，不是派生缓存：默认落在 `$XDG_DATA_HOME/agent-usages/usage.db`（环境变量没有则
-`~/.local/share/agent-usages/usage.db`），可以备份、可以用 `sqlite3` 或任何语言的客户端直接读。
+它是**用户的数据**，不是派生缓存：默认落在 `~/.liruohrh.agent-usages/data/usage.db`（应用目录可用
+`AGENT_USAGES_HOME` 换），可以备份、可以用 `sqlite3` 或任何语言的客户端直接读。
+
+**为什么不用 XDG**：`$XDG_CONFIG_HOME/agent-usages` 与 `$XDG_DATA_HOME/agent-usages` 会把一个应用的文件
+拆到按约定推断出来的不同目录里，而真正要紧的那份（多年历史、目录消失后唯一的副本）落在谁也不会去备份的地方。
+仿 Android 的做法：一个应用一个目录，`config/`、`cache/`、`data/` 各放一类，"整体备份/搬走"就是复制这一个
+文件夹。`XDG_*` 一概不读；保留 `AGENT_USAGES_HOME` 覆盖整个根目录（测试也用它隔离）。
+0.2 及更早版本按 XDG 存：升级后第一次运行时，命令行与服务端各自调用一次 `migrateLegacyLayout()`
+（`src/config/legacy.ts`）把 `config.json`、`cache-*.json`、`state.json` 与 `usage.db*`（含 `-wal`/`-shm`
+与 `usage.db.bak-*`）搬进新目录；**只搬不拷、不覆盖新位置已有的文件、失败也继续跑**，只有真的搬动了才在
+stderr 提一句。`~/.cache/agent-usages/scan-cache.json`（0.1.0 就退役的 JSON 扫描缓存）**不搬也不删**——
+那是用户的文件，文档里说明了可以自行删掉。
 `--no-store` 不读不写（只看机器现在的样子），`--db <路径>` 换位置。
 
 一次扫描的代价与历史长度成正比，而绝大多数文件两次运行之间并没有变：每个 `(agent, 数据根)` 的结果

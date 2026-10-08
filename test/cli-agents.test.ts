@@ -48,7 +48,7 @@ async function cli(args: string[], env: Record<string, string> = {}): Promise<Cl
         LANG: 'zh_CN.UTF-8',
         HOME: home,
         DSH_HOME: join(home, '.dsh'),
-        XDG_CONFIG_HOME: configHome,
+        AGENT_USAGES_HOME: configHome,
         ...env,
       },
     });
@@ -337,7 +337,7 @@ describe('serve with two agents in one project', () => {
         LANG: 'zh_CN.UTF-8',
         HOME: home,
         DSH_HOME: join(home, '.dsh'),
-        XDG_CONFIG_HOME: configHome,
+        AGENT_USAGES_HOME: configHome,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -398,8 +398,8 @@ describe('serve with two agents in one project', () => {
 describe('configured projects', () => {
   /** Write the user's configuration, and read it back afterwards. */
   async function withProjects(document: unknown): Promise<string> {
-    await mkdir(join(configHome, 'agent-usages'), { recursive: true });
-    const path = join(configHome, 'agent-usages', 'config.json');
+    await mkdir(join(configHome, 'config'), { recursive: true });
+    const path = join(configHome, 'config', 'config.json');
     await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
     return path;
   }
@@ -431,7 +431,7 @@ describe('configured projects', () => {
     const parsed = (await usageJson()) as { warnings: { code: string; message: string }[] };
     const warning = parsed.warnings.find((entry) => entry.code === 'configIgnored');
     expect(warning?.message).toMatch(/projects\[0\]\.paths/);
-    await rm(join(configHome, 'agent-usages'), { recursive: true, force: true });
+    await rm(join(configHome, 'config'), { recursive: true, force: true });
   });
 });
 

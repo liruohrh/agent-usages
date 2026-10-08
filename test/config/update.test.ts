@@ -20,7 +20,7 @@ import { PRICING_URL, cachedConfigText, updatePricing, updateRates } from '../..
 
 /** An isolated config directory. */
 function env(): NodeJS.ProcessEnv {
-  return { ...process.env, XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), 'agent-usages-update-')) };
+  return { ...process.env, AGENT_USAGES_HOME: mkdtempSync(join(tmpdir(), 'agent-usages-update-')) };
 }
 
 /** The shipped price file, served as if it were the repository's copy. */
@@ -212,7 +212,7 @@ describe('updateRates', () => {
       fetchImpl: stubFetch(() => new Response(frankfurter, { status: 200 })).impl,
     });
     const written = readJson<{ sources?: unknown[] }>(
-      join(directory['XDG_CONFIG_HOME'] as string, 'agent-usages', 'cache-rates.json'),
+      join(directory['AGENT_USAGES_HOME'] as string, 'cache', 'cache-rates.json'),
     ).value;
     expect(written?.sources).toBeUndefined();
     // The cached text itself carries them, so a write-back keeps the source list.

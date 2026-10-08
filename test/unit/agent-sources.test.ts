@@ -50,9 +50,9 @@ afterEach(async () => {
 function environment(): NodeJS.ProcessEnv {
   return {
     HOME: home,
-    XDG_CONFIG_HOME: join(home, '.config'),
-    XDG_DATA_HOME: join(home, '.local', 'share'),
-    XDG_CACHE_HOME: join(home, '.cache'),
+    // The application directory keeps the store and the configuration out of a
+    // real home; nothing here reads `XDG_*` any more.
+    AGENT_USAGES_HOME: join(home, 'app'),
     CLAUDE_CONFIG_DIR: configDir,
     CODEX_HOME: join(home, '.codex'),
     DSH_HOME: join(home, '.dsh'),
