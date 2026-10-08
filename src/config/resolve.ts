@@ -150,10 +150,12 @@ export async function resolveConfig(options: ResolveOptions = {}): Promise<Resol
           if (period.holidayCalendar === undefined) continue;
           // A day of slack: this is a "go update the file" reminder, not a billing
           // decision, and the calendar's own zone is the vendor's, not UTC's.
-          const covered = Date.parse(`${holidays.to}T00:00:00Z`) + 86_400_000;
+          // Coverage, not the last holiday: a year's last holiday can be in
+          // October while its arrangement speaks for the whole year.
+          const covered = Date.parse(`${holidays.covers}T00:00:00Z`) + 86_400_000;
           if ((period.to ?? now.getTime()) <= covered) continue;
           warnings.push(
-            new UserError('holidaysNotCovering', { to: holidays.to, name: provider.label }),
+            new UserError('holidaysNotCovering', { to: holidays.covers, name: provider.label }),
           );
           break;
         }

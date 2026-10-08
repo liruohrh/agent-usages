@@ -128,6 +128,29 @@ describe('the calendar is opt-in, and its absence is not silent', () => {
 describe('the shipped calendar', () => {
   const calendar = shippedHolidays();
 
+  it('refuses a horizon that ends before the last holiday it lists', () => {
+    expect(() =>
+      parseHolidaysConfig({
+        version: 1,
+        zone: 'Asia/Shanghai',
+        source: 'test',
+        covers: '2026-01-01',
+        days: { '2026-01-01': '元旦', '2026-05-01': '劳动节' },
+      }),
+    ).toThrowError(/covers/);
+  });
+
+  it('treats a document without a horizon as covering up to its last holiday', () => {
+    const calendar = parseHolidaysConfig({
+      version: 1,
+      zone: 'Asia/Shanghai',
+      source: 'test',
+      days: { '2026-01-01': '元旦', '2026-05-01': '劳动节' },
+    });
+    expect(calendar.covers).toBe('2026-05-01');
+    expect(calendar.to).toBe('2026-05-01');
+  });
+
   it('covers the current year and only lists real dates', () => {
     expect(calendar.zone).toBe('Asia/Shanghai');
     expect(calendar.from.startsWith('2026-')).toBe(true);

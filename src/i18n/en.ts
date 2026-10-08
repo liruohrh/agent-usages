@@ -418,6 +418,8 @@ export const en: Messages = {
       `the cached holiday calendar is unusable; falling back to the shipped one: ${p.reason}`,
     configHolidayDate: (p: { value: string }) => `expected YYYY-MM-DD naming a real date, got ${p.value}`,
     configHolidaysEmpty: 'a holiday calendar needs at least one date',
+    configHolidayCovers: (p: { covers: string; to: string }) =>
+      `covers ${p.covers} is earlier than the last holiday ${p.to}: the horizon has to include every date the table lists`,
     configUnknownCalendar: (p: { known: string; value: string }) =>
       `unknown holiday calendar ${p.value} (known: ${p.known})`,
     holidaysNotCovering: (p: { to: string; name: string }) =>

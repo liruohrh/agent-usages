@@ -104,12 +104,31 @@ export function parseHolidaysConfig(value: unknown): HolidayCalendar {
     days.set(date, name.trim());
   }
   const sorted = [...days.keys()].sort();
+  const to = sorted[sorted.length - 1] as string;
+  // When the document stops speaking for the future.
+  //
+  // The days map holds *holidays*, and a year's last holiday is usually well
+  // before its last day (2026's last is 10-07). "No holiday listed after today"
+  // therefore cannot mean "the table is stale" — that reading made the tool
+  // demand an update every October. The document says how far its source speaks
+  // instead; older documents that never said fall back to the last holiday, which
+  // is exactly what they used to mean.
+  const coversRaw = root['covers'];
+  let covers = to;
+  if (coversRaw !== undefined) {
+    if (typeof coversRaw !== 'string' || coversRaw.trim().length === 0) {
+      throw new ConfigError('covers', 'configNonEmptyString', { value: JSON.stringify(coversRaw) });
+    }
+    covers = dateKey(coversRaw, 'covers');
+  }
+  if (covers < to) throw new ConfigError('covers', 'configHolidayCovers', { covers: JSON.stringify(covers), to });
   return {
     id: 'cn',
     zone: zone.trim(),
     days,
     from: sorted[0] as string,
-    to: sorted[sorted.length - 1] as string,
+    to,
+    covers,
     source: source.trim(),
   };
 }

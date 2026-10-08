@@ -28,9 +28,17 @@ export interface HolidayCalendar {
   zone: string;
   /** `YYYY-MM-DD` → the holiday's name. */
   days: ReadonlyMap<string, string>;
-  /** First and last date the calendar covers, both inclusive. */
+  /** First and last *holiday* the calendar lists, both inclusive. */
   from: string;
   to: string;
+  /**
+   * The last date the calendar's source speaks for, inclusive.
+   *
+   * `to` is the last holiday, which is usually months before the source stops
+   * being authoritative (a year's last holiday can be in October). Anything after
+   * `covers` is unjudged, and that is what the "go update the file" warning keys on.
+   */
+  covers: string;
   /** Where the dates came from, for the report's provenance line. */
   source: string;
 }

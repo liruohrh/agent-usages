@@ -497,6 +497,8 @@ export const zh = {
     cachedHolidaysUnusable: (p: { reason: string }) => `已缓存的节假日表不可用，改用随包版本：${p.reason}`,
     configHolidayDate: (p: { value: string }) => `应为 YYYY-MM-DD 且是真实日期，收到 ${p.value}`,
     configHolidaysEmpty: '节假日表至少要有一个日期',
+    configHolidayCovers: (p: { covers: string; to: string }) =>
+      `covers ${p.covers} 早于最后一个假日 ${p.to}：覆盖范围必须包含表里列出的所有假日`,
     configUnknownCalendar: (p: { known: string; value: string }) =>
       `未知的节假日表 ${p.value}（可用：${p.known}）`,
     holidaysNotCovering: (p: { to: string; name: string }) =>

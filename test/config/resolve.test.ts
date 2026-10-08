@@ -270,6 +270,36 @@ describe('the holiday calendar', () => {
     expect(config.holidays?.days.size).toBe(2);
   });
 
+  it('does not call a calendar stale just because its last holiday has passed', async () => {
+    // 2026's last holiday is 10-07 while the notice it came from speaks for the
+    // whole year. Coverage decides, not the last day off — reading it the other way
+    // made the tool demand a new calendar every October (2026-10-08).
+    const config = await resolveConfig({ env: envWith(), noUpdate: true, now: new Date('2026-10-08T00:00:00Z') });
+    expect(config.holidays?.to).toBe('2026-10-07');
+    expect(config.holidays?.covers).toBe('2026-12-31');
+    expect(config.warnings.some((item) => item.code === 'holidaysNotCovering')).toBe(false);
+  });
+
+  it('warns once the declared coverage ends before the periods still in force', async () => {
+    const env = envWith({
+      'cache-holidays.json': {
+        fetchedAt: Date.now(),
+        text: JSON.stringify({
+          version: 1,
+          zone: 'Asia/Shanghai',
+          source: 'test',
+          covers: '2026-02-01',
+          days: { '2026-01-01': '元旦' },
+        }),
+      },
+    });
+    const config = await resolveConfig({ env, noUpdate: true, now: new Date('2026-09-26T00:00:00Z') });
+    const warning = config.warnings.find((item) => item.code === 'holidaysNotCovering');
+    expect(warning, config.warnings.map((item) => item.code).join(', ')).toBeDefined();
+    // The date in the reminder is the coverage, not the last holiday.
+    expect(warning?.message).toContain('2026-02-01');
+  });
+
   it('says nothing when the calendar covers everything in force', async () => {
     const config = await resolveConfig({ env: envWith(), noUpdate: true, now: new Date('2026-09-26T00:00:00Z') });
     // The shipped calendar covers 2026, and every holiday-aware period is closed
