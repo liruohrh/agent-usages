@@ -165,10 +165,63 @@ export interface ScanOptions {
   noStore?: boolean | undefined;
   /** `--db <path>`: where the scan database lives. */
   db?: string | undefined;
+  /**
+   * Roots that are read but never stored (`--store-exclude`), as absolute path
+   * prefixes.
+   *
+   * An excluded root still contributes its numbers — the dashboard is a report,
+   * not a cache — but it is neither looked up nor written: the data belongs to
+   * somebody else, or is being measured, and must leave nothing behind. The
+   * whole-run switch is {@link ScanOptions.noStore}; the two do not override
+   * each other.
+   */
+  excludedRoots?: readonly string[] | undefined;
   /** Environment to resolve default roots from. */
   env?: NodeJS.ProcessEnv | undefined;
   /** Injectable clock, for tests. */
   now?: Date | undefined;
+}
+
+/**
+ * The scan database, as `/api/health` reports it.
+ *
+ * Maintenance/debugging only: while the page runs, "is the store writing, and
+ * does it hold rows an older build read" is the question a maintainer asks, and
+ * the answer is otherwise invisible from the browser. `oldReaderRoots` counts
+ * roots whose `readerVersion` is not {@link TOOL_VERSION}: those rows cannot pick
+ * up a field the older build never extracted (tool calls, for one) unless the
+ * logs are read again.
+ */
+export interface StoreHealth {
+  /** Whether this run reads and writes a scan database at all. */
+  enabled: boolean;
+  /** The file it uses, or would use; empty in snapshot mode. */
+  path: string;
+  /** Roots the database holds. */
+  roots: number;
+  /** Of those, how many were written by another version of the tool. */
+  oldReaderRoots: number;
+}
+
+/** Nothing to report: a run that never touches a store. */
+const NO_STORE_HEALTH: StoreHealth = { enabled: false, path: '', roots: 0, oldReaderRoots: 0 };
+
+/**
+ * How many roots the store holds, and how many an older build wrote.
+ *
+ * A store that cannot answer must not fail the scan: this is diagnostic detail
+ * beside the report, not part of it.
+ *
+ * @param store - the opened store.
+ * @returns the two counts.
+ */
+function storeRootCounts(store: UsageStore): { roots: number; oldReaderRoots: number } {
+  try {
+    const rows = store.rootSummaries();
+    return { roots: rows.length, oldReaderRoots: rows.filter((row) => row.readerVersion !== TOOL_VERSION).length };
+  } catch {
+    return { roots: 0, oldReaderRoots: 0 };
+  }
 }
 
 /** What a caller may ask a loaded store for. */
@@ -214,6 +267,13 @@ export interface DashboardStore {
    * `GET /api/tools` and `/api/health` report.
    */
   readonly toolsAvailable: boolean;
+  /**
+   * The scan database behind this run, for `/api/health`.
+   *
+   * Counts are from the last scan; a run with no store (`--no-store`, or snapshot
+   * mode) reports `enabled: false` and zeroes.
+   */
+  readonly store: StoreHealth;
   /**
    * The dashboard for a query.
    * @param query - range, agent, project and search filters.
@@ -764,6 +824,16 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
   // the planner below reads the same selector and resolves the roots.
   selectAdapters(options.agent);
 
+  /** The scan database this run uses (or would use): `/api/health` reports it. */
+  const storePath = options.db ?? defaultStorePath(env);
+  /** What the last scan saw in it; zeroes until that scan finishes. */
+  let storeHealth: StoreHealth = {
+    enabled: options.noStore !== true,
+    path: storePath,
+    roots: 0,
+    oldReaderRoots: 0,
+  };
+
   /** Read the configuration, and build everything that depends on it. */
   const resolveRuntime = async (): Promise<{
     config: Awaited<ReturnType<typeof resolveConfig>>;
@@ -885,11 +955,12 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     const warnings: DashboardWarning[] = [...config.warnings.map(flattenWarning)];
     // The store spans runs: an unchanged root answers from it, a root that has
     // disappeared keeps its history and says so. `--no-store` reads the machine
-    // as it is now.
+    // as it is now, and `--store-exclude` keeps the named roots out of it either
+    // way — they are read, but never looked up and never written.
     const opened =
       options.noStore === true
         ? undefined
-        : await UsageStore.open({ path: options.db ?? defaultStorePath(env), toolVersion: TOOL_VERSION });
+        : await UsageStore.open({ path: storePath, toolVersion: TOOL_VERSION });
     if (opened?.reset != null) warnings.push(flattenWarning(storeResetWarning(opened.reset)));
     // The dashboard reads every agent it ships, so a missing one is a warning on
     // the page rather than a silent absence: `detect: false` plans them all.
@@ -897,6 +968,7 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
       ...(options.agent === undefined ? {} : { agent: [options.agent] }),
       ...(options.agentDirs === undefined ? {} : { agentDirs: options.agentDirs }),
       ...(options.home === undefined ? {} : { home: options.home }),
+      ...(options.excludedRoots === undefined ? {} : { excludedRoots: options.excludedRoots }),
       env,
       detect: false,
     });
@@ -916,6 +988,7 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
         const read = await loadPlannedAgents([entry], {
           env,
           enrich: true,
+          ...(options.excludedRoots === undefined ? {} : { excludedRoots: options.excludedRoots }),
           ...(opened === undefined ? {} : { store: opened.store }),
         });
         for (const item of read.warnings) warnings.push(flattenWarning(item));
@@ -950,6 +1023,11 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     // 实时模式只有这一条路：合并层把 N 份 dataset 合成一份（一份都没有时给空数据集）。
     // 它同时也是 CLI 用的那个函数，所以两个入口对"同一份数据属于哪个项目"只有一个答案。
     const dataset = await mergeDatasets(loaded, { projects: config.projects ?? [] });
+    // 调试状态在关库之前取：`rootSummaries()` 是这一轮扫描之后的库内容。
+    storeHealth =
+      opened === undefined
+        ? { enabled: false, path: storePath, roots: 0, oldReaderRoots: 0 }
+        : { enabled: true, path: opened.store.path, ...storeRootCounts(opened.store) };
     opened?.store.close();
     scan = { dataset, sources };
     scanWarnings = warnings;
@@ -1043,6 +1121,9 @@ async function openLiveStore(options: ScanOptions): Promise<DashboardStore> {
     // A live store read the records itself, so it always has an answer: zero
     // calls means the logs recorded none.
     toolsAvailable: true,
+    get store() {
+      return storeHealth;
+    },
     dashboard(query = {}) {
       return filterDashboard(build(query.range), query);
     },
@@ -2462,6 +2543,9 @@ async function openSnapshotStore(path: string, options: ScanOptions): Promise<Da
     // stays `undefined` in the second case, and this is how a caller knows
     // before asking.
     toolsAvailable: snapshot.tools !== undefined,
+    // A snapshot run never opens the scan database, so there is no state to
+    // report — but the shape stays the same for a caller that reads it.
+    store: NO_STORE_HEALTH,
     dashboard(query = {}) {
       const range = resolveRange(query.range === undefined ? {} : { spec: query.range });
       const built: Dashboard = {

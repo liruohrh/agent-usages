@@ -35,6 +35,8 @@ interface Args {
   noStore?: boolean;
   /** `--db <path>`: where the scan database lives. */
   db?: string;
+  /** `--store-exclude <path>`: roots read but never stored, every occurrence in order. */
+  storeExclude?: string[];
   writeSnapshot?: string;
   quiet?: boolean;
   help?: boolean;
@@ -68,6 +70,7 @@ function usage(): string {
       --no-update          不联网刷新价格表与汇率
       --no-store           ${t().help.noStore}
       --db <路径>          ${t().help.db}
+      --store-exclude <路径>  ${t().help.storeExclude}
   -q, --quiet              不打印启动信息（脚本里起服务用）
       --write-snapshot <文件>  扫一次并把整份仪表盘写成快照 JSON，然后退出
   -h, --help               显示本帮助
@@ -144,6 +147,10 @@ export function parseArgs(argv: readonly string[]): Args {
       case '--db':
         args.db = next();
         break;
+      case '--store-exclude':
+        // Not comma-split: a path may contain commas, and the flag repeats.
+        args.storeExclude = [...(args.storeExclude ?? []), next()];
+        break;
       case '-q':
       case '--quiet':
         args.quiet = true;
@@ -183,6 +190,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     ...(args.snapshot === undefined ? {} : { snapshot: args.snapshot }),
     ...(args.noStore === true ? { noStore: true } : {}),
     ...(args.db === undefined ? {} : { db: args.db }),
+    ...(args.storeExclude === undefined ? {} : { excludedRoots: args.storeExclude }),
     noUpdate: args.noUpdate ?? true,
   };
 

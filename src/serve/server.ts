@@ -94,6 +94,14 @@ export interface ServeOptions {
   noStore?: boolean | undefined;
   /** `--db <path>`: where the scan database lives. */
   db?: string | undefined;
+  /**
+   * `--store-exclude <path>`, repeatable: roots read but never stored.
+   *
+   * Maintenance/debugging switch. The data is read and reported like any other
+   * root, but nothing about it is remembered, so pointing the platform at a
+   * directory that is not the user's own cannot leave rows in their database.
+   */
+  excludedRoots?: readonly string[] | undefined;
   /** Suppress the startup lines (the smoke test and tests do). */
   quiet?: boolean | undefined;
 }
@@ -289,6 +297,10 @@ export function createApp(store: DashboardStore, options: ServeOptions = {}): Ex
       // saying so here lets the page hide the view instead of drawing an empty
       // one, which would read as "these agents called no tools".
       toolsAvailable: store.toolsAvailable,
+      // Maintenance/debugging: is the scan database writing, where is it, and
+      // does it hold rows an older build read (which cannot carry a field that
+      // build never extracted)?
+      store: store.store,
     });
   }));
 
@@ -687,6 +699,7 @@ export async function startServer(options: ServeOptions = {}): Promise<RunningSe
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
     ...(options.noStore === true ? { noStore: true } : {}),
     ...(options.db === undefined ? {} : { db: options.db }),
+    ...(options.excludedRoots === undefined ? {} : { excludedRoots: options.excludedRoots }),
     noUpdate: options.noUpdate ?? true,
   });
   const app = createApp(store, options);

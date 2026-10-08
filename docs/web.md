@@ -179,6 +179,7 @@ pnpm serve                               # = node src/serve/main.ts，不经过 
 | `--snapshot <json>` | 关 | 读离线快照，完全不碰 agent 数据（§5） |
 | `--no-update` | 关（允许懒更新） | 本次不联网刷新价格表与汇率；没写就是「过期才刷」 |
 | `--no-store` / `--db <路径>` | 用库 | 用量数据库（`usage.db`）：没变的根不重解析（数字与首次一致），已消失的目录与文件保留历史并告警；`--no-store` 只看现存来源，`--db` 换位置（见[架构](architecture.md#用量数据库srcstore)） |
+| `--store-exclude <路径>` | 无 | **维护/调试开关**（可重复，路径分段前缀匹配）：命中的根照常读、照常进 dashboard，但既不查库也不写库。给不属于自己的数据（别人的目录、一次对比测量）跑平台时用，跑完不留痕 |
 | `--dev` | 关 | 把非 `/api` 请求代理到 Vite（默认 `http://127.0.0.1:5173`） |
 | `--dev-target <url>` | `http://127.0.0.1:5173` | `--dev` 的代理目标 |
 | `--write-snapshot <文件>` | — | 扫一次、写出整份仪表盘 JSON、退出 |
@@ -474,6 +475,24 @@ CLI 的 `bin` / `files` / `version` 未改动。
 
 本机实测：四个 agent 全量扫描在**秒级**（数据目录合计不到 1 GB 时约 2–5 秒），
 首次聚合到能应答再多几百毫秒；此后每个请求都在 10 ms 量级。
+
+### 存储开关与 `/api/health`（维护/调试）
+
+`--no-store`、`--db <路径>`、`--store-exclude <路径>` 三个开关在平台与 CLI 上含义完全一致（同一个
+`openStore`）：`--no-store` 一次都不读也不写库，`--db` 换文件位置，`--store-exclude` 把命中的根排除在库之外。
+它们给维护与调试用，一般使用不需要动。
+
+跑起来后 `GET /api/health` 多一行状态，用来一眼确认库在不在写、有没有旧版本读出来的行：
+
+```json
+"store": { "enabled": true, "path": "/home/me/.local/share/agent-usages/usage.db",
+           "roots": 7, "oldReaderRoots": 1 }
+```
+
+`enabled` 为 `false` 表示本次运行根本没有打开库（`--no-store`，或快照模式——此时 `path` 为空串）；
+`roots` 是库里记住的根数；`oldReaderRoots` 是其中由**别的版本**读出来的根数。被这个版本真正读到的根会
+就地被重读并重写成当前版本（`fingerprintOf` 拒绝使用别的版本的行），所以 `oldReaderRoots` 通常只会剩下
+这次没有读到的根（例如被 `--agent` 排除、被 `--store-exclude` 排除，或日志已消失只剩历史）。
 
 ### 离线快照（`--snapshot`）
 

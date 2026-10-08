@@ -21,6 +21,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { startServer } from '../../src/serve/server.ts';
+import { TOOL_VERSION } from '../../src/core/version.ts';
+import { UsageStore, rootIdOf } from '../../src/store/index.ts';
 
 const SESSION_ID = 'session-11112222-0000-4000-8000-0000000000cd';
 const CWD = '/tmp/serve-options-demo';
@@ -29,14 +31,14 @@ let work: string;
 let home: string;
 
 /** A DSH home with exactly one billed request, so a scan is quick. */
-async function writeHome(): Promise<void> {
-  const projectKey = `--${CWD.replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+/, '')}--`;
-  const dir = join(home, 'sessions', projectKey, SESSION_ID);
+async function writeHomeAt(target: string, cwd = CWD, sessionId = SESSION_ID): Promise<void> {
+  const projectKey = `--${cwd.replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+/, '')}--`;
+  const dir = join(target, 'sessions', projectKey, sessionId);
   await mkdir(dir, { recursive: true });
   await writeFile(
     join(dir, 'session.jsonl'),
     `${[
-      JSON.stringify({ type: 'session', version: 0, id: SESSION_ID, createdAt: 1, cwd: CWD, delegationDepth: 0 }),
+      JSON.stringify({ type: 'session', version: 0, id: sessionId, createdAt: 1, cwd, delegationDepth: 0 }),
       JSON.stringify({
         type: 'assistant/message',
         seq: 3,
@@ -55,7 +57,7 @@ async function writeHome(): Promise<void> {
 beforeEach(async () => {
   work = await mkdtemp(join(tmpdir(), 'agent-usages-serve-options-'));
   home = join(work, '.dsh');
-  await writeHome();
+  await writeHomeAt(home);
 });
 
 afterEach(async () => {
@@ -89,6 +91,39 @@ describe('the scan options startServer forwards', () => {
       expect(off.store.dashboard().tools?.agents[0]?.records).toBe(1);
     } finally {
       await off.close();
+    }
+  });
+
+  it('reads an excluded root but never stores it, while other roots are stored', async () => {
+    const kept = join(work, 'root-kept');
+    const excluded = join(work, 'root-excluded');
+    await writeHomeAt(kept, '/tmp/serve-options-kept', 'session-aaaa1111-0000-4000-8000-000000000001');
+    await writeHomeAt(excluded, '/tmp/serve-options-excluded', 'session-bbbb2222-0000-4000-8000-000000000002');
+    const db = join(work, 'exclude.db');
+
+    const running = await startServer({
+      agent: 'dsh',
+      agentDirs: [`dsh=${kept},${excluded}`],
+      db,
+      excludedRoots: [excluded],
+      noUpdate: true,
+      quiet: true,
+      port: 0,
+    });
+    try {
+      // Both roots are read: the report counts their requests, exclusion or not.
+      expect(running.store.dashboard().tools?.agents[0]?.records).toBe(2);
+      expect(running.store.store).toMatchObject({ enabled: true, roots: 1 });
+    } finally {
+      await running.close();
+    }
+
+    const opened = await UsageStore.open({ path: db, toolVersion: TOOL_VERSION });
+    try {
+      expect(opened.store.knowsRoot('dsh', rootIdOf(kept))).toBe(true);
+      expect(opened.store.knowsRoot('dsh', rootIdOf(excluded))).toBe(false);
+    } finally {
+      opened.store.close();
     }
   });
 });

@@ -1368,6 +1368,7 @@ async function runServe(options: ServeOptions): Promise<void> {
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
     ...(options.noStore === true ? { noStore: true } : {}),
     ...(options.db === undefined ? {} : { db: options.db }),
+    ...(options.storeExclude === undefined ? {} : { excludedRoots: options.storeExclude }),
     // Unlike the library default, the command follows the CLI's convention: the
     // price list and the rates are refreshed when they are stale, unless the run
     // says `--no-update`.
